@@ -187,6 +187,15 @@ describe("teaching agents to use Dak", () => {
   });
 });
 
+describe("the Ask helper is not an agent", () => {
+  test("hooks inside Dak's own helper record nothing and deliver nothing", () => {
+    const input = new TextEncoder().encode(JSON.stringify({ hook_event_name: "SessionStart", cwd: "/tmp/dak-ask-zz9", session_id: "helper-1" }));
+    const p = Bun.spawnSync(["bun", CLI, "hook", "codex"], { env: { ...process.env, DAK_HOME: home, DAK_HELPER: "1" }, stdin: input, stdout: "pipe" });
+    expect(p.stdout.toString()).toBe("");
+    expect(dak("agents", "--json").json().some((a: any) => a.name.startsWith("dak-ask-"))).toBe(false);
+  });
+});
+
 describe("session names", () => {
   test("a Claude Code session that sends as a name gets that name's mail, whatever its folder", () => {
     const env = { ...process.env, DAK_HOME: home, CLAUDE_CODE_SESSION_ID: "sess-claim-1" };

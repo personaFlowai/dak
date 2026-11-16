@@ -133,8 +133,18 @@ export function codexDefaultModel(): string | null {
   catch { return null; }
 }
 
+// Before DAK_HELPER existed, the Ask helper's temporary folders (dak-ask-…) were recorded
+// as if they were agents. They never were; clear them so nobody can write to one.
+let cleared = false;
+function clearHelperGhosts() {
+  if (cleared) return;
+  cleared = true;
+  store().query("DELETE FROM presence WHERE name LIKE 'dak-ask-%'").run();
+}
+
 export function agents(opts: { scan?: boolean } = {}): Agent[] {
   ensure();
+  clearHelperGhosts();
   const cfg = loadConfig();
   const byName = new Map<string, Agent>();
   const recent = (iso: string | null) => !!iso && Date.now() - Date.parse(iso) < 10 * 60_000;

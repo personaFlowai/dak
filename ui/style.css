@@ -658,14 +658,24 @@ table.diff { font-size: 12.5px; }
 article.msg.found-msg { animation: foundmsg 1.6s ease-out; border-radius: 8px; }
 @keyframes foundmsg { from { box-shadow: 0 0 0 6px var(--accent-tint2); background: var(--accent-tint); } to { box-shadow: 0 0 0 6px transparent; background: transparent; } }
 
-/* Side by side: each half is its own number, sign and code, coloured by its own side. */
-table.diff.split td.tx { border-right: 1px solid var(--line2); }
-table.diff.split td.tx:last-child { border-right: 0; }
-table.diff.split td.add.tx, table.diff.split td.add.sg { background: var(--add-bg); } table.diff.split td.add.ln { background: var(--add-ln); } table.diff.split td.add.sg { color: var(--add); }
-table.diff.split td.del.tx, table.diff.split td.del.sg { background: var(--del-bg); } table.diff.split td.del.ln { background: var(--del-ln); } table.diff.split td.del.sg { color: var(--del); }
-table.diff.split td.empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--line2) 6px 7px); }
-table.diff.split td.sel { background: var(--accent-tint) !important; } table.diff.split td.sel.ln { color: var(--accent-text); background: var(--accent-tint2) !important; }
-table.diff.split td.drag { background: var(--accent-tint) !important; }
-table.diff.split td.flash { animation: flash 1.4s ease-out; }
-table.diff.split td.found.tx { background-image: linear-gradient(color-mix(in srgb, var(--warn) 16%, transparent), color-mix(in srgb, var(--warn) 16%, transparent)); }
-table.diff.split td.found-on.ln { box-shadow: inset 2px 0 0 var(--warn); }
+/* Side by side (class sbs: .split is already the page layout). Each half is its own number, sign and code, coloured by its own side. */
+table.diff.sbs td.tx { border-right: 1px solid var(--line2); }
+table.diff.sbs td.tx:last-child { border-right: 0; }
+table.diff.sbs td.add.tx, table.diff.sbs td.add.sg { background: var(--add-bg); } table.diff.sbs td.add.ln { background: var(--add-ln); } table.diff.sbs td.add.sg { color: var(--add); }
+table.diff.sbs td.del.tx, table.diff.sbs td.del.sg { background: var(--del-bg); } table.diff.sbs td.del.ln { background: var(--del-ln); } table.diff.sbs td.del.sg { color: var(--del); }
+table.diff.sbs td.empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--line2) 6px 7px); }
+table.diff.sbs td.sel { background: var(--accent-tint) !important; } table.diff.sbs td.sel.ln { color: var(--accent-text); background: var(--accent-tint2) !important; }
+table.diff.sbs td.drag { background: var(--accent-tint) !important; }
+table.diff.sbs td.flash { animation: flash 1.4s ease-out; }
+table.diff.sbs td.found.tx { background-image: linear-gradient(color-mix(in srgb, var(--warn) 16%, transparent), color-mix(in srgb, var(--warn) 16%, transparent)); }
+table.diff.sbs td.found-on.ln { box-shadow: inset 2px 0 0 var(--warn); }
+.seg.mini { padding: 2px; border-radius: 6px; }
+.seg.mini button { height: 22px; padding: 0 9px; font-size: 12px; border-radius: 4px; }
+/* Side by side: each code column takes half of what the numbers and signs leave. */
+table.diff.sbs col.c-tx { width: calc(50% - 70px); }
+table.diff td.ln button { white-space: nowrap; }
+/* A long pair of names shortens; the time stays whole. */
+.item { min-width: 0; }
+.item .top { min-width: 0; }
+.item .top .who { flex: 1 1 0; }
+.item .top time, .item.pair .marks { flex: none; }

@@ -104,7 +104,9 @@ async function run(prompt: string, cwd: string, files: Record<string, string>) {
   const started = Date.now();
   running++;
   try {
-    const proc = Bun.spawn([...command, prompt], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    // DAK_HELPER tells Dak's own hooks to stay out: the helper is not an agent, and its
+    // temporary folder must not show up as one that others can write to.
+    const proc = Bun.spawn([...command, prompt], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, DAK_HELPER: "1" } });
     const timer = setTimeout(() => proc.kill(), timeout_seconds * 1000);
     const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     clearTimeout(timer);

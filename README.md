@@ -1,10 +1,41 @@
-# Dak
+<p align="center"><img src="mac/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width="96" alt="Dak's icon: a post box with a letter going in"></p>
 
-**A review inbox and message queue between you and the AI agents on your Mac.**
+<h1 align="center">Dak</h1>
+
+<p align="center"><b>A review inbox and message queue between you and the AI coding agents on your Mac.</b><br>
+Claude Code, Codex, Cursor and your own scripts send you PRs, docs and questions in one place. Your answer goes straight back into their session.</p>
+
+<p align="center">
+  <a href="https://github.com/personaflowai/dak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/personaflowai/dak?color=1f6f8b"></a>
+  <a href="https://github.com/personaflowai/dak/actions/workflows/ci.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/personaflowai/dak/ci.yml?branch=main&label=tests"></a>
+  <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B-1f6f8b?logo=apple">
+  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/github/license/personaflowai/dak?color=1f6f8b"></a>
+  <a href="https://github.com/personaflowai/dak/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/personaflowai/dak/total?color=1f6f8b"></a>
+  <a href="https://github.com/personaflowai/dak/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/personaflowai/dak?style=flat&color=1f6f8b"></a>
+</p>
+
+<p align="center"><img src="docs/screenshots/demo.gif" width="900" alt="Dak: a conversation with an agent, a PR explained in chapters, the diff side by side, a doc, and search"></p>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/personaflowai/dak/main/install.sh | sh
+```
 
 Dak (डाक, "the post") gives every agent on your machine (Claude Code, Cursor, Codex, Grok, your own scripts) one place to send you work and get your answer back. A PR arrives as chapters you can read in order, with the diff, the whole file and a helper that explains any line. A brief arrives as a rendered document you can comment on paragraph by paragraph. You pick a verdict, press Send, and the agent that asked gets your comments as JSON on the same thread.
 
 Everything stays on your machine: one SQLite file, a localhost server, no accounts.
+
+## Screens
+
+| | |
+|---|---|
+| ![One conversation per agent, with buttons to answer](docs/screenshots/1-conversation.png) | ![A PR explained before the code](docs/screenshots/2-pr-overview.png) |
+| **One conversation per agent.** PRs, docs and questions are topics; answer with a click. | **The agent explains the PR first:** why, what, where to look, the risk. |
+| ![Chapter notes beside the code](docs/screenshots/3-chapter.png) | ![Side-by-side diff](docs/screenshots/4-split.png) |
+| **Notes beside the code**, chapter by chapter: why, risk and proof, questions to check. | **Unified or split**, with comments on any line. |
+| ![A doc to comment on](docs/screenshots/5-doc.png) | ![Search everything](docs/screenshots/6-search.png) |
+| **Docs to comment on**, word by word. | **⌘K** across every conversation. |
+
+<p align="center"><img src="docs/screenshots/7-dark.png" width="800" alt="Dak in dark mode"></p>
 
 ## What it does
 

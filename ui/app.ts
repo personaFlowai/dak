@@ -239,7 +239,8 @@ function paneHead(a: any): string {
   const i = same.findIndex(({ x }) => x.id === a.id);
   const title = a.type === "pr" ? (a.meta.title ? `${a.name} · ${a.meta.title}` : a.name) : a.name;
   const versions = same.length > 1 ? `<label class="popup"><select id="version" aria-label="Version">${same.map(({ x, m }, n) => `<option value="${x.id}" ${x.id === a.id ? "selected" : ""}>Version ${n + 1} of ${same.length} · ${when(m.created_at)}</option>`).join("")}</select></label>${i < same.length - 1 ? `<button class="link" data-att="${same[same.length - 1].x.id}">Newest</button>` : ""}` : "";
-  const splitBtn = a.type === "pr" ? `<button class="icon-btn" data-split-view aria-pressed="${S.split}" title="${S.split ? "One column" : "Side by side"}" aria-label="Side by side diff">${I.columns}</button>` : "";
+  // Words, not an icon: "Unified" and "Split" say exactly what they do.
+  const splitBtn = a.type === "pr" ? `<div class="seg mini" role="group" aria-label="Diff layout"><button type="button" data-split-view="0" aria-pressed="${!S.split}">Unified</button><button type="button" data-split-view="1" aria-pressed="${S.split}">Split</button></div>` : "";
   const findBtn = a.type === "pr" && !S.find.open ? `<button class="icon-btn" data-find-open title="Find in this PR (⌘F)" aria-label="Find in this PR">${I.search}</button>` : "";
   // Expand and close sit together: both act on this pane, not on the conversation.
   const focusBtn = `<button class="icon-btn" data-focus title="${S.focus ? "Show the conversation (F)" : "Focus on the review (F)"}" aria-label="${S.focus ? "Leave focus" : "Focus"}">${S.focus ? I.collapse : I.expand}</button>`;
@@ -651,7 +652,7 @@ document.addEventListener("click", async (e) => {
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
-  if (d.splitView !== undefined) { S.split = !S.split; local.set("split", S.split); return renderMain(); }
+  if (d.splitView !== undefined) { S.split = d.splitView === "1"; local.set("split", S.split); return renderMain(); }
   if (d.searchOpen !== undefined) return openSearch();
   if (d.hitThread) return openSearchHit(d.hitThread, Number(d.hitMid));
   if (d.findOpen !== undefined) return openFind();
@@ -963,6 +964,9 @@ function toast(text: string, thread: string) {
 let seen = new Set<string>();
 async function refresh() {
   await loadList();
+  // A sender Dak has not seen yet (a new Codex or Cursor session) gets its tool's logo.
+  const known = new Set(S.agents.map((a) => a.name));
+  if ([...S.threads, ...S.others].some((t) => !known.has(t.from) || !known.has(t.to))) { await loadAgents(); renderSide(); }
   const mine = S.threads;
   for (const t of mine) {
     const key = `${t.id}:${t.updated_at}`;

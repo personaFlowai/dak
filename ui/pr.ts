@@ -138,7 +138,7 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
       ${seen ? `<button class="link" data-unfold="${esc(path)}">${folded ? "Show" : "Hide"}</button>` : ""}
       ${isMd && !folded ? `<button class="link" data-mode="${esc(path)}|${preview ? "diff" : "preview"}">${preview ? "Show diff" : "Preview"}</button>` : ""}
       <label class="viewed-box"><input type="checkbox" data-viewed="${esc(path)}" ${seen ? "checked" : ""}> Reviewed</label></header>
-    ${folded ? "" : preview ? mdPreview(df, pf!.new_blob!) : `<div class="diffwrap"><table class="diff ${split ? "split" : ""}"><colgroup>${split ? `<col class="c-ln"><col class="c-sg"><col><col class="c-ln"><col class="c-sg"><col>` : `<col class="c-ln"><col class="c-sg"><col>`}</colgroup><tbody>${rows || `<tr class="gap"><td colspan="${cols}">${df?.binary ? "Binary file" : "No changes to show"}</td></tr>`}</tbody></table></div>`}
+    ${folded ? "" : preview ? mdPreview(df, pf!.new_blob!) : `<div class="diffwrap"><table class="diff ${split ? "sbs" : ""}"><colgroup>${split ? `<col class="c-ln"><col class="c-sg"><col class="c-tx"><col class="c-ln"><col class="c-sg"><col class="c-tx">` : `<col class="c-ln"><col class="c-sg"><col>`}</colgroup><tbody>${rows || `<tr class="gap"><td colspan="${cols}">${df?.binary ? "Binary file" : "No changes to show"}</td></tr>`}</tbody></table></div>`}
   </section>`;
 }
 

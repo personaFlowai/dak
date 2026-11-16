@@ -1,0 +1,17 @@
+# Every push and pull request: typecheck and the full test suite on a Mac.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.42
+      - run: bun install --frozen-lockfile
+      - run: bun run build:ui && bun run typecheck
+      - run: bun run test

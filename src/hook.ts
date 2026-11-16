@@ -22,6 +22,8 @@ export function sessionName(input: any, _tool: string): { name: string; where: s
 export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "claude-code"): Promise<void> {
   let input: any = {};
   try { input = JSON.parse(await Bun.stdin.text()); } catch { return; }
+  // Dak's read-only helper (Ask) runs Claude Code, Codex or Cursor too; it is not an agent.
+  if (process.env.DAK_HELPER) { if (tool === "cursor") console.log(JSON.stringify({ continue: true })); return; }
   const { name, where } = sessionName(input, tool);
   touch(name, { tool, where, session: input.session_id ?? input.conversation_id });
   const event = input.hook_event_name ?? input.event;
