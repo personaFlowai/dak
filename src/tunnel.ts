@@ -109,6 +109,7 @@ export function instructionsFor(agent: string, url: string, key: string, person:
     `Read new replies:  GET  ${url}/x/inbox`,
     ``,
     `Getting your mail: Dak cannot reach into your sandbox, so you must ask. At the start of every task and before you finish, call GET ${url}/x/inbox and act on what is there. While you wait for an answer, keep GET ${url}/x/wait/<thread id>?timeout=50 open in a loop rather than stopping.`,
+    `These instructions, current: GET ${url}/x/skill. Read them again when something here does not work as described.`,
     `You appear in Dak as "${agent}". Keep messages short and say what you need.`,
   ].join("\n");
 }

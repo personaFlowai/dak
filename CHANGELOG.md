@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.1
+- Remote agents can read their own instructions at /x/skill, so they refresh them after Dak changes.
+
 ## 0.3.0
 - Back and forward: every place you go is a history entry; ‹ › in the toolbar, ⌘[ ⌘], and the browser's back all walk it.
 - On the phone's home screen Dak has its own icon and name, runs full-screen, and keeps inside the iPhone's safe areas.

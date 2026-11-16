@@ -191,12 +191,18 @@ async function outside(req: Request, url: URL): Promise<Response> {
     return json({ messages: [], timed_out: true });
   }
   if (parts[0] === "inbox" && req.method === "GET") return json(takeUnread(agent));
+  // Its instructions, so a remote agent can refresh them itself after Dak changes. The key is
+  // not repeated: it already holds it.
+  if (parts[0] === "skill" && req.method === "GET") {
+    const base = `https://${req.headers.get("host") ?? ""}`;
+    return new Response(instructionsFor(agent, base, "<your key>", me), { headers: { "content-type": "text/plain; charset=utf-8" } });
+  }
   // Who it can write to: the person and the agents, with what each does.
   if (parts[0] === "agents" && req.method === "GET") {
     const c = loadConfig();
     return json(c.readers.filter((r) => r.name !== agent && (r.kind === "agent" || r.name === me)).map((r) => ({ name: r.name, about: r.about ?? (r.name === me ? "The person" : null) })));
   }
-  throw new DakError("not_found", "The outside routes are /x/send, /x/reply/<id>, /x/wait/<id>, /x/inbox and /x/agents.", 404);
+  throw new DakError("not_found", "The outside routes are /x/send, /x/reply/<id>, /x/wait/<id>, /x/inbox, /x/agents and /x/skill.", 404);
 }
 
 async function api(req: Request, url: URL): Promise<Response> {

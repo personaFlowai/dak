@@ -873,6 +873,10 @@ describe("the outside door for remote agents", () => {
     await http(`/v1/threads/${sent.thread.id}/messages`, { method: "POST", body: JSON.stringify({ author: "sam", body: "The second one." }) });
     const got = await (await out(`/x/wait/${sent.thread.id}?timeout=5`)).json();
     expect(got.messages[0].body).toBe("The second one.");
+    // It can read its own instructions, without its key in them.
+    const skill = await (await out("/x/skill")).text();
+    expect(skill).toContain("/x/send");
+    expect(skill).not.toContain(key);
     // It can write to another agent directly, and the agent's answer reaches its inbox.
     const names = ((await (await out("/x/agents")).json()) as any[]).map((a) => a.name);
     expect(names).toContain("zari");
