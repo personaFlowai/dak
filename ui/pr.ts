@@ -30,9 +30,10 @@ export function prView(a: Pr): string {
 
   if (onPhone()) {
     const body = S.phoneTab === "overview" ? overview(a, chapters, files, done) : phoneGuide(a, files, done);
-    // The sheet sits beside the scrolling page, not inside it: on iPhone a fixed layer inside a
-    // scrolled box takes taps at the wrong place, so its close button hit the Reviewed button below.
-    return `<div class="pr phone-pr ${S.phoneFile ? "under-sheet" : ""}">${phoneTabs(a, plain)}${body}</div>${S.phoneFile ? phoneSheet(a, files, done, fileSection) : ""}`;
+    // An open file replaces the page instead of floating over it. iPhone sent taps on a floating
+    // (fixed) sheet to the wrong place, so its close button marked the file reviewed.
+    if (S.phoneFile) return `<div class="pr psheet-page">${phoneSheet(a, files, done, fileSection)}</div>`;
+    return `<div class="pr phone-pr">${phoneTabs(a, plain)}${body}</div>`;
   }
   const rail = `<nav class="rail" aria-label="Reading order">
     <button class="step ${S.chapter === -1 ? "on" : ""}" data-chapter="-1"><span class="num">${I.doc}</span><span class="t">Overview</span></button>

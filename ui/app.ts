@@ -908,14 +908,21 @@ document.addEventListener("click", async (e) => {
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
   if (d.phoneFile !== undefined) {
-    // A file opens as a sheet over the page; closing it leaves the page where it was.
+    // An open file replaces the page; closing it puts the page back where it was.
+    if (!S.phoneFile) phonePageTop = $(".phone-pr")?.scrollTop ?? 0;
     S.phoneFile = d.phoneFile || null; S.phoneFileChapter = Number(d.ch ?? -1);
     renderMain();
-    $(".psheet-body")?.scrollTo({ top: 0 });
+    if (S.phoneFile) $(".psheet-body")?.scrollTo({ top: 0 });
+    else { const pp = $(".phone-pr"); if (pp) pp.scrollTop = phonePageTop; }
     return;
   }
   // The file's Reviewed on a phone: a big button in the sheet's bar, not a tiny box in a pinned header.
-  if (d.toggleViewed && S.att) { setViewed(S.att, [d.toggleViewed], !viewed(S.att).has(d.toggleViewed)); return renderMain(); }
+  if (d.toggleViewed && S.att) {
+    const top = $(".psheet-body")?.scrollTop ?? 0;
+    setViewed(S.att, [d.toggleViewed], !viewed(S.att).has(d.toggleViewed)); renderMain();
+    const sb = $(".psheet-body"); if (sb) sb.scrollTop = top;
+    return;
+  }
   if (d.phoneTab) { S.phoneTab = d.phoneTab as any; S.phoneFile = null; renderMain(); $(".phone-pr")?.scrollTo({ top: 0 }); return; }
   if (d.gotoFile) {
     // Bring the file to the top of the code column, under any pinned header.
@@ -1274,6 +1281,7 @@ addEventListener("focus", () => { if (S.view === "thread" && S.cur) { forgetConv
    queues, settings) is a history entry, so the ‹ › buttons, ⌘[ ⌘] and the browser's own back
    (or a swipe on a phone) walk the same list. Restoring a place never adds a new one. */
 type Place = { view: string; cur: string | null; att: string | null; chapter: number; phoneList: boolean; phoneTab: string; phoneFile: string | null; phoneFileChapter: number };
+let phonePageTop = 0; // where the phone PR page was when a file opened over it
 const place = (): Place => ({ view: S.view, cur: S.cur, att: S.att, chapter: S.chapter, phoneList: S.phoneList, phoneTab: S.phoneTab, phoneFile: S.phoneFile, phoneFileChapter: S.phoneFileChapter });
 const navKey = (p: Place | null) => p ? [p.view, p.view === "thread" ? `${p.cur}|${p.att}|${p.chapter}|${p.phoneTab}|${p.phoneFile}` : "", p.phoneList].join("~") : "";
 let restoring = false;

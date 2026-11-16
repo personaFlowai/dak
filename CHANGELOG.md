@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.10
+- Phone: an open file now replaces the page instead of floating over it, so nothing on it is a fixed layer. iPhone still sent a tap on the floating sheet's X to Mark reviewed on some files. Closing puts the page back where it was.
+
 ## 0.3.9
 - A chapter's Proof is its own row (Why, Needs care, Proof, People notice), not run on inside Needs care. The phone shows it too.
 
