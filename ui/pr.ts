@@ -82,6 +82,7 @@ function chapterView(a: Pr, chapters: (Chapter & { plain?: boolean })[], files: 
       ${keys ? `<div class="keys"><h3>What to review</h3><ul>${keys}</ul></div>` : ""}
       ${ch.reviewer_note ? `<aside class="rnote"><div class="w">${mark(ch.reviewer_note.by, "sm")}<b>${esc(name(ch.reviewer_note.by))}</b><span>read the code</span></div><p>${esc(ch.reviewer_note.text)}</p></aside>` : ""}
       <p class="hint">To comment, click a line number or select some code. Shift-click or drag for several lines.</p>
+      ${fileList(a, files, byFile)}
     </header>`;
   const code = `<div class="fcards">${[...byFile].map(([path, starts]) => fileSection(a, files.find((f) => f.path === path), path, starts)).join("")}</div>
     <footer class="chapter-end">
@@ -110,6 +111,21 @@ function finish(): string {
     <div class="btns"><button class="btn" data-finish="reply">Reply</button><button class="btn" data-finish="changes">Request changes</button><button class="btn primary" data-finish="approve">${I.check} Approve</button></div></div>`;
 }
 
+// The chapter's files, each with the lines this chapter adds and removes in it. A click
+// brings that file to the top of the code column.
+function fileList(a: Pr, files: DiffFile[], byFile: Map<string, number[]>): string {
+  const seen = viewed(a.id);
+  const rows = [...byFile].map(([path, starts]) => {
+    const f = files.find((x) => x.path === path);
+    let add = 0, del = 0;
+    for (const h of f?.hunks ?? []) if (starts.includes(hunkStart(f!, h))) for (const l of h.lines) { if (l[0] === "+") add++; else if (l[0] === "-") del++; }
+    const slash = path.lastIndexOf("/");
+    return `<li><button data-goto-file="${esc(path)}" title="${esc(path)}">${fileIcon(path)}<span class="fl-name"><b>${esc(path.slice(slash + 1))}</b><span>${esc(slash >= 0 ? path.slice(0, slash + 1) : "")}</span></span>
+      <span class="n"><span class="a">+${add}</span> <span class="d">−${del}</span></span>${seen.has(path) ? `<span class="fl-ok" title="Reviewed">${I.check}</span>` : ""}</button></li>`;
+  }).join("");
+  return `<div class="keys"><h3>Files <span>${byFile.size}</span></h3><ul class="files-list">${rows}</ul></div>`;
+}
+
 // One file as a card: name first, folder after, its comments, size and a Reviewed box.
 // A reviewed file folds to its header, so what is left open is what is left to read.
 function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: number[]) {
@@ -131,7 +147,7 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
   const split = S.split && mode !== "full";
   cols = split ? 6 : 3;
   const rows = folded || preview ? "" : mode === "full" ? fullRows(a, df, path, full!) : split ? splitRows(a, path, hunks, full) : diffRows(a, path, hunks, full);
-  return `<section class="fcard ${seen ? "viewed" : ""}">
+  return `<section class="fcard ${seen ? "viewed" : ""}" data-file="${esc(path)}">
     <header class="fhead">${fileIcon(path)}<span class="fname" title="${esc(path)}"><b>${esc(file)}</b><span class="dir">${esc(dir)}</span></span>
       ${talk ? `<span class="talk" title="${talk} comment${talk === 1 ? "" : "s"}">${I.chat}${talk}</span>` : ""}
       ${pf ? `<span class="n"><span class="a">+${pf.additions}</span> <span class="d">−${pf.deletions}</span></span>` : ""}

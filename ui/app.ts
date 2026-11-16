@@ -652,6 +652,13 @@ document.addEventListener("click", async (e) => {
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
+  if (d.gotoFile) {
+    // Bring the file to the top of the code column, under any pinned header.
+    const card = document.querySelector<HTMLElement>(`.fcard[data-file="${CSS.escape(d.gotoFile)}"]`);
+    const box = card?.closest<HTMLElement>("#code-scroll, #reading");
+    if (card && box) box.scrollTo({ top: box.scrollTop + card.getBoundingClientRect().top - box.getBoundingClientRect().top - 12 });
+    return;
+  }
   if (d.splitView !== undefined) { S.split = d.splitView === "1"; local.set("split", S.split); return renderMain(); }
   if (d.searchOpen !== undefined) return openSearch();
   if (d.hitThread) return openSearchHit(d.hitThread, Number(d.hitMid));

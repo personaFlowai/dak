@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.5
+- Each chapter lists its files with the lines it adds and removes in each; a click jumps the code to that file.
+
 ## 0.1.4
 - Codex sessions get names of their own (`<folder>-codex-<worktree id>`), so they never share a name with Claude Code sessions in the same repository.
 - `dak whoami`; inside an agent, `send`, `reply`, `inbox` and `wait` fill in your name.

@@ -679,3 +679,15 @@ table.diff td.ln button { white-space: nowrap; }
 .item .top { min-width: 0; }
 .item .top .who { flex: 1 1 0; }
 .item .top time, .item.pair .marks { flex: none; }
+
+/* The chapter's files, as buttons that jump the code column to each one */
+.files-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.files-list button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; margin: 0 -8px; border-radius: 6px; text-align: left; font-size: 13px; }
+.files-list button:hover { background: var(--hover); }
+.files-list svg { width: 14px; height: 14px; color: var(--text3); flex: none; }
+.files-list .fl-name { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline; overflow: hidden; }
+.files-list .fl-name b { font-weight: 500; white-space: nowrap; }
+.files-list .fl-name span { color: var(--text3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-list .n { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+.files-list .fl-ok svg { color: var(--add); }
+.notes-col .keys .files-list button { display: flex; justify-content: flex-start; gap: 8px; }
