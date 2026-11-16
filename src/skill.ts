@@ -15,6 +15,9 @@ const START = "<!-- dak:start (added by Dak; Disconnect Codex in Dak removes thi
 const END = "<!-- dak:end -->";
 
 export const SKILL = skillText as unknown as string;
+
+// Codex runs a hook only after the person approves it, so its mail must not depend on one.
+const CODEX_FIRST = `**Every task, in Codex:** run \`dak inbox --unread --json\` when you start and again before you finish, and act on anything there first. Your name on Dak is what \`dak whoami\` prints; \`dak send\`, \`reply\`, \`inbox\` and \`wait\` fill it in, so you never need \`--from\` or \`--for\`.`;
 // The skill without its front matter: plain instructions for tools that have no skills.
 export const INSTRUCTIONS = SKILL.replace(/^---[\s\S]*?---\s*/, "").trim();
 
@@ -35,7 +38,7 @@ export function installSkill(tool: "claude" | "codex" | "cursor") {
     const before = existsSync(path) ? readFileSync(path, "utf8") : "";
     const rest = stripSection(before).trimEnd();
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${rest ? rest + "\n\n" : ""}${START}\n## Dak\n\n${INSTRUCTIONS}\n${END}\n`);
+    writeFileSync(path, `${rest ? rest + "\n\n" : ""}${START}\n## Dak\n\n${CODEX_FIRST}\n\n${INSTRUCTIONS}\n${END}\n`);
   }
 }
 

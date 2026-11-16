@@ -7,7 +7,7 @@ import {
   addMessage, createThread, getThread, listThreads, putBlob, requireReader, setStatus, takeUnread,
   type NewAttachment,
 } from "./store";
-import { touch, detectTool, agents, claimName } from "./presence";
+import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presence";
 import { SKILL, INSTRUCTIONS } from "./skill";
 import pkg from "../package.json";
 import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
@@ -38,6 +38,7 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak close <thread>
   dak chapters check <file> [--pr n | --base ref | --diff f] [--repo .]
   dak agents                                     readers and every session Dak has seen or can see running
+  dak whoami                                     your name on Dak in this session (fills in --from and --for)
   dak skill [--plain]                            how to use Dak, for an agent's instructions (--plain: no front matter)
   dak watch --for <name>                         stream new messages as JSON lines (push, for long-lived agents)
   dak hook claude-code                           Claude Code hook: new messages reach the session at each turn
@@ -133,6 +134,11 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
   const { values, positionals } = parseArgs({ args: rest, options: OPTIONS as any, allowPositionals: true }) as any;
+  // Inside an agent's session, its Dak name fills in --from and --for: one less thing to get wrong.
+  if (inAgent() && ["send", "reply", "inbox", "wait", "watch"].includes(cmd)) {
+    if (["send", "reply"].includes(cmd)) values.from ??= whoami();
+    else values.for ??= whoami();
+  }
   const json = !!values.json;
 
   switch (cmd) {
@@ -276,6 +282,11 @@ export async function main(argv: string[]): Promise<number> {
     case "skill": {
       // The Dak skill, for an agent Dak cannot install it into: paste it into its instructions.
       console.log(values.plain ? INSTRUCTIONS : SKILL);
+      return 0;
+    }
+    case "whoami": {
+      const name = whoami();
+      out(json, { name, tool: detectTool(), where: process.cwd() }, () => name);
       return 0;
     }
     case "close": {

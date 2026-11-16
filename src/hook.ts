@@ -1,5 +1,4 @@
-import { nameFor, touch, claimedName } from "./presence";
-import { readerForFolder } from "./config";
+import { touch, whoami } from "./presence";
 import { getThreadRow, takeUnread } from "./store";
 import type { Message } from "./types";
 
@@ -15,8 +14,8 @@ import type { Message } from "./types";
 // folder it runs in, else a name made from the folder.
 export function sessionName(input: any, _tool: string): { name: string; where: string } {
   const where = String(input.cwd ?? input.workspace_roots?.[0] ?? process.cwd());
-  const claimed = claimedName(input.session_id);
-  return { where, name: (process.env.DAK_NAME || claimed || readerForFolder(where) || nameFor(where)).toLowerCase() };
+  // The session id comes only from the hook's own input: a hook never borrows the shell's.
+  return { where, name: whoami({ tool: _tool, where, session: input.session_id ?? "" }) };
 }
 
 export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "claude-code"): Promise<void> {

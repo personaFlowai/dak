@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+- Codex sessions get names of their own (`<folder>-codex-<worktree id>`), so they never share a name with Claude Code sessions in the same repository.
+- `dak whoami`; inside an agent, `send`, `reply`, `inbox` and `wait` fill in your name.
+- Codex checks its mail at the start and end of every task, so it gets messages even before you approve Dak's hook.
+
 ## 0.1.3
 - A session's name comes only from what it sends as (--from). Reading another inbox with --for no longer makes a session receive that reader's mail.
 

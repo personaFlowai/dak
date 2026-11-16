@@ -26,6 +26,29 @@ export interface Agent {
 export const nameFor = (folder: string) =>
   basename(folder).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "session";
 
+// A Codex session's name: its folder, "-codex", and the short id of the worktree Codex
+// made, so it never shares a name with a Claude Code session in the same repository.
+export function codexNameFor(folder: string): string {
+  const id = folder.match(/\/\.codex\/worktrees\/([^/]+)\//)?.[1]?.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+  return `${nameFor(folder)}-codex${id ? `-${id}` : ""}`;
+}
+
+// Who this process is on Dak: the one answer the CLI and the hooks agree on.
+// DAK_NAME, else the name this session has sent as, else a reader whose folder this is,
+// else a name from the folder (with "-codex…" for Codex).
+export function whoami(opts: { tool?: string; where?: string; session?: string } = {}): string {
+  if (process.env.DAK_NAME) return process.env.DAK_NAME.toLowerCase();
+  const claimed = claimedName(opts.session ?? process.env.CLAUDE_CODE_SESSION_ID);
+  if (claimed) return claimed;
+  const where = opts.where ?? process.cwd();
+  const reader = readerForFolder(where);
+  if (reader) return reader;
+  return (opts.tool ?? detectTool()) === "codex" ? codexNameFor(where) : nameFor(where);
+}
+
+// True inside an agent's session; a person at a terminal keeps their own name as the default.
+export const inAgent = () => ["claude-code", "codex", "cursor"].includes(detectTool());
+
 function ensure() {
   store().exec(`CREATE TABLE IF NOT EXISTS presence (
     name TEXT PRIMARY KEY, tool TEXT, where_ TEXT, session_id TEXT, last_seen TEXT NOT NULL);

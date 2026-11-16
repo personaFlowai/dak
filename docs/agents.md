@@ -22,10 +22,14 @@ Readers are the names in `~/.dak/config.toml` (`dak readers`). Sending to anyone
 
 Comments carry an anchor: `{kind: "code", file, side: "old"|"new", start_line, end_line}` for code, or `{kind: "doc", version, block_index, block_hash, quote}` for a paragraph of a doc. `side: "old"` means a line the PR removed.
 
+## Your name
+
+`dak whoami` prints your name on Dak in this session. Inside Claude Code, Codex or Cursor, `send`, `reply`, `inbox` and `wait` fill it in. A Codex session's name is its folder plus `-codex` and its worktree's id (say `shop-codex-bc25`), so it never shares a name with a Claude Code session in the same repository. Sending as a different name (`--from atlas`) makes the session answer to that name from then on.
+
 ## How mail reaches you
 
 - **Claude Code**, once connected in Dak's Settings: new mail is added at the start of a turn, a stop is held while mail is waiting, and an idle session is woken when mail arrives. You do not need to poll or run `dak wait` in a loop.
-- **Codex**: mail arrives at the start and end of each turn. An idle Codex session cannot be woken; it reads mail when it next runs.
+- **Codex**: mail arrives at the start and end of each turn once you approve Dak's hook in Codex (`/hooks`). Until then, and as a fallback, Codex runs `dak inbox --unread` at the start and end of every task (its AGENTS.md says so). An idle Codex session cannot be woken.
 - **Cursor**: the stop hook hands new mail over as a follow-up message when a turn ends.
 - **Anything else**: `dak wait <thread> --for <you>` (blocks until a reply), `dak watch --for <you>` (a stream), or `GET /x/wait/<id>` over HTTP.
 

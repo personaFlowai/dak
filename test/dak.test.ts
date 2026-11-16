@@ -187,6 +187,23 @@ describe("teaching agents to use Dak", () => {
   });
 });
 
+describe("Codex sessions have names of their own", () => {
+  test("a Codex worktree gets <folder>-codex-<id>; send and inbox fill it in; the hook delivers to the same name", () => {
+    const wt = join(home, ".codex", "worktrees", "bc25", "shop");
+    require("node:fs").mkdirSync(wt, { recursive: true });
+    const env = { ...process.env, DAK_HOME: home, DAK_TOOL: "codex", CLAUDE_CODE_SESSION_ID: "", CLAUDECODE: "" };
+    const run = (...args: string[]) => Bun.spawnSync(["bun", CLI, ...args], { env, cwd: wt, stdout: "pipe", stderr: "pipe" });
+    expect(run("whoami").stdout.toString().trim()).toBe("shop-codex-bc25");
+    const sent = JSON.parse(run("send", "--to", "sam", "--subject", "From Codex", "hi", "--json").stdout.toString());
+    expect(sent.thread.from).toBe("shop-codex-bc25");
+    dak("reply", sent.thread.id, "--from", "sam", "Got it, Codex");
+    expect(JSON.parse(run("inbox", "--unread", "--peek", "--json").stdout.toString())[0].body).toBe("Got it, Codex");
+    const hook = Bun.spawnSync(["bun", CLI, "hook", "codex"], { env: { ...process.env, DAK_HOME: home },
+      stdin: new TextEncoder().encode(JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: wt })), stdout: "pipe" });
+    expect(hook.stdout.toString()).toContain("Got it, Codex");
+  });
+});
+
 describe("the Ask helper is not an agent", () => {
   test("hooks inside Dak's own helper record nothing and deliver nothing", () => {
     const input = new TextEncoder().encode(JSON.stringify({ hook_event_name: "SessionStart", cwd: "/tmp/dak-ask-zz9", session_id: "helper-1" }));

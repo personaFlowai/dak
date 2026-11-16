@@ -9,6 +9,10 @@ Dak is the review inbox on this Mac. You send work to a reader (a person, such a
 
 Before the first send, check Dak is there: `dak agents --json` lists the readers and sessions. If `dak` is not found, it is not installed on this machine: say so and stop.
 
+**Your name.** `dak whoami` prints your name on Dak in this session. Inside Claude Code, Codex or Cursor, `send`, `reply`, `inbox` and `wait` fill it in, so `--from` and `--for` are only needed to use a different name (a named role such as `atlas`). Once you send as a name, this session answers to it.
+
+**Getting mail.** Claude Code receives mail through Dak's hooks, even when idle. If your tool has no hook running (Codex until its hook is approved), run `dak inbox --unread --json` at the start and the end of every task.
+
 ## 1. Send a PR, with chapters
 
 A PR without chapters reads one file at a time. Chapters turn it into a five-minute read: the reviewer knows why each part exists, where to look, what could go wrong and how you know it does not.
