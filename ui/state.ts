@@ -10,7 +10,7 @@ export type Doc = Extract<Attachment, { type: "doc" }>;
 export interface Summary extends Thread { unread: number; last_body: string; last_author: string; participants?: string[]; reviewing_since?: string | null }
 export interface Draft { id: string; attachment_id: string; anchor: Anchor; body: string; label: string }
 export interface Sel { att: string; file: string; side: "old" | "new"; start: number; end: number }
-export interface AgentRow { name: string; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
+export interface AgentRow { name: string; title?: string | null; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
 export interface AskTurn { q: string; a?: string; error?: string; context?: string; loading?: boolean; seconds?: number; by?: string }
 export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "waiting";
 
@@ -123,7 +123,14 @@ export const reviewed = (att: string, chapters: { hunks: { file: string }[] }[])
 export const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 export const $ = <T extends HTMLElement = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T | null;
 
-export const name = (n: string) => (n === me ? "You" : n.length > 18 && /-[0-9a-f]{6}$/.test(n) ? n.replace(/-[0-9a-f]{6}$/, "") : n.charAt(0).toUpperCase() + n.slice(1));
+// How a name reads: You; a session by its own title in Claude Code ("Team engineer (M21)"),
+// not the folder-and-code name Dak gave it; anyone else by name. Named readers (Atlas) keep theirs.
+export const name = (n: string) => {
+  if (n === me) return "You";
+  const a = S.agents.find((x) => x.name === n);
+  if (a?.title && !a.reader) return a.title;
+  return n.length > 18 && /-[0-9a-f]{6}$/.test(n) ? n.replace(/-[0-9a-f]{6}$/, "") : n.charAt(0).toUpperCase() + n.slice(1);
+};
 export const agentOf = (n: string) => S.agents.find((a) => a.name === n);
 const BY_NAME: Record<string, string> = { github: "github", cursor: "cursor", codex: "codex", claude: "claude-code", grok: "grok" };
 export const toolOf = (n: string) => agentOf(n)?.tool ?? BY_NAME[n] ?? null;

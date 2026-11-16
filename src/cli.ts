@@ -368,7 +368,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "agents": {
       const list = agents({ scan: true });
-      out(json, list, () => list.map((a) => `${a.listening ? "●" : a.running ? "○" : " "} ${a.name.padEnd(42)} ${(a.reader ? (a.kind === "person" ? "person" : "reader") : a.tool ?? "").padEnd(12)} ${a.where ?? ""}`).join("\n")
+      out(json, list, () => list.map((a) => `${a.listening ? "●" : a.running ? "○" : " "} ${a.name.padEnd(42)} ${(a.reader ? (a.kind === "person" ? "person" : "reader") : a.tool ?? "").padEnd(12)} ${a.title ? `"${a.title}"  ` : ""}${a.where ?? ""}`).join("\n")
         + "\n\n● listening (used Dak in the last 10 minutes)   ○ running, not listening yet");
       return 0;
     }

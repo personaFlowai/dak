@@ -883,6 +883,14 @@ describe("the outside door for remote agents", () => {
     expect(row).toMatchObject({ type: "brief", blocks: "Zari's Friday post", tier: "urgent", why: "goes out Friday" });
     expect((await out(`/x/priority/${ask.thread.id}`, { method: "PUT", body: JSON.stringify({ tier: "later" }) })).status).toBe(200);
     expect((await out(`/x/priority/${other.thread.id}`, { method: "PUT", body: JSON.stringify({ tier: "later" }) })).status).toBe(404); // not its own
+    // One key, several bots: each sends under its own name; replies to any of them come back on the key.
+    const orbit = await (await out("/x/send", { method: "POST", body: JSON.stringify({ from: "Orbit", subject: "Ops", body: "Status?" }) })).json();
+    expect(orbit.thread).toMatchObject({ from: "orbit", to: "sam" });
+    expect((await out("/x/send", { method: "POST", body: JSON.stringify({ from: "atlas", body: "x" }) })).status).toBe(403); // a reader's name is not free
+    await http(`/v1/threads/${orbit.thread.id}/messages`, { method: "POST", body: JSON.stringify({ author: "sam", body: "All good." }) });
+    expect(((await (await out("/x/inbox")).json()) as any[]).some((m) => m.thread_id === orbit.thread.id && m.body === "All good.")).toBe(true);
+    const r2 = await (await out(`/x/reply/${orbit.thread.id}`, { method: "POST", body: JSON.stringify({ body: "Thanks" }) })).json();
+    expect(r2.author).toBe("orbit"); // the reply goes out as the bot on the thread
     // It can write to another agent directly, and the agent's answer reaches its inbox.
     const names = ((await (await out("/x/agents")).json()) as any[]).map((a) => a.name);
     expect(names).toContain("zari");

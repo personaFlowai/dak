@@ -9,7 +9,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, person, token } from "./config";
 import {
-  addMessage, blobPath, createThread, getThread, latestMessageId, listThreads, markRead, putBlob,
+  addMessage, blobPath, store, createThread, getThread, latestMessageId, listThreads, markRead, putBlob,
   requireReader, takeUnread, archives, setArchived, setStatus, search, type NewAttachment, type NewComment,
   addParticipant, decisions, groups, setGroup, awaitingReview,
 } from "./store";
@@ -158,12 +158,26 @@ async function outside(req: Request, url: URL): Promise<Response> {
     if (text.length > 64_000) throw new DakError("too_large", "Keep a message under 64 KB.", 413);
     try { return JSON.parse(text || "{}"); } catch { throw new DakError("bad_json", "The request body must be JSON."); }
   };
+  // One key can speak for several bots (Grok's Orbit, Nova...): each sends under its own name,
+  // and everything addressed to any of them comes back on this key.
+  const tool = "grok" === agent ? "grok" : "http";
+  const names = [agent, ...botsOf(agent)];
+  const sideOf = (t: { from: string; to: string }) => names.find((n) => n === t.from || n === t.to);
   const ownThread = (id: string) => {
     const t = getThread(id).thread;
-    if (t.from !== agent && t.to !== agent) throw new DakError("no_thread", `No thread ${id}.`, 404);
+    if (!sideOf(t)) throw new DakError("no_thread", `No thread ${id}.`, 404);
     return t;
   };
-  touch(agent, { tool: "grok" === agent ? "grok" : "http" });
+  const as = (b: any) => {
+    const n = b?.from ? String(b.from).trim().toLowerCase() : agent;
+    if (names.includes(n)) return n;
+    if (!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(n)) throw new DakError("bad_name", "A bot's name is letters, digits, - and _.");
+    if (loadConfig().readers.some((r) => r.name === n)) throw new DakError("taken", `"${n}" is a reader on this Mac; pick another name for your bot.`, 403);
+    if (!claimBot(n, agent)) throw new DakError("taken", `"${n}" belongs to another key.`, 403);
+    names.push(n);
+    return n;
+  };
+  touch(agent, { tool });
   if (parts[0] === "send" && req.method === "POST") {
     const b = await body();
     const atts = b.link ? [{ type: "link", name: String(b.link), meta: { url: String(b.link) } } as any] : [];
@@ -171,9 +185,10 @@ async function outside(req: Request, url: URL): Promise<Response> {
     // work with the team directly. It still reads only its own threads.
     const to = b.to ? String(b.to).toLowerCase() : me;
     if (to !== me && loadConfig().readers.some((r) => r.name === to && r.kind === "person")) throw new DakError("not_allowed", "An outside agent writes to the person or to agents.", 403);
-    const made = createThread({ to, from: agent, subject: String(b.subject ?? "").slice(0, 200) || String(b.body ?? "").split("\n")[0].slice(0, 80), kind: "note", body: String(b.body ?? ""), attachments: atts,
+    const from = as(b); touch(from, { tool });
+    const made = createThread({ to, from, subject: String(b.subject ?? "").slice(0, 200) || String(b.body ?? "").split("\n")[0].slice(0, 80), kind: "note", body: String(b.body ?? ""), attachments: atts,
       options: optionsOf(b), extra: { cost: costOf(b) }, ...(b.needs_reply === false || b.fyi === true ? { needs_reply: false } : {}) });
-    askedAs(made.thread.id, agent, b);
+    askedAs(made.thread.id, from, b);
     return json(made, 201);
   }
   // Re-rank or re-describe one of its own asks after sending it.
@@ -185,7 +200,10 @@ async function outside(req: Request, url: URL): Promise<Response> {
   if (parts[0] === "reply" && parts[1] && req.method === "POST") {
     ownThread(parts[1]);
     const b = await body();
-    const m = addMessage(parts[1], { author: agent, body: String(b.body ?? ""), options: optionsOf(b), extra: { cost: costOf(b) },
+    // A reply goes out as whichever of its bots is on the thread, unless it names one.
+    const t = ownThread(parts[1]);
+    const author = b.from ? as(b) : sideOf(t)!;
+    const m = addMessage(parts[1], { author, body: String(b.body ?? ""), options: optionsOf(b), extra: { cost: costOf(b) },
       ...(b.needs_reply === false || b.fyi === true || b.done === true ? { needs_reply: false } : {}) });
     askedAs(parts[1], agent, b);
     if (b.done === true) setStatus(parts[1], "closed");
@@ -195,13 +213,14 @@ async function outside(req: Request, url: URL): Promise<Response> {
     ownThread(parts[1]);
     const deadline = Date.now() + Math.min(Number(url.searchParams.get("timeout") ?? 25), 55) * 1000;
     while (Date.now() < deadline) {
-      const msgs = takeUnread(agent, { threadId: parts[1] });
+      const msgs = takeUnread(sideOf(getThread(parts[1]).thread)!, { threadId: parts[1] });
       if (msgs.length) return json({ messages: msgs });
       await Bun.sleep(700);
     }
     return json({ messages: [], timed_out: true });
   }
-  if (parts[0] === "inbox" && req.method === "GET") return json(takeUnread(agent));
+  // Mail for every bot on this key; each message says which thread, and the thread says to whom.
+  if (parts[0] === "inbox" && req.method === "GET") return json(names.flatMap((n) => takeUnread(n)).sort((a, b) => a.id - b.id));
   // Its instructions, so a remote agent can refresh them itself after Dak changes. The key is
   // not repeated: it already holds it.
   if (parts[0] === "skill" && req.method === "GET") {
@@ -591,4 +610,21 @@ function costOf(b: any) {
 function askedAs(threadId: string, agent: string, b: any) {
   if (b.type !== undefined || b.blocks !== undefined) describeReview(threadId, { type: b.type === undefined ? undefined : String(b.type), blocks: b.blocks === undefined ? undefined : String(b.blocks) });
   if (b.tier !== undefined || b.why !== undefined) prioritizeReview(threadId, agent, { tier: tierOf(b.tier === undefined ? undefined : String(b.tier)), why: b.why === undefined ? undefined : String(b.why) });
+}
+
+/* Bots that speak through one outside key, each with its own name. The first key to use a
+   name keeps it, so one key's bots cannot take another's. */
+function botsTable() { store().exec("CREATE TABLE IF NOT EXISTS door_bots (name TEXT PRIMARY KEY, agent TEXT NOT NULL, at TEXT NOT NULL)"); }
+function botsOf(agent: string): string[] {
+  botsTable();
+  return (store().query("SELECT name FROM door_bots WHERE agent = ?").all(agent) as { name: string }[]).map((r) => r.name);
+}
+function claimBot(name: string, agent: string): boolean {
+  botsTable();
+  const cur = store().query("SELECT agent FROM door_bots WHERE name = ?").get(name) as { agent: string } | null;
+  if (cur) return cur.agent === agent;
+  // A name some session on this Mac already goes by is not free either.
+  if (store().query("SELECT 1 FROM presence WHERE name = ? AND coalesce(tool, '') NOT IN ('grok', 'http')").get(name)) return false;
+  store().query("INSERT INTO door_bots (name, agent, at) VALUES (?, ?, ?)").run(name, agent, new Date().toISOString());
+  return true;
 }

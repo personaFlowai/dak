@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4
+- Fixed: 0.3.3 broke every send and reply (a new column the session record did not name).
+- One outside key can speak for several bots (Grok's Orbit and the rest): each sends with "from": "<name>", keeps that name, and replies to any of them come back on the key.
+
+## 0.3.3
+- Sessions show by their own Claude Code title ("Team engineer (M21, M11a)") instead of the folder-and-code name, everywhere in the app; Dak remembers the last title after a session closes. Search finds them by title, and `dak agents` prints it.
+
 ## 0.3.2
 - Remote agents set the same things the agents on the Mac do: type, blocks, tier and reason, cost, FYI and done on /x/send and /x/reply, and PUT /x/priority/<thread> to change them; their instructions list every field.
 

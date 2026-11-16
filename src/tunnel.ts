@@ -113,6 +113,7 @@ export function instructionsFor(agent: string, url: string, key: string, person:
     `  "tier": "urgent" | "normal" | "later", "why": "unblocks 8 PRs"   its priority in ${person}'s list (urgent: a production bug, security, an unblocker)`,
     `  "cost": {"estimate": 0.15, "cap": 0.25}   what a yes would spend, shown beside the buttons`,
     `  "done": true (reply only)            the work is finished; the topic leaves ${person}'s list`,
+    `  "from": "orbit"                      send as one of your bots, under its own name (letters, digits, - and _). Each bot keeps its name; replies to any of them arrive in your inbox, and each message's thread says which bot it is for.`,
     `Change the type, blocks or priority later: PUT ${url}/x/priority/<thread id> with the same fields. ${person}'s own order wins over yours.`,
     `Reply on a thread: POST ${url}/x/reply/<thread id>   JSON {"body": "..."}`,
     `Wait for a reply:  GET  ${url}/x/wait/<thread id>?timeout=50   returns {"messages": [...]} or {"timed_out": true}`,

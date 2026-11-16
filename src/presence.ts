@@ -13,6 +13,7 @@ import { store } from "./store";
 
 export interface Agent {
   name: string;
+  title?: string | null; // the Claude Code session's own title ("Team engineer (M21)"), when it has one
   kind: "person" | "agent";
   reader: boolean;
   about: string | null;
@@ -53,6 +54,23 @@ function ensure() {
   store().exec(`CREATE TABLE IF NOT EXISTS presence (
     name TEXT PRIMARY KEY, tool TEXT, where_ TEXT, session_id TEXT, last_seen TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS session_names (session_id TEXT PRIMARY KEY, name TEXT NOT NULL, at TEXT NOT NULL)`);
+  const cols = new Set((store().query("PRAGMA table_info(presence)").all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("title")) store().exec("ALTER TABLE presence ADD COLUMN title TEXT");
+}
+
+/* A Claude Code session's title, the name it shows in Claude ("Team engineer (M21, M11a)"):
+   Claude Code writes one small file per running session that carries it. Dak keeps the last
+   title it saw, so a closed session is still shown by its title, not its folder. */
+export function sessionTitles(): Map<string, string> {
+  const dir = process.env.DAK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "sessions");
+  const out = new Map<string, string>();
+  try {
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try { const s = JSON.parse(readFileSync(join(dir, f), "utf8")); if (s.sessionId && typeof s.name === "string" && s.name.trim()) out.set(s.sessionId, s.name.trim()); } catch { /* being written */ }
+    }
+  } catch { /* no sessions folder */ }
+  return out;
 }
 
 // The name a session goes by is the one it SENDS as (dak send/reply --from). Reading
@@ -90,7 +108,7 @@ export function touch(name: string, info: { tool?: string; where?: string; sessi
   // A person is never a session: whatever sent as them, record no tool, folder or session.
   if (loadConfig().readers.some((r) => r.name === name.toLowerCase() && r.kind === "person")) info = {};
   ensure();
-  store().query(`INSERT INTO presence VALUES (?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET
+  store().query(`INSERT INTO presence (name, tool, where_, session_id, last_seen) VALUES (?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET
       tool = coalesce(excluded.tool, tool), where_ = coalesce(excluded.where_, where_),
       session_id = coalesce(excluded.session_id, session_id), last_seen = excluded.last_seen`)
     .run(name.toLowerCase(), info.tool ?? null, info.where ?? null, info.session ?? null, new Date().toISOString());
@@ -177,9 +195,12 @@ export function agents(opts: { scan?: boolean } = {}): Agent[] {
   for (const r of cfg.readers) {
     byName.set(r.name, { name: r.name, kind: r.kind, reader: true, about: r.about ?? null, tool: r.tool ?? null, where: r.where ?? null, last_seen: null, running: false, listening: false });
   }
+  const titles = sessionTitles();
   for (const p of store().query("SELECT * FROM presence").all() as any[]) {
     const a = byName.get(p.name) ?? { name: p.name, kind: "agent", reader: false, about: null, tool: null, where: null, last_seen: null, running: false, listening: false };
-    Object.assign(a, { tool: p.tool ?? a.tool, where: p.where_ ?? a.where, last_seen: p.last_seen, listening: recent(p.last_seen) });
+    const title = (p.session_id && titles.get(p.session_id)) || p.title || null;
+    if (title && title !== p.title) store().query("UPDATE presence SET title = ? WHERE name = ?").run(title, p.name);
+    Object.assign(a, { tool: p.tool ?? a.tool, where: p.where_ ?? a.where, last_seen: p.last_seen, listening: recent(p.last_seen), title });
     byName.set(p.name, a);
   }
   if (opts.scan) {

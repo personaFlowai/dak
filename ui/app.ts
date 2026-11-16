@@ -470,7 +470,7 @@ function composeView(): string {
   const fortnight = new Date(Date.now() - 14 * 86_400_000).toISOString();
   const named = S.agents.filter((a) => a.name !== me && a.kind !== "person" && lastWith(a.name) > fortnight)
     .sort((x, y) => lastWith(y.name).localeCompare(lastWith(x.name))).slice(0, 8);
-  const match = (a: AgentRow) => !f || `${a.name} ${a.about ?? ""} ${a.where ?? ""}`.toLowerCase().includes(f);
+  const match = (a: AgentRow) => !f || `${a.name} ${a.title ?? ""} ${a.about ?? ""} ${a.where ?? ""}`.toLowerCase().includes(f);
   const others = f ? S.agents.filter((a) => a.name !== me && !named.includes(a) && match(a)).slice(0, 20) : [];
   const row = (a: AgentRow) => {
     const w = waiting(a.name);
