@@ -186,7 +186,14 @@ function clearHelperGhosts() {
   store().query("DELETE FROM presence WHERE name LIKE 'dak-ask-%'").run();
 }
 
-export function agents(opts: { scan?: boolean } = {}): Agent[] {
+// A reviewer's throwaway checkout (wt-2463 under a scratchpad, a temp folder): a session there
+// is a one-off run, not an agent anyone writes to. Hidden unless asked for.
+export function ephemeral(where: string | null): boolean {
+  if (!where) return false;
+  return [tmpdir(), "/private/var/folders/", "/var/folders/"].some((p) => where.startsWith(p)) || where.includes("/scratchpad/") || /\/wt-\d+[^/]*\/?$/.test(where);
+}
+
+export function agents(opts: { scan?: boolean; all?: boolean } = {}): Agent[] {
   ensure();
   clearHelperGhosts();
   const cfg = loadConfig();
@@ -222,7 +229,7 @@ export function agents(opts: { scan?: boolean } = {}): Agent[] {
     }
   }
   const people = [...byName.values()].filter((a) => a.kind === "person");
-  const rest = [...byName.values()].filter((a) => a.kind !== "person");
+  const rest = [...byName.values()].filter((a) => a.kind !== "person" && (opts.all || a.reader || !ephemeral(a.where)));
   rest.sort((x, y) => Number(y.reader) - Number(x.reader) || Number(y.listening) - Number(x.listening)
     || Number(y.running) - Number(x.running) || x.name.localeCompare(y.name));
   return [...people, ...rest];

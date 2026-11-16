@@ -21,6 +21,9 @@ export const me = boot.me;
    A PR or doc opens full-screen with the reply floating at the bottom. */
 export const onPhone = () => !!(window as any).DAK?.phone || matchMedia("(max-width: 760px)").matches;
 
+// Being reworked (skip it; it comes back with its next version) or parked by the person's choice.
+export interface Hold { kind: "rework" | "parked"; note: string | null; at: string; by: string | null }
+
 export const S = {
   view: "thread" as View,
   focus: local.get("focus", false), // review fills the window; the reply floats at the bottom
@@ -58,9 +61,11 @@ export const S = {
   phoneTab: "guide" as "overview" | "guide", // on a phone: which view of the PR // on a phone: the list is showing, not what was opened from it
   queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string;
     state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null;
-    tier: string; rank: number | null; why: string | null; rank_by: string | null; pair_id: string | null; waiting_reason: string | null }[],
+    tier: string; rank: number | null; why: string | null; rank_by: string | null; pair_id: string | null; waiting_reason: string | null;
+    hold: Hold | null; head_moved: { from: string; to: string; change: "rebase only" | "content changed" | null } | null }[],
   reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null;
-    tier: string; rank: number | null; why: string | null; rank_by: string | null; type: string; blocks: string | null }[], // everything waiting on you, in priority order
+    tier: string; rank: number | null; why: string | null; rank_by: string | null; type: string; blocks: string | null; hold: Hold | null }[], // everything waiting on you, in priority order
+  heldReviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; type: string; hold: Hold }[], // being reworked or parked: not counted
   reviewFilter: local.get("reviewFilter", "") as string, // the merge queue's "Waiting on you": all, or one type
   allTopics: local.get("allTopics", false), // the conversation shows every topic at once, not just the one you are on
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation

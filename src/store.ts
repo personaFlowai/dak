@@ -115,7 +115,7 @@ export interface NewComment { attachment_id?: string | null; anchor: Anchor | nu
 export function createThread(input: {
   to: string; from: string; subject: string; kind: ThreadKind; body: string; attachments: NewAttachment[]; needs_reply?: boolean; options?: string[];
   participants?: Participant[]; extra?: MessageExtra;
-}): { thread: Thread; message: Message } {
+}): { thread: Thread; message: Message; routed?: { to: string; via: string; from_group: string } } {
   const to = String(input.to ?? "").trim().toLowerCase();
   if (!to) throw new DakError("no_reader", "Say who it is for with --to <name>.");
   // A group is its members: each one is on the thread and gets the message.
@@ -129,6 +129,12 @@ export function createThread(input: {
   }
   const from = input.from.trim().toLowerCase();
   if (!from) throw new DakError("no_sender", "Say who is sending with --from <name>.");
+  // A route rule: a PR or brief from a group's member to this reader goes to someone else first.
+  const route = routeFor(to, from, input.kind);
+  if (route) {
+    const r = createThread({ ...input, to: route.via, body: `${input.body.trim() ? input.body.trim() + "\n\n" : ""}(Sent to ${to}; ${to}'s rule sends ${route.from_group}'s PRs and briefs to ${route.via} first.)` });
+    return { ...r, routed: { to, via: route.via, from_group: route.from_group } };
+  }
   if (!input.subject.trim()) throw new DakError("no_subject", "A thread needs a subject.");
   const id = newId("t");
   const t = now();
@@ -164,9 +170,25 @@ export function addMessage(threadId: string, input: {
     : author === thread.to ? "answered"
     : other ? (thread.to.startsWith("group:") && !settled ? "answered" : thread.status)
     : needsReply(thread, input) ? "waiting" : thread.status;
+  // An approval records exactly what was approved (head and diff), so a later push can be told
+  // apart: the merge queue says "head moved since your approval" and whether the changes differ.
+  let extra = input.extra;
+  // A pick on a "try it" note is the Checking result: record it plainly, with the ticket, so the
+  // agent's hook and dak wait --json both say what to do (works: post the proof, move it to Done).
+  if (input.choice) {
+    const q = store().query("SELECT options, extra FROM messages WHERE thread_id = ? AND options IS NOT NULL ORDER BY id DESC LIMIT 1").get(threadId) as { options: string; extra: string | null } | null;
+    const tryit = q?.extra ? JSON.parse(q.extra).tryit : undefined;
+    if (tryit) extra = { ...extra, tryit_result: { result: JSON.parse(q!.options)[0] === input.choice ? "works" : "wrong", ...(tryit.ticket ? { ticket: tryit.ticket } : {}) } };
+  }
+  if (input.verdict === "approve") {
+    const row = store().query(`SELECT a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
+      WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1`).get(threadId) as { meta: string } | null;
+    const meta = row ? JSON.parse(row.meta) : null;
+    if (meta?.head_sha) extra = { ...extra, approved: { head_sha: meta.head_sha, diff_blob: meta.diff_blob } };
+  }
   const s = store();
   const id = s.transaction(() => {
-    const mid = insertMessage(threadId, author, input.body, input.verdict ?? null, input.attachments ?? [], input.comments ?? [], cleanOptions(input.options), input.choice, input.extra);
+    const mid = insertMessage(threadId, author, input.body, input.verdict ?? null, input.attachments ?? [], input.comments ?? [], cleanOptions(input.options), input.choice, extra);
     s.query("UPDATE threads SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), threadId);
     return mid;
   })();
@@ -352,6 +374,35 @@ export function addParticipant(threadId: string, p: Participant): Participant[] 
   return participantsOf(threadId);
 }
 
+/* ---------- routes ---------- */
+
+// "PRs and briefs that engineers send to pratik go to atlas": the reader's own way of saying who
+// reviews first. Only new PR and doc threads are routed; replies, notes and questions are not,
+// so anything on a thread the person is already on still reaches them.
+export interface Route { to_reader: string; from_group: string; via: string }
+function ensureRoutes() {
+  store().exec("CREATE TABLE IF NOT EXISTS routes (to_reader TEXT NOT NULL, from_group TEXT NOT NULL, via TEXT NOT NULL, PRIMARY KEY (to_reader, from_group))");
+}
+export function routes(): Route[] { ensureRoutes(); return store().query("SELECT * FROM routes ORDER BY to_reader, from_group").all() as Route[]; }
+export function setRoute(to: string, fromGroup: string, via: string | null): Route[] {
+  ensureRoutes();
+  const t = to.trim().toLowerCase(), g = fromGroup.trim().toLowerCase().replace(/^group:/, ""), v = via?.trim().toLowerCase() ?? null;
+  if (v === null) { store().query("DELETE FROM routes WHERE to_reader = ? AND from_group = ?").run(t, g); return routes(); }
+  if (!groupMembers(g).length) throw new DakError("unknown_group", `No group "${g}". Make one with: dak group set ${g} <name>...`);
+  if (!known(t) || !known(v)) throw new DakError("unknown_reader", `Both ${t} and ${v} must be readers or have used Dak.`);
+  if (t === v) throw new DakError("bad_route", "A route sends to someone else.");
+  store().query("INSERT INTO routes VALUES (?,?,?) ON CONFLICT(to_reader, from_group) DO UPDATE SET via = excluded.via").run(t, g, v);
+  return routes();
+}
+function routeFor(to: string, from: string, kind: ThreadKind): Route | null {
+  if (kind !== "pr" && kind !== "doc") return null;
+  ensureRoutes();
+  for (const r of store().query("SELECT * FROM routes WHERE to_reader = ?").all(to) as Route[]) {
+    if (r.via !== from && groupMembers(r.from_group).includes(from)) return r;
+  }
+  return null;
+}
+
 export function groupMembers(name: string): string[] {
   return (store().query("SELECT member FROM groups WHERE name = ? ORDER BY member").all(name.toLowerCase()) as { member: string }[]).map((r) => r.member);
 }
@@ -424,7 +475,7 @@ export interface AwaitingReview { thread_id: string; subject: string; from: stri
      decision: a question with buttons, or a question asked after they approved.
    Updates (FYIs), closed topics, and PRs they approved that only wait to merge are not here:
    the merge queue holds those. An agent can name the type itself (--type), which wins. */
-export type ReviewType = "pr" | "brief" | "decision";
+export type ReviewType = "pr" | "brief" | "decision" | "tryit";
 export function awaitingReview(reader: string, typed: Map<string, string> = new Map()): (AwaitingReview & { type: ReviewType })[] {
   const rows = store().query(`SELECT t.id AS thread_id, t.kind, t.subject, t.from_name AS "from", t.updated_at AS waiting_since, ${REVIEWING} AS reviewing_since
     FROM threads t WHERE t.to_reader = ? AND t.status = 'waiting' ORDER BY t.updated_at`).all(reader) as any[];

@@ -84,6 +84,13 @@ A PR without chapters shows one section per file. Chapters make it reviewable in
 - **Decisions and cost.** `--cost 0.15 --cap 0.25` on a question with buttons. `dak decisions --for <person>` lists every choice with its question, date and cost.
 - **Stacked PRs.** A PR whose base is another branch shows "Stacked on #N", linked to that PR's thread.
 - **Merge queue.** `dak queue set <pr> --state ...` from merge scripts; Dak shows the queue live. Over HTTP: `GET /v1/queue`, `PUT /v1/queue/<pr>` with `{ "state": "testing", "note": "..." }`.
+- **Holds.** `dak queue set <pr|thread> --rework "why"` greys a PR out below the rest until its next version; `--state parked --waiting "why"` keeps it out of the review count until `dak queue unpark`.
+- **Moved heads.** An approval records the head and diff it approved. The queue row says when the head moved since, and whether it is a rebase only or the changes differ (`--head <sha>` from the merge script triggers the check).
+- **Routes.** `dak route set <person> --from-group <group> --via <agent>`: that group's PRs and briefs to the person go to the agent first, with a note. Replies are not routed.
+- **Try it.** `--type tryit --ticket REVA-123` gives Works / Something's wrong; a Works pick comes back with `tryit_result` naming the ticket to close.
+- **Stacked reviews.** `--range base..head` (send, add, reply) makes a runner review only those commits.
+- **Lookup.** `dak thread --pr <n>` prints the thread id; `send --json` returns `thread_id`.
+- **Confirmed orders.** `--confirmed-by <thread>` on `order`, `review-order` and `priority` applies an order as the person's when they asked for it there, by button or in words; the output quotes them.
 
 ## Over HTTP
 

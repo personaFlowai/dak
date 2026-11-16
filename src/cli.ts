@@ -4,8 +4,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { loadConfig, writeConfig, configPath, dakHome, person, HELPERS } from "./config";
 import {
-  addMessage, createThread, getThread, listThreads, putBlob, refreshPr, requireReader, setStatus, takeUnread,
-  addParticipant, decisions, groups, setGroup, awaitingReview,
+  addMessage, createThread, getThread, threadForPr, listThreads, putBlob, refreshPr, requireReader, setStatus, takeUnread,
+  addParticipant, decisions, groups, setGroup, awaitingReview, routes, setRoute,
   type NewAttachment,
 } from "./store";
 import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presence";
@@ -15,9 +15,9 @@ import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
 import { snapshotPr, loadChapters, checkChapters, diffForChapters, draftChapters } from "./pr";
 import { DakError, type Message, type Verdict } from "./types";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
-import { addRunner, removeRunner, runners } from "./reviewer";
-import { next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
-import { confirmedBy, describeReview, orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
+import { addRunner, removeRunner, runners, setRange } from "./reviewer";
+import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
+import { confirmedBy, setHold, describeReview, orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
 import type { AwaitingReview } from "./store";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
@@ -41,6 +41,7 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
                     [--done]                               the work is finished: the topic leaves the reader's list
                     [--fyi]                                an update that needs no answer (after an approval, text-only replies are updates anyway)
   dak show <thread>                              the whole thread
+  dak thread --pr <n>                            the thread carrying PR #n (prints its id)
   dak refresh <thread> [--pr n | --base ref | --diff f] [--chapters f]
                                                  the same PR at its new head (after a rebase), in place: no new version
   dak close <thread>
@@ -51,8 +52,14 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
       --cost 0.15 [--cap 0.25]  what a yes would spend, shown with the buttons
       --head-only (reply)       move the PR to its new head in place, with a note that asks nothing
       --message-file <f|->      the message from a file or stdin, untouched by the shell
+      --type tryit [--ticket REVA-123]   a "try it" on a live feature: buttons Works / Something's wrong; on Works
+                                the reply says to post the proof on the ticket and move it to Done
+      --range base..head        (also on dak add) a reviewer runner reviews only these commits: a stacked PR's own
   dak add <thread> <name:role>...                bring someone onto a thread; they get it all as new mail
   dak group set <name> <member>... | dak group   send to all of them with --to group:<name>
+  dak route set <reader> --from-group <group> --via <reader>
+                                                 PRs and briefs a group sends to <reader> go to --via first (replies are not routed)
+  dak route | dak route remove <reader> --from-group <group>
   dak ack <thread> --from <name> [text]          a member's "done" on a broadcast
   dak decisions [--for <name>]                   every button picked, with the question and its cost
   dak runner add codex | cursor | claude | <name> --command '["prog","arg"]'
@@ -64,6 +71,11 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak reviewing <thread> [text]                  tell the sender you are reviewing it (the person's "I'm on it")
   dak queue remove <pr>
   dak queue set <pr> --tier urgent|normal|later --why "unblocks 8 PRs" --waiting "a rebase"
+  dak queue set <pr|thread> --rework "prefix being added"   about to change: greyed, below the rest, skipped by
+                                                 queue next; back by itself with the next version (--rework none ends it)
+  dak queue set <pr|thread> --state parked --waiting "department settings"
+                                                 open but parked by the person's choice: out of the review count
+  dak queue unpark <pr|thread>
   dak queue order <pr>... [--tier t]             merge order; refused if it puts a PR before the one it waits for
   dak queue review-order <pr|thread>... [--tier t]   the order the person reviews in
   dak queue priority <pr|thread> [--review] --tier t --why text
@@ -155,15 +167,46 @@ function queueText(rows: QueueRow[], reviews: OrderedReview[], who: string): str
   const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
   const left = (r: QueueRow) => { if (!r.eta_at) return ""; const m = Math.round((Date.parse(r.eta_at) - Date.now()) / 60000); return m >= 0 ? `, about ${m} min left` : `, ${-m} min over`; };
   const line = (r: QueueRow) => `  #${String(r.pr).padEnd(6)} ${r.title}  [${r.state} for ${ago(r.state_since)}${left(r)}]${r.tier !== "normal" ? ` ${r.tier}` : ""}${r.why ? ` (${r.why})` : ""}${r.pair_id ? ` pair ${r.pair_id}` : ""}${r.waiting_reason ? `  ${r.waiting_reason}` : ""}${r.approval ? "" : ` (no approval from ${who} on the thread)`}${r.note ? `  ${r.note}` : ""}`;
-  const moving = rows.filter((r) => ["testing", "building", "merging", "merged", "migrated"].includes(r.state));
-  const waiting = rows.filter((r) => ["approved", "held", "failed"].includes(r.state));
-  const done = rows.filter((r) => r.state === "deployed");
+  const live = rows.filter((r) => !r.hold);
+  const moving = live.filter((r) => ["testing", "building", "merging", "merged", "migrated"].includes(r.state));
+  const waiting = live.filter((r) => ["approved", "held", "failed"].includes(r.state));
+  const done = live.filter((r) => r.state === "deployed");
+  const heldRows = rows.filter((r) => r.hold);
+  const open = reviews.filter((r) => !r.hold), heldReviews = reviews.filter((r) => r.hold);
+  const holdLine = (h: NonNullable<QueueRow["hold"]>) => `${h.kind === "rework" ? "being reworked" : "parked"}${h.note ? `: ${h.note}` : ""}`;
   return [
-    `Waiting on ${who} (${reviews.length})`, ...reviews.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}  {${r.type}}${r.tier !== "normal" ? `  ${r.tier.toUpperCase()}` : ""}${r.why ? ` (${r.why})` : ""}${r.blocks ? `  blocks: ${r.blocks}` : ""}  [from ${r.from}, ${r.reviewing_since ? `reviewing for ${ago(r.reviewing_since)}` : `waiting ${ago(r.waiting_since)}`}]`),
+    `Waiting on ${who} (${open.length})`, ...open.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}  {${r.type}}${r.tier !== "normal" ? `  ${r.tier.toUpperCase()}` : ""}${r.why ? ` (${r.why})` : ""}${r.blocks ? `  blocks: ${r.blocks}` : ""}  [from ${r.from}, ${r.reviewing_since ? `reviewing for ${ago(r.reviewing_since)}` : `waiting ${ago(r.waiting_since)}`}]`),
+    ...(heldReviews.length ? ["", `Not to review now (${heldReviews.length})`, ...heldReviews.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}  [${holdLine(r.hold!)}]`)] : []),
     "", `In progress (${moving.length})`, ...moving.map(line),
     "", `Approved, waiting (${waiting.length})`, ...waiting.map(line),
+    ...(heldRows.length ? ["", `Parked or being reworked (${heldRows.length})`, ...heldRows.map((r) => `${line(r)}  [${holdLine(r.hold!)}]`)] : []),
     ...(done.length ? ["", `Deployed today (${done.length})`, ...done.map(line)] : []),
   ].join("\n");
+}
+
+// SQLite refusing a write: the store is read-only to this run (Codex's read-only sandbox).
+const readOnly = (e: any) => /readonly|read-only|SQLITE_CANTOPEN|unable to open|EPERM|operation not permitted/i.test(String(e?.code ?? "") + " " + String(e?.message ?? e));
+
+function inboxCmd(values: any, json: boolean) {
+  const reader = String(values.for ?? person(loadConfig())).toLowerCase();
+  touch(reader, { tool: detectTool(), where: process.cwd() });
+  if (values.unread) {
+    const msgs = takeUnread(reader, { peek: values.peek });
+    out(json, msgs, () => msgs.length ? msgs.map(describe).join("\n\n") : "Nothing new.");
+  } else {
+    const list = listThreads(reader);
+    out(json, list, () => list.length ? list.map((t) =>
+      `${t.unread ? "●" : " "} ${t.id}  ${t.from} → ${t.to}  [${t.kind}, ${t.status}]  ${t.subject}`).join("\n") : "No threads yet.");
+  }
+}
+
+// --confirmed-by <thread>: act as the person, because they asked for it there. The output quotes
+// what they said, so anyone reading the agent's log sees what the order rests on.
+function asPerson(values: any, by: string): { as: string; said: string | null } {
+  if (!values["confirmed-by"]) return { as: by, said: null };
+  const c = confirmedBy(values["confirmed-by"], by);
+  const p = person(loadConfig());
+  return { as: p, said: c.quoted ? `Applied as ${p}'s, who wrote on ${values["confirmed-by"]}: "${c.choice}"` : `Applied as ${p}'s, who picked "${c.choice}" on ${values["confirmed-by"]}.` };
 }
 
 function readBody(positionals: string[], values: any): string {
@@ -220,7 +263,7 @@ const OPTIONS = {
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
   eta: { type: "string" }, after: { type: "string" }, tier: { type: "string" }, why: { type: "string" }, waiting: { type: "string" },
   review: { type: "boolean" }, hotfix: { type: "boolean" }, "confirmed-by": { type: "string" }, type: { type: "string" }, blocks: { type: "string" },
-  state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
+  rework: { type: "string" }, "from-group": { type: "string" }, via: { type: "string" }, range: { type: "string" }, ticket: { type: "string" }, state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
 } as const;
 
 export async function main(argv: string[]): Promise<number> {
@@ -282,25 +325,29 @@ export async function main(argv: string[]): Promise<number> {
         const heading = doc ? readFileSync(doc, "utf8").match(/^#\s+(.+)$/m)?.[1] : undefined;
         subject = heading ?? (values.file ?? [])[0] ?? readBody(positionals, values).split("\n")[0].slice(0, 80);
       }
-      const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
-      const { thread, message } = createThread({ to: values.to, from: values.from, subject: subject ?? "", kind, body: readBody(positionals, values), attachments: atts, options: values.option,
+      const extra: any = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
+      // A "try it": the person tries the live feature and answers with one tap. The first button
+      // means it works; on that, the agent posts its proof on the ticket and moves it to Done.
+      if (values.type === "tryit") {
+        extra.tryit = values.ticket ? { ticket: values.ticket } : {};
+        values.option ??= [values.ticket ? `Works: move ${values.ticket} to Done` : "Works", "Something's wrong"];
+      }
+      const { thread, message, routed } = createThread({ to: values.to, from: values.from, subject: subject ?? "", kind, body: readBody(positionals, values), attachments: atts, options: values.option,
         participants: (values.cc ?? []).map(parseParticipant), extra, ...(values.fyi ? { needs_reply: false } : {}) });
+      if (values.range) setRange(thread.id, values.range);
       // A hotfix goes to the top of the reader's review list.
       if (values.hotfix) prioritizeReview(thread.id, values.from, { tier: "urgent", why: values.why ?? "Hotfix" });
       describeReview(thread.id, { type: values.type, blocks: values.blocks });
-      out(json, { thread, message }, () => `Sent ${thread.id} to ${thread.to}: ${thread.subject}\nWait for the reply with: dak wait ${thread.id} --for ${thread.from}`);
+      out(json, { thread_id: thread.id, thread, message, ...(routed ? { routed } : {}) }, () => `${routed ? `Routed: ${routed.to} has ${routed.from_group}'s PRs and briefs go to ${routed.via} first.\n` : ""}Sent ${thread.id} to ${thread.to}: ${thread.subject}\nWait for the reply with: dak wait ${thread.id} --for ${thread.from}`);
       return 0;
     }
     case "inbox": {
-      const reader = String(values.for ?? person(loadConfig())).toLowerCase();
-      touch(reader, { tool: detectTool(), where: process.cwd() });
-      if (values.unread) {
-        const msgs = takeUnread(reader, { peek: values.peek });
-        out(json, msgs, () => msgs.length ? msgs.map(describe).join("\n\n") : "Nothing new.");
-      } else {
-        const list = listThreads(reader);
-        out(json, list, () => list.length ? list.map((t) =>
-          `${t.unread ? "●" : " "} ${t.id}  ${t.from} → ${t.to}  [${t.kind}, ${t.status}]  ${t.subject}`).join("\n") : "No threads yet.");
+      // A reviewer run inside a read-only sandbox (codex exec) cannot write the store, and has no
+      // mailbox anyway: skip the check quietly instead of logging SQLITE_READONLY on every run.
+      if (process.env.DAK_HELPER) { out(json, [], () => "Nothing new."); return 0; }
+      try { inboxCmd(values, json); } catch (e) {
+        if (!readOnly(e)) throw e;
+        out(json, [], () => "Nothing new here: this run cannot write Dak's store (a read-only sandbox), so the inbox is not checked.");
       }
       return 0;
     }
@@ -353,6 +400,7 @@ export async function main(argv: string[]): Promise<number> {
       if (values.ready && !prMeta) prMeta = messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop()?.meta ?? null;
       const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
       for (const c of values.cc ?? []) addParticipant(id, parseParticipant(c));
+      if (values.range) setRange(id, ["none", ""].includes(values.range) ? null : values.range);
       describeReview(id, { type: values.type, blocks: values.blocks });
       const body = readBody(positionals, values);
       if (values["head-only"] && !body.trim() && !values.ready) { out(json, { thread: id, head_sha: prMeta.head_sha }, () => `Moved ${id} to ${prMeta.head_sha?.slice(0, 7)}.`); return 0; }
@@ -367,9 +415,9 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "agents": {
-      const list = agents({ scan: true });
+      const list = agents({ scan: true, all: values.all });
       out(json, list, () => list.map((a) => `${a.listening ? "●" : a.running ? "○" : " "} ${a.name.padEnd(42)} ${(a.reader ? (a.kind === "person" ? "person" : "reader") : a.tool ?? "").padEnd(12)} ${a.title ? `"${a.title}"  ` : ""}${a.where ?? ""}`).join("\n")
-        + "\n\n● listening (used Dak in the last 10 minutes)   ○ running, not listening yet");
+        + "\n\n● listening (used Dak in the last 10 minutes)   ○ running, not listening yet" + (values.all ? "" : "\nReviewer workspaces in temporary folders are hidden; --all shows them."));
       return 0;
     }
     case "watch": {
@@ -388,6 +436,16 @@ export async function main(argv: string[]): Promise<number> {
         return 0;
       }
       throw new DakError("usage", "dak hook claude-code | dak hook print");
+    }
+    case "thread": {
+      // dak thread --pr 2426: the Dak thread carrying that PR (the newest, if it was sent twice).
+      const n = Number(String(values.pr ?? positionals[0] ?? "").replace(/^#/, ""));
+      if (!Number.isInteger(n) || n <= 0) throw new DakError("usage", "dak thread --pr <number>");
+      const id = threadForPr(n);
+      if (!id) throw new DakError("no_thread", `No Dak thread carries PR #${n}.`, 404);
+      const t = getThread(id).thread;
+      out(json, { thread_id: id, subject: t.subject, from: t.from, to: t.to, status: t.status }, () => id);
+      return 0;
     }
     case "show": {
       const t = getThread(positionals[0] ?? "");
@@ -418,6 +476,7 @@ export async function main(argv: string[]): Promise<number> {
       if (!positionals.length) throw new DakError("usage", "dak add <thread> <name:role>... (roles: author, reviewer, approver, watcher)");
       let list = getThread(id).participants;
       for (const p of positionals) list = addParticipant(id, parseParticipant(p));
+      if (values.range) setRange(id, ["none", ""].includes(values.range) ? null : values.range);
       out(json, list, () => list.map((p) => `${p.name} (${p.role})`).join(", "));
       return 0;
     }
@@ -430,6 +489,18 @@ export async function main(argv: string[]): Promise<number> {
       }
       const all = groups();
       out(json, all, () => Object.entries(all).map(([g, m]) => `group:${g}  ${m.join(", ")}`).join("\n") || "No groups. Make one with: dak group set <name> <member>...");
+      return 0;
+    }
+    case "route": {
+      // dak route set pratik --from-group engineers --via atlas | dak route remove pratik --from-group engineers | dak route
+      const [sub, to] = positionals;
+      if ((sub === "set" || sub === "remove") && to) {
+        if (!values["from-group"]) throw new DakError("usage", "dak route set <reader> --from-group <group> --via <reader>");
+        if (sub === "set" && !values.via) throw new DakError("usage", "Say who it goes to instead with --via <reader>.");
+        setRoute(to, values["from-group"], sub === "set" ? values.via : null);
+      }
+      const list = routes();
+      out(json, list, () => list.map((r) => `${r.to_reader}: PRs and briefs from group:${r.from_group} go to ${r.via} first`).join("\n") || "No routes. Add one with: dak route set <reader> --from-group <group> --via <reader>");
       return 0;
     }
     case "ack": {
@@ -447,27 +518,58 @@ export async function main(argv: string[]): Promise<number> {
       // Who is ordering: an agent's order never moves rows the person placed by hand.
       const by = String(values.from ?? (inAgent() ? whoami() : person(loadConfig()))).toLowerCase();
       if (sub === "set" && n) {
+        // --rework and a review-only park put a hold on the PR's thread and leave the merge queue
+        // alone: a PR still waiting for review must not appear there as approved.
+        const row0 = /^t_/.test(n) ? null : inQueue(num(n));
+        const notes: string[] = [];
+        if (values.rework !== undefined) {
+          const off = ["", "none", "done"].includes(String(values.rework).trim());
+          const id = setHold(row0?.thread_id ?? n, off ? null : "rework", off ? null : String(values.rework).trim(), by);
+          notes.push(off ? `${id}: no longer being reworked.` : `${id}: being reworked, skip it. It comes back with its next version (dak reply --pr).`);
+        }
+        const parkNote = values.waiting ?? values.why ?? values.note ?? null;
+        if (values.state === "parked") {
+          const id = row0?.thread_id ?? (row0 ? null : setHold(n, "parked", parkNote, by));
+          if (row0?.thread_id) setHold(row0.thread_id, "parked", parkNote, by);
+          if (!row0) { out(json, { parked: id, note: parkNote }, () => [...notes, `${id}: parked${parkNote ? ` (${parkNote})` : ""}. It stays out of the review count until dak queue unpark ${n}.`].join("\n")); return 0; }
+        } else if (values.state && row0?.state === "parked" && row0.thread_id) setHold(row0.thread_id, null, null, by);
+        const queueFields = ["state", "title", "subject", "head", "migration", "note", "thread", "eta", "after", "tier", "why", "waiting"].some((k) => values[k] !== undefined);
+        if (!queueFields || /^t_/.test(n)) { out(json, { holds: notes }, () => notes.join("\n") || "Nothing to change."); return 0; }
         const row = setQueue(num(n), { state: values.state, title: values.title ?? values.subject, head: values.head, migration: values.migration, note: values.note,
           thread: values.thread, eta: values.eta, after: values.after, tier: values.tier, why: values.why, waiting: values.waiting, by });
-        out(json, row, () => `#${row.pr} ${row.state}${row.note ? ` (${row.note})` : ""}`);
+        if (values.head) { checkHead(num(n), values.head, (cmd, cwd) => { const p = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" }); return p.exitCode === 0 ? p.stdout.toString() : null; }); }
+        const fresh = values.head ? queue({ all: true }).find((r) => r.pr === row.pr) ?? row : row;
+        const moved = fresh.head_moved ? `\nHead moved since ${person(loadConfig())}'s approval (${fresh.head_moved.from.slice(0, 7)} → ${fresh.head_moved.to.slice(0, 7)}): ${fresh.head_moved.change ?? "git could not tell whether the changes differ"}.` : "";
+        out(json, fresh, () => `#${row.pr} ${row.state}${row.note ? ` (${row.note})` : ""}${moved}`);
+        return 0;
+      }
+      if (sub === "unpark" && n) {
+        const row0 = /^t_/.test(n) ? null : inQueue(num(n));
+        const id = row0?.thread_id ?? (row0 ? null : setHold(n, null, null, by));
+        if (row0?.thread_id) setHold(row0.thread_id, null, null, by);
+        if (row0?.state === "parked") setQueue(num(n), { state: "approved", by });
+        out(json, { unparked: n }, () => `${id ?? `#${n}`} is back${row0?.state === "parked" ? " in the queue, approved" : " in the review list"}.`);
         return 0;
       }
       if (sub === "remove" && n) { removeQueue(num(n)); out(json, { removed: n }, () => `Removed #${n}.`); return 0; }
       if (sub === "order" || sub === "review-order") {
         const refs = positionals.slice(1);
         if (!refs.length) throw new DakError("usage", `dak queue ${sub} <pr> <pr>... [--tier urgent|normal|later] [--confirmed-by <thread>]`);
-        // --confirmed-by: the person picked a button approving this order on that thread; it is applied as theirs.
-        const as = values["confirmed-by"] ? (confirmedBy(values["confirmed-by"], by), person(loadConfig())) : by;
+        // --confirmed-by: the person asked for this order on that thread (a button, or in words); it is applied as theirs.
+        const { as, said } = asPerson(values, by);
         const r = sub === "order" ? orderQueue(refs.map(num), as, { tier: tierOf(values.tier) }) : orderReviews(refs, as, { tier: tierOf(values.tier) });
-        out(json, r, () => `Ordered ${r.ordered.length}.${r.kept.length ? ` Kept ${person(loadConfig())}'s order for ${r.kept.join(", ")}.` : ""}`);
+        out(json, { ...r, ...(said ? { confirmed_by: said } : {}) }, () => `Ordered ${r.ordered.length}.${r.kept.length ? ` Kept ${person(loadConfig())}'s order for ${r.kept.join(", ")}.` : ""}${said ? `\n${said}` : ""}`);
         return 0;
       }
       if (sub === "priority" && n) {
         // One row's tier and reason: --review for the review list, else the merge queue.
         const v = { tier: tierOf(values.tier), why: values.why };
-        if (values.review) { if (v.tier || v.why) prioritizeReview(n, by, v); describeReview(n, { type: values.type, blocks: values.blocks }); }
-        else prioritizeQueue(num(n), by, v);
-        out(json, { [values.review ? "review" : "pr"]: n, ...v }, () => `${n}: ${v.tier ?? "tier unchanged"}${v.why ? `, ${v.why}` : ""}.`);
+        const { as, said } = asPerson(values, by);
+        // Without --review, a PR not in the merge queue yet is a review: set its priority there.
+        const review = values.review || /^t_/.test(n) || !inQueue(num(n));
+        if (review) { if (v.tier || v.why) prioritizeReview(n, as, v); describeReview(n, { type: values.type, blocks: values.blocks }); }
+        else prioritizeQueue(num(n), as, v);
+        out(json, { [review ? "review" : "pr"]: n, ...v, ...(said ? { confirmed_by: said } : {}) }, () => `${n}: ${v.tier ?? "tier unchanged"}${v.why ? `, ${v.why}` : ""}${review && !values.review ? " (in the review list)" : ""}.${said ? `\n${said}` : ""}`);
         return 0;
       }
       if (sub === "pair" && n && positionals[2]) { pairQueue(num(n), num(positionals[2])); out(json, { paired: [num(n), num(positionals[2])] }, () => `Paired #${n} and #${positionals[2]}.`); return 0; }
@@ -552,6 +654,9 @@ if (import.meta.main) {
       else console.error(`dak: ${e.message}`);
       process.exit(1);
     }
+    // The inbox check in a read-only sandbox can fail before the command runs (naming the session
+    // reads the store too): say so quietly and exit 0, so a reviewer run logs nothing alarming.
+    if (process.argv[2] === "inbox" && readOnly(e)) { console.log(process.argv.includes("--json") ? "[]" : "Nothing new here: this run cannot write Dak's store (a read-only sandbox)."); process.exit(0); }
     if (e?.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" || e?.code === "ERR_PARSE_ARGS_INVALID_OPTION_VALUE") {
       console.error(`dak: ${e.message}. Run dak help.`);
       process.exit(1);

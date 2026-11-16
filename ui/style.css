@@ -916,3 +916,14 @@ html { touch-action: manipulation; }
 .pf-toggle svg { width: 14px; height: 14px; }
 .psheet .fhead .viewed-box { display: none; }
 .psheet .fhead { position: static; }
+
+/* Rows someone said not to act on now (being reworked, parked): kept in sight, greyed, apart. */
+.qgroup.held .qrow { opacity: .62; }
+.qgroup.held .qrow:hover { opacity: 1; }
+.qhold { margin-top: 4px; font-size: 12px; color: var(--text2); }
+.qhold b { font-weight: 600; color: var(--text); }
+/* The head moved after the person approved: what the merge script will stop on. */
+.qmoved { margin-top: 4px; font-size: 12px; color: var(--text2); }
+.qmoved b { font-weight: 600; color: var(--text); }
+.qmoved.bad b, .qmoved.bad { color: var(--danger-text); }
+.rtype.t-tryit { color: var(--accent-text); border-color: var(--accent-tint2); }

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+From a day of Atlas coordinating ten engineers:
+- `dak route set <person> --from-group <group> --via <agent>`: a group's PRs and briefs to the person go to the agent first, with a note. Replies, notes and questions are not routed.
+- `dak queue set <pr|thread> --rework "why"`: greyed out below the rest, skipped by `queue next`, back by itself with the next version.
+- A `parked` state: open but parked by the person's choice, out of the review count until `dak queue unpark`.
+- `--confirmed-by` on `dak queue priority` too, and it accepts what the person wrote ("can you move them lower?"), quoting it in the output.
+- `dak thread --pr <n>`; `dak send --json` returns `thread_id`.
+- The queue says when a PR's head moved after the approval, and whether it is a rebase only or the changes differ.
+- `--range base..head` on send, add and reply: a reviewer runner reviews only a stacked PR's own commits.
+- A read-only sandbox's inbox check exits quietly instead of failing on SQLITE_READONLY.
+- Reviewer workspaces (temp folders, `wt-NNNN`) are hidden from `dak agents`; `--all` shows them.
+- `--type tryit --ticket REVA-123`: Works / Something's wrong; Works comes back with the ticket to close.
+
 ## 0.3.10
 - Phone: an open file now replaces the page instead of floating over it, so nothing on it is a fixed layer. iPhone still sent a tap on the floating sheet's X to Mark reviewed on some files. Closing puts the page back where it was.
 

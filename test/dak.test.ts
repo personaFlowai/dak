@@ -936,3 +936,123 @@ describe("diff parser", () => {
     expect(files[0].hunks[0].lines).toEqual([" keep", "-gone", "+came"]);
   });
 });
+
+describe("coordination: holds, routes, confirmations, moved heads, try-it", () => {
+  const post = (id: string, body: object) => http(`/v1/threads/${id}/messages`, { method: "POST", body: JSON.stringify(body) });
+  beforeAll(() => {
+    writeFileSync(join(repo, "h1.diff"), "diff --git a/h.ts b/h.ts\n--- a/h.ts\n+++ b/h.ts\n@@ -1 +1 @@\n-one\n+uno\n");
+    // The same change after a rebase: the hunk moved and its context changed, the lines did not.
+    writeFileSync(join(repo, "h2.diff"), "diff --git a/h.ts b/h.ts\nindex 1111111..2222222 100644\n--- a/h.ts\n+++ b/h.ts\n@@ -7,2 +7,2 @@\n context moved\n-one\n+uno\n");
+    writeFileSync(join(repo, "h3.diff"), "diff --git a/h.ts b/h.ts\n--- a/h.ts\n+++ b/h.ts\n@@ -1 +1 @@\n-one\n+eins\n");
+  });
+
+  test("send --json gives thread_id; thread --pr names a missing PR plainly", () => {
+    const r = dak("send", "--to", "sam", "--from", "atlas", "--subject", "Ids", "hello", "--json").json();
+    expect(r.thread_id).toBe(r.thread.id);
+    expect(dak("thread", "--pr", "999999", "--json").json().error.code).toBe("no_thread");
+  });
+
+  test("--rework greys a review out below the rest until its next version; parked stays out of the count until unparked", async () => {
+    const a = dak("send", "--to", "sam", "--from", "atlas", "--diff", "h1.diff", "--subject", "About to change", "--json").json().thread_id;
+    const b = dak("send", "--to", "sam", "--from", "atlas", "--diff", "h1.diff", "--subject", "Still fine", "--json").json().thread_id;
+    expect(dak("queue", "set", a, "--rework", "prefix being added", "--from", "atlas").code).toBe(0);
+    let list = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    const ia = list.findIndex((r) => r.thread_id === a), ib = list.findIndex((r) => r.thread_id === b);
+    expect(list[ia].hold).toMatchObject({ kind: "rework", note: "prefix being added", by: "atlas" });
+    expect(ia).toBeGreaterThan(ib);
+    expect(dak("queue").out).toContain("Not to review now (");
+    expect(dak("queue", "--json").json().some((r: any) => r.thread_id === a)).toBe(false); // a review hold adds no queue row
+    dak("reply", a, "--from", "atlas", "--diff", "h3.diff", "New version.");
+    list = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    expect(list.find((r) => r.thread_id === a).hold).toBeNull(); // back by itself
+    dak("queue", "set", b, "--state", "parked", "--waiting", "department settings", "--from", "atlas");
+    list = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    expect(list.find((r) => r.thread_id === b).hold).toMatchObject({ kind: "parked", note: "department settings" });
+    dak("reply", b, "--from", "atlas", "--diff", "h3.diff", "Another version."); // parked is the person's call: a version does not lift it
+    expect(((await (await http("/v1/reviews?for=sam")).json()) as any[]).find((r) => r.thread_id === b).hold?.kind).toBe("parked");
+    dak("queue", "unpark", b, "--from", "atlas");
+    expect(((await (await http("/v1/reviews?for=sam")).json()) as any[]).find((r) => r.thread_id === b).hold).toBeNull();
+  });
+
+  test("a queue row being reworked is skipped by next; a parked row is its own state", () => {
+    const t = dak("send", "--to", "sam", "--from", "atlas", "--diff", "h1.diff", "--subject", "Queued then reworked", "--json").json().thread_id;
+    dak("queue", "set", "6001", "--state", "approved", "--thread", t, "--tier", "urgent", "--title", "R6001");
+    expect(dak("queue", "next", "--json").json().next?.map((r: any) => r.pr)).toContain(6001);
+    dak("queue", "set", "6001", "--rework", "department step removed");
+    expect(dak("queue", "next", "--json").json().next?.map((r: any) => r.pr) ?? []).not.toContain(6001);
+    expect(dak("queue", "--json").json().find((r: any) => r.pr === 6001).hold.kind).toBe("rework");
+    dak("queue", "set", "6001", "--rework", "none");
+    dak("queue", "set", "6001", "--state", "parked", "--waiting", "his call");
+    expect(dak("queue", "--json").json().find((r: any) => r.pr === 6001)).toMatchObject({ state: "parked", hold: { kind: "parked", note: "his call" } });
+    dak("queue", "unpark", "6001");
+    expect(dak("queue", "--json").json().find((r: any) => r.pr === 6001)).toMatchObject({ state: "approved", hold: null });
+  });
+
+  test("--confirmed-by works on priority, and accepts what the person wrote, quoting it", async () => {
+    const pr = dak("send", "--to", "sam", "--from", "atlas", "--diff", "h1.diff", "--subject", "Low one", "--json").json().thread_id;
+    await http("/v1/reviews/order", { method: "PUT", body: JSON.stringify({ threads: [pr], by: "sam" }) });
+    dak("queue", "priority", pr, "--review", "--tier", "urgent", "--from", "sam");
+    expect(dak("queue", "priority", pr, "--review", "--tier", "later", "--from", "atlas", "--json").json().error.code).toBe("person_ordered");
+    const ask = dak("send", "--to", "sam", "--from", "atlas", "--subject", "Lower?", "Should I move it lower?", "--json").json().thread_id;
+    expect(dak("queue", "priority", pr, "--review", "--tier", "later", "--from", "atlas", "--confirmed-by", ask, "--json").json().error.code).toBe("not_confirmed");
+    await post(ask, { author: "sam", body: "can you move them lower?" });
+    const r = dak("queue", "priority", pr, "--review", "--tier", "later", "--from", "atlas", "--confirmed-by", ask, "--json").json();
+    expect(r.confirmed_by).toContain('"can you move them lower?"');
+    const row = ((await (await http("/v1/reviews?for=sam")).json()) as any[]).find((x) => x.thread_id === pr);
+    expect(row).toMatchObject({ tier: "later", rank_by: "sam" });
+  });
+
+  test("a route sends a group's PRs and briefs to someone else first; notes still reach the person", () => {
+    dak("group", "set", "engineers", "mitra", "zari");
+    expect(dak("route", "set", "sam", "--from-group", "nobody", "--via", "atlas", "--json").json().error.code).toBe("unknown_group");
+    expect(dak("route", "set", "sam", "--from-group", "engineers", "--via", "atlas").code).toBe(0);
+    const r = dak("send", "--to", "sam", "--from", "mitra", "--diff", "h1.diff", "--subject", "Routed PR", "--json").json();
+    expect(r.thread.to).toBe("atlas");
+    expect(r.routed).toEqual({ to: "sam", via: "atlas", from_group: "engineers" });
+    expect(r.message.body).toContain("sam's rule sends engineers's PRs and briefs to atlas first");
+    expect(dak("send", "--to", "sam", "--from", "mitra", "--subject", "A note", "fyi", "--json").json().thread.to).toBe("sam");
+    expect(dak("send", "--to", "sam", "--from", "atlas", "--diff", "h1.diff", "--subject", "From atlas", "--json").json().thread.to).toBe("sam");
+    dak("route", "remove", "sam", "--from-group", "engineers");
+    expect(dak("send", "--to", "sam", "--from", "mitra", "--diff", "h1.diff", "--subject", "Direct", "--json").json().thread.to).toBe("sam");
+  });
+
+  test("the queue says when a head moved after the approval, and whether the change is the same", async () => {
+    const t = dak("send", "--to", "sam", "--from", "atlas", "--diff", "h1.diff", "--subject", "Moving head", "--json").json().thread_id;
+    dak("queue", "set", "6101", "--state", "approved", "--thread", t, "--title", "M6101");
+    await post(t, { author: "sam", body: "", verdict: "approve" });
+    expect(dak("queue", "--json").json().find((r: any) => r.pr === 6101).head_moved).toBeNull();
+    git("commit", "-q", "--allow-empty", "-m", "rebase stand-in");
+    dak("refresh", t, "--diff", "h2.diff");
+    let row = dak("queue", "--json").json().find((r: any) => r.pr === 6101);
+    expect(row.head_moved.change).toBe("rebase only");
+    git("commit", "-q", "--allow-empty", "-m", "another");
+    dak("refresh", t, "--diff", "h3.diff");
+    row = dak("queue", "--json").json().find((r: any) => r.pr === 6101);
+    expect(row.head_moved.change).toBe("content changed");
+    // A head the script reports that git cannot compare here: moved, change unknown.
+    row = dak("queue", "set", "6101", "--head", "deadbeefcafe", "--json").json();
+    expect(row.head_moved).toMatchObject({ to: "deadbeefcafe", change: null });
+  });
+
+  test("a try-it note: Works carries the ticket back, so the agent posts its proof and moves it to Done", async () => {
+    const t = dak("send", "--to", "sam", "--from", "atlas", "--type", "tryit", "--ticket", "REVA-1", "--subject", "Try it: retention", "Open Settings, then Messages.", "--json").json();
+    expect(t.message.options).toEqual(["Works: move REVA-1 to Done", "Something's wrong"]);
+    expect(((await (await http("/v1/reviews?for=sam")).json()) as any[]).find((r) => r.thread_id === t.thread_id).type).toBe("tryit");
+    await post(t.thread_id, { author: "sam", body: "", choice: "Works: move REVA-1 to Done" });
+    const got = dak("wait", t.thread_id, "--for", "atlas", "--timeout", "2s", "--json").json();
+    expect(got.messages[0].tryit_result).toEqual({ result: "works", ticket: "REVA-1" });
+  });
+
+  test("--range must be a range; a read-only store makes the inbox check say so quietly", () => {
+    const t = dak("send", "--to", "sam", "--from", "atlas", "--diff", "h1.diff", "--subject", "Stacked", "--json").json().thread_id;
+    expect(dak("add", t, "mitra:reviewer", "--range", "not a range", "--json").json().error.code).toBe("bad_range");
+    expect(dak("add", t, "mitra:reviewer", "--range", "origin/base..HEAD").code).toBe(0);
+    const ro = mkdtempSync(join(tmpdir(), "dak-ro-"));
+    Bun.spawnSync(["bun", CLI, "init", "--readers", "me:person,atlas"], { env: { ...process.env, DAK_HOME: ro } });
+    Bun.spawnSync(["chmod", "-R", "a-w", ro]);
+    const p = Bun.spawnSync(["bun", CLI, "inbox", "--for", "atlas", "--unread", "--json"], { env: { ...process.env, DAK_HOME: ro }, stdout: "pipe", stderr: "pipe" });
+    Bun.spawnSync(["chmod", "-R", "u+w", ro]);
+    rmSync(ro, { recursive: true, force: true });
+    expect([p.exitCode, p.stdout.toString().trim(), p.stderr.toString()]).toEqual([0, "[]", ""]);
+  });
+});

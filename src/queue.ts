@@ -5,11 +5,11 @@
    Who approved a PR is never typed in: it is read from the PR's Dak thread, so the page can
    only say "Approved by you" when you did. */
 import { loadConfig, person } from "./config";
-import { latestPr, store, threadForPr, type PrSize } from "./store";
+import { latestPr, readBlobText, store, threadForPr, type PrSize } from "./store";
 import { DakError } from "./types";
-import { byPriority, ensurePriority, nextInQueue, prioritizeQueue, tierOf, touchStamp, waitingReason, type Tier } from "./priority";
+import { byPriority, ensurePriority, holdOf, nextInQueue, type Hold, prioritizeQueue, tierOf, touchStamp, waitingReason, type Tier } from "./priority";
 
-export const STATES = ["approved", "testing", "building", "merging", "merged", "migrated", "deployed", "failed", "held"] as const;
+export const STATES = ["approved", "testing", "building", "merging", "merged", "migrated", "deployed", "failed", "held", "parked"] as const;
 export type QueueState = (typeof STATES)[number];
 export interface QueueRow {
   pr: number; title: string; head: string | null; migration: string | null; state: QueueState;
@@ -17,13 +17,16 @@ export interface QueueRow {
   state_since: string; // when it reached this step
   eta_at: string | null; // when the script expects this step to finish
   after_pr: number | null; // waits for this PR first (a stack, a rebase)
-  approval: { by: string; at: string } | null; // the person's own approval on the thread, if there is one
+  approval: { by: string; at: string; head_sha?: string; diff_blob?: string } | null; // the person's own approval on the thread, if there is one
   size: PrSize | null; // files and lines changed, from the PR on its thread
   tier: Tier; rank: number | null; why: string | null; rank_by: string | null; // priority: see priority.ts
   waiting: string | null; // what the agent says it is waiting on: "a migration renumber"
   pair_id: string | null; // two PRs tested and merged together: "2420+2433"
   waiting_reason: string | null; // the plain-words reason it is not moving, derived or said
+  hold: Hold | null; // being reworked (skip it) or parked, from its thread
+  head_moved: { from: string; to: string; change: HeadChange | null } | null; // pushed after the approval
 }
+export type HeadChange = "rebase only" | "content changed";
 
 function ensure() {
   const s = store();
@@ -34,6 +37,8 @@ function ensure() {
   if (!cols.has("state_since")) { s.exec("ALTER TABLE queue ADD COLUMN state_since TEXT"); s.exec("UPDATE queue SET state_since = updated_at"); }
   if (!cols.has("eta_at")) s.exec("ALTER TABLE queue ADD COLUMN eta_at TEXT");
   if (!cols.has("after_pr")) s.exec("ALTER TABLE queue ADD COLUMN after_pr INTEGER");
+  // What git said about a moved head, worked out when the merge script reported it: {head, change}.
+  if (!cols.has("head_check")) s.exec("ALTER TABLE queue ADD COLUMN head_check TEXT");
   ensurePriority();
 }
 
@@ -41,18 +46,73 @@ function ensure() {
 function approvalOn(thread: string | null): QueueRow["approval"] {
   if (!thread) return null;
   const me = person(loadConfig());
-  const rows = store().query(`SELECT m.author, m.verdict, m.created_at, (SELECT count(*) FROM attachments a WHERE a.message_id = m.id AND a.type = 'pr') AS prs
-    FROM messages m WHERE m.thread_id = ? ORDER BY m.id`).all(thread) as { author: string; verdict: string | null; created_at: string; prs: number }[];
+  const rows = store().query(`SELECT m.author, m.verdict, m.created_at, m.extra, (SELECT count(*) FROM attachments a WHERE a.message_id = m.id AND a.type = 'pr') AS prs
+    FROM messages m WHERE m.thread_id = ? ORDER BY m.id`).all(thread) as { author: string; verdict: string | null; created_at: string; extra: string | null; prs: number }[];
   let ok: QueueRow["approval"] = null;
   for (const r of rows) {
-    if (r.author === me && r.verdict) ok = r.verdict === "approve" ? { by: me, at: r.created_at } : null;
+    const approved = r.extra ? JSON.parse(r.extra).approved : undefined;
+    if (r.author === me && r.verdict) ok = r.verdict === "approve" ? { by: me, at: r.created_at, ...(approved ?? {}) } : null;
     else if (r.author !== me && r.prs) ok = null; // a new version needs a new approval
   }
   return ok;
 }
 
-const hydrate = (r: any): QueueRow => ({ ...r, state_since: r.state_since ?? r.updated_at, approval: approvalOn(r.thread_id),
-  size: r.thread_id ? latestPr(r.thread_id)?.size ?? null : null });
+const hydrate = (r: any): QueueRow => { const approval = approvalOn(r.thread_id); return { ...r, state_since: r.state_since ?? r.updated_at, approval,
+  size: r.thread_id ? latestPr(r.thread_id)?.size ?? null : null, head_moved: headMoved(r, approval), head_check: undefined,
+  hold: r.state === "parked" ? { kind: "parked", note: r.waiting ?? r.note ?? null, at: r.state_since ?? r.updated_at, by: null } : holdOf(r.thread_id) }; };
+
+// The change itself, as git's patch-id sees it: which files, and the lines added and removed.
+// Blob ids, hunk positions and context lines move on a rebase without the change changing.
+const comparable = (diff: string) => diff.split("\n").filter((l) => l.startsWith("diff --git") || ((l[0] === "+" || l[0] === "-") && !/^(\+\+\+|---) /.test(l))).join("\n");
+
+// Has the PR moved since the person approved it, and is it the same change? The current head is
+// the merge script's (--head), else the thread's newest snapshot. Same diff after a rebase: same change.
+function headMoved(r: any, approval: QueueRow["approval"]): QueueRow["head_moved"] {
+  if (!approval?.head_sha || !r.thread_id) return null;
+  const snap = store().query(`SELECT a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
+    WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1`).get(r.thread_id) as { meta: string } | null;
+  const meta = snap ? JSON.parse(snap.meta) : null;
+  const current: string | null = r.head ?? meta?.head_sha ?? null;
+  if (!current || current.startsWith(approval.head_sha) || approval.head_sha.startsWith(current)) return null;
+  let change: HeadChange | null = null;
+  const check = r.head_check ? JSON.parse(r.head_check) : null;
+  if (check?.head === current) change = check.change ?? null;
+  else if (meta?.head_sha === current && approval.diff_blob && meta.diff_blob) {
+    try { change = comparable(readBlobText(approval.diff_blob)) === comparable(readBlobText(meta.diff_blob)) ? "rebase only" : "content changed"; } catch { /* a blob gone: unknown */ }
+  }
+  return { from: approval.head_sha, to: current, change };
+}
+
+/* For the merge script's --head (CLI only: it runs gh or git). Same change = the same diff as the
+   one approved, ignoring blob ids and line positions, which a rebase moves. Null when it cannot
+   tell here (no repo, GitHub on another head). Stored, so the page never runs a command. */
+export function checkHead(pr: number, head: string, run: (cmd: string[], cwd: string) => string | null) {
+  ensure();
+  const r = store().query("SELECT * FROM queue WHERE pr = ?").get(pr) as any;
+  const approval = r ? approvalOn(r.thread_id) : null;
+  if (!r || !approval?.head_sha || head.startsWith(approval.head_sha)) return;
+  const meta = latestMeta(r.thread_id);
+  const repo = meta?.repo;
+  let change: HeadChange | null = null;
+  const same = (diff: string | null) => diff === null || !approval.diff_blob ? null : comparable(diff) === comparable(readBlobText(approval.diff_blob)) ? "rebase only" : "content changed";
+  if (repo && meta.number) {
+    // A GitHub PR: its diff as GitHub has it now, if GitHub's head is the one reported.
+    const now = run(["gh", "pr", "view", String(meta.number), "--json", "headRefOid", "-q", ".headRefOid"], repo)?.trim();
+    if (now && (now.startsWith(head) || head.startsWith(now))) change = same(run(["gh", "pr", "diff", String(meta.number)], repo));
+  } else if (repo && meta.base_ref) {
+    // A branch sent with --base: diff the new head from where it forks off that base.
+    const mb = run(["git", "merge-base", meta.base_ref, head], repo)?.trim();
+    change = same(mb ? run(["git", "diff", "--no-color", "--find-renames", `${mb}...${head}`], repo) : null);
+  }
+  store().query("UPDATE queue SET head_check = ? WHERE pr = ?").run(JSON.stringify({ head, change }), pr);
+}
+
+function latestMeta(thread: string | null): any {
+  if (!thread) return null;
+  const row = store().query(`SELECT a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
+    WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1`).get(thread) as { meta: string } | null;
+  return row ? JSON.parse(row.meta) : null;
+}
 
 // In priority order: tier, then the order set inside it, then when a PR joined. A deployed PR
 // stays a day, so the morning view shows what went out overnight.
@@ -61,14 +121,16 @@ export function queue(opts: { all?: boolean } = {}): QueueRow[] {
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const all = store().query("SELECT * FROM queue").all() as any[];
   return all.filter((r) => opts.all || r.state !== "deployed" || r.updated_at > dayAgo)
-    .sort((a, b) => byPriority(a, b, (x, y) => x.added_at.localeCompare(y.added_at) || x.pr - y.pr))
-    .map((r) => ({ ...hydrate(r), waiting_reason: waitingReason(r, all) }));
+    .map((r) => ({ ...hydrate(r), waiting_reason: waitingReason(r, all) }))
+    // A row being reworked or parked sinks below the rest; it is not what anyone acts on next.
+    .sort((a, b) => Number(!!a.hold) - Number(!!b.hold) || byPriority(a, b, (x, y) => x.added_at.localeCompare(y.added_at) || x.pr - y.pr));
 }
 
 // The next PR (or pair) the merge loop should take; null when nothing is ready.
 export function next(): QueueRow[] | null {
   ensure();
-  const prs = nextInQueue(store().query("SELECT * FROM queue").all() as any[]);
+  // A PR about to change is not merged as it stands: skip it until its next version.
+  const prs = nextInQueue((store().query("SELECT * FROM queue").all() as any[]).filter((r) => !holdOf(r.thread_id)));
   return prs ? queue().filter((r) => prs.includes(r.pr)) : null;
 }
 
@@ -112,6 +174,11 @@ export function setQueue(pr: number, v: { state?: string; title?: string; head?:
     .run(Object.fromEntries(Object.entries({ ...row, waiting }).map(([k, x]) => [`$${k}`, x])) as any);
   if (v.tier !== undefined || v.why !== undefined) prioritizeQueue(pr, v.by ?? person(loadConfig()), { tier: tierOf(v.tier), why: v.why });
   return queue({ all: true }).find((r) => r.pr === pr)!;
+}
+
+export function inQueue(pr: number): { state: string; thread_id: string | null } | null {
+  ensure();
+  return store().query("SELECT state, thread_id FROM queue WHERE pr = ?").get(pr) as any ?? null;
 }
 
 export function removeQueue(pr: number) {

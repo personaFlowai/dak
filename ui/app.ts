@@ -28,7 +28,9 @@ async function loadList() {
     api<Summary[]>(`/threads?for=${encodeURIComponent(me)}&box=others`),
     api<Record<string, string>>("/archives").catch(() => ({})),
   ]);
-  [S.queue, S.reviews] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => [])]);
+  const [q, all] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => [])]);
+  // Held rows (being reworked, parked) are listed apart and never counted as waiting on you.
+  S.queue = q; S.reviews = all.filter((r) => !r.hold); S.heldReviews = all.filter((r) => r.hold) as typeof S.heldReviews;
   if (S.view === "queue" || S.view === "waiting") renderMain();
   S.counts = { to: S.threads.filter((t) => t.unread && !isArchived(peerOf(t))).length };
   renderSide();
@@ -160,7 +162,7 @@ function renderSide() {
   $("#side")!.innerHTML = `
     <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
     <button class="row-btn queue-entry" data-waiting aria-current="${S.view === "waiting"}">${I.check}<span class="lbl">Waiting on you</span>${S.reviews.length ? `<span class="count you">${S.reviews.length}</span>` : ""}</button>
-    <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.queue.some((r) => r.state !== "deployed") ? `<span class="count">${S.queue.filter((r) => r.state !== "deployed").length}</span>` : ""}</button>
+    <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.queue.some((r) => r.state !== "deployed" && !r.hold) ? `<span class="count">${S.queue.filter((r) => r.state !== "deployed" && !r.hold).length}</span>` : ""}</button>
     <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
     <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>
     <div class="side-foot" ${(window as any).DAK?.phone ? "hidden" : ""}><button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
@@ -298,21 +300,29 @@ function queueRow(r: QRow, pos?: number): string {
   const at = TRAIL.findIndex(([k]) => k === r.state);
   const trail = MOVING.includes(r.state) ? `<ol class="trail">${TRAIL.map(([, w], i) => `<li class="${i < at ? "past" : i === at ? "now" : ""}">${w}</li>`).join("")}</ol>` : "";
   const titles = mates.map((m) => `<div class="qhead">${prTitle(m.pr, m.title, m.thread_id)}</div>`).join("");
-  const waitingRow = ["approved", "held", "failed"].includes(r.state);
+  const waitingRow = ["approved", "held", "failed"].includes(r.state) && !r.hold;
   return `<li class="qrow ${r.state} ${mates.length > 1 ? "pair" : ""}" ${waitingRow ? `draggable="true" data-drag-pr="${r.pr}" data-tier="${r.tier}"` : ""}>
     ${pos !== undefined ? `<span class="qpos">${pos}</span>` : ""}
     <div class="qmain">${mates.length > 1 ? `<span class="pair-tag">Pair, tested together</span>` : ""}${titles}<div class="qmeta">${meta}</div>
-      ${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}${trail}</div>
+      ${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}${r.hold ? holdLine(r.hold) : ""}${headMoved(r)}${trail}</div>
     <div class="qside"><div class="qtop"><b class="st ${r.state}">${STATE_WORD[r.state] ?? esc(r.state)}</b>${waitingRow ? tierMenu("pr", r.pr, r.tier) : ""}</div>
       <span>${r.state === "deployed" ? when(r.state_since) : `for ${span(r.state_since)}`}</span>${left(r.eta_at)}
       ${r.waiting_reason ? `<span class="qwait">${esc(r.waiting_reason)}</span>` : ""}${r.note ? `<span class="qnote">${esc(r.note)}</span>` : ""}${placedBy(r.rank_by)}</div></li>`;
 }
 
-const TYPE_WORD: Record<string, string> = { pr: "PR", brief: "Brief", decision: "Decision" };
+const TYPE_WORD: Record<string, string> = { pr: "PR", brief: "Brief", decision: "Decision", tryit: "Try it" };
+
+// The head moved after the person approved: the merge script stops on that, so say what moved.
+function headMoved(r: (typeof S.queue)[number]): string {
+  const h = r.head_moved;
+  if (!h) return "";
+  const what = h.change === "rebase only" ? "a rebase only, the changes are the same" : h.change === "content changed" ? "the changes are different from what you approved" : "not checked whether the changes differ";
+  return `<div class="qmoved ${h.change === "content changed" ? "bad" : ""}"><b>Head moved since your approval</b> ${esc(h.from.slice(0, 7))} → ${esc(h.to.slice(0, 7))}: ${what}.</div>`;
+}
 
 function reviewRow(r: (typeof S.reviews)[number], pos: number): string {
   // A decision is answered with a tap, not reviewed: no "I'm reviewing" for it.
-  const reviewable = r.type !== "decision";
+  const reviewable = r.type !== "decision" && r.type !== "tryit";
   const action = r.reviewing_since ? `<b class="st reviewing">You're reviewing</b>`
     : reviewable ? `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`
     : `<button class="btn" data-topic="${esc(r.thread_id)}">Answer</button>`;
@@ -329,17 +339,30 @@ function reviewRow(r: (typeof S.reviews)[number], pos: number): string {
 function reviewGroup(): string {
   const f = S.reviewFilter;
   const count = (t: string) => S.reviews.filter((r) => r.type === t).length;
-  const chips = ["pr", "brief", "decision"].filter(count).map((t) =>
+  const chips = ["pr", "brief", "decision", "tryit"].filter(count).map((t) =>
     `<button class="chip-f ${f === t ? "on" : ""}" data-review-filter="${t}">${TYPE_WORD[t]}s <span>${count(t)}</span></button>`).join("");
   const shown = f ? S.reviews.filter((r) => r.type === f) : S.reviews;
   const list = shown.length ? `<ol class="qlist" data-drop="review">${tiered(shown, reviewRow).join("")}</ol>` : `<p class="qempty">Nothing is waiting on you.</p>`;
   return `<section class="qgroup">
-    ${chips ? `<div class="chips-f"><button class="chip-f ${f ? "" : "on"}" data-review-filter="">All</button>${chips}</div>` : ""}${list}</section>`;
+    ${chips ? `<div class="chips-f"><button class="chip-f ${f ? "" : "on"}" data-review-filter="">All</button>${chips}</div>` : ""}${list}</section>
+    ${S.heldReviews.length ? `<section class="qgroup held"><h3>Not to review now <span class="count">${S.heldReviews.length}</span></h3>
+      <ol class="qlist">${S.heldReviews.map(heldRow).join("")}</ol></section>` : ""}`;
+}
+
+// A row someone said not to act on now: why, and when it comes back.
+const HOLD_WORD = { rework: "Being reworked", parked: "Parked" } as const;
+function holdLine(h: { kind: "rework" | "parked"; note: string | null; by: string | null }): string {
+  const back = h.kind === "rework" ? "Comes back with its next version." : "Stays here until it is unparked.";
+  return `<div class="qhold"><b>${HOLD_WORD[h.kind]}</b>${h.note ? `: ${esc(h.note)}` : ""}${h.by ? ` · ${esc(name(h.by))}` : ""}. ${back}</div>`;
+}
+function heldRow(r: (typeof S.heldReviews)[number]): string {
+  return `<li class="qrow review is-held"><div class="qmain"><div class="qhead"><span class="rtype t-${r.type}">${TYPE_WORD[r.type] ?? esc(r.type)}</span>${prTitle(r.pr, r.subject, r.thread_id)}</div>
+    <div class="qmeta">From ${esc(name(r.from))}</div>${holdLine(r.hold)}</div></li>`;
 }
 
 function waitingSummary(): string {
   const n = (t: string) => S.reviews.filter((r) => r.type === t).length;
-  return [`${n("pr")} PRs`, `${n("brief")} briefs`, `${n("decision")} decisions`].join(" · ");
+  return [`${n("pr")} PRs`, `${n("brief")} briefs`, `${n("decision")} decisions`, ...(n("tryit") ? [`${n("tryit")} to try`] : [])].join(" · ");
 }
 
 function queueSummary(): string {
@@ -360,17 +383,19 @@ function tiered<T extends { tier: string }>(rows: T[], draw: (r: T, pos: number)
 }
 
 function queueView(): string {
-  const moving = S.queue.filter((r) => MOVING.includes(r.state));
+  const live = S.queue.filter((r) => !r.hold), held = S.queue.filter((r) => r.hold);
+  const moving = live.filter((r) => MOVING.includes(r.state));
   // A pair shows once, at its first member's place.
   const firstOfPair = (r: QRow, list: QRow[]) => !r.pair_id || list.find((x) => x.pair_id === r.pair_id) === r;
-  const waitingAll = S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state));
+  const waitingAll = live.filter((r) => ["approved", "held", "failed"].includes(r.state));
   const waiting = waitingAll.filter((r) => firstOfPair(r, waitingAll));
-  const done = S.queue.filter((r) => r.state === "deployed");
+  const done = live.filter((r) => r.state === "deployed");
   const group = (title: string, hint: string, rows: string[], count: number, kind = "") => `<section class="qgroup"><h3>${title} <span class="count">${count}</span></h3>
     ${rows.length ? `<ol class="qlist" ${kind ? `data-drop="${kind}"` : ""}>${rows.join("")}</ol>` : `<p class="qempty">${hint}</p>`}</section>`;
   return `<div class="pane-body"><div class="queue-page">
     ${group("In progress", "Nothing is merging right now.", moving.filter((r) => firstOfPair(r, moving)).map((r) => queueRow(r)), moving.length)}
     ${group("Approved, waiting their turn", "Nothing approved is waiting.", tiered(waiting, queueRow), waiting.length, "pr")}
+    ${held.length ? `<section class="qgroup held"><h3>Parked or being reworked <span class="count">${held.length}</span></h3><ol class="qlist">${held.map((r) => queueRow(r)).join("")}</ol></section>` : ""}
     ${done.length ? group("Deployed today", "", done.map((r) => queueRow(r)), done.length) : ""}
     <p class="qfoot">Drag rows to set the order, or change a row's priority; your order wins over Atlas's. Atlas's merge loop takes the next ready PR with <code>dak queue next</code>. "Approved by you" is read from your verdict on the PR's thread.</p>
   </div></div>`;

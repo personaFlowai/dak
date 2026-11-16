@@ -67,6 +67,9 @@ export function brief(name: string, msgs: Message[]): string {
     const v = m.verdict ? ` [${{ approve: "approved", changes: "changes requested", question: "question" }[m.verdict]}]` : "";
     lines.push("", `Thread ${t.id} "${t.subject}", from ${m.author}${v}:`, m.body.trim() || (m.choice ? "" : "(no text)"));
     if (m.choice) lines.push(`  Picked: ${m.choice}`);
+    if (m.tryit_result) lines.push(m.tryit_result.result === "works"
+      ? `  It works: that is the Checking. Post your production proof on ${m.tryit_result.ticket ?? "the ticket"} and move it to Done.`
+      : `  Something's wrong: ask what they saw, and keep ${m.tryit_result.ticket ?? "the ticket"} out of Done.`);
     for (const c of m.comments) {
       const at = !c.anchor ? "" : c.anchor.kind === "code" ? `${c.anchor.file}:${c.anchor.start_line}-${c.anchor.end_line}` : `"${c.anchor.quote.slice(0, 80)}"`;
       lines.push(`  - on ${at}: ${c.body}`);

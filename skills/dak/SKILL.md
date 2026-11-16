@@ -93,6 +93,22 @@ If Dak has a runner named `codex` (`dak runner add codex`), sending a PR to it, 
 - A group: `dak send --to group:engineers --from <you> --fyi "Load 67: stop your stacks" --json`. Each member answers with `dak ack <thread> --from <them> "Stopped"`; `dak show <thread>` lists who acked and who has not opened it.
 - A question that spends money: add `--cost 0.15 --cap 0.25` beside its `--option` buttons. `dak decisions --for <person>` later lists every button they picked, with the question, the date and the cost.
 
+### Finding threads
+
+`dak thread --pr 2426` prints the thread carrying that PR. `dak send --json` and `dak reply --json` return `thread_id`.
+
+### Routes
+
+The person can have a group's PRs and briefs come to an agent first: `dak route set pratik --from-group engineers --via atlas`. Such a send goes to atlas with a note saying why, and `dak send` prints "Routed". Replies, notes and questions are never routed.
+
+### Try it
+
+A "try it" on a live feature: `dak send --to pratik --type tryit --ticket REVA-2850 "Open Settings → Messages and ..."`. It gets the buttons "Works: move REVA-2850 to Done" and "Something's wrong". When they pick Works, the reply carries `tryit_result: {result: "works", ticket}`: post your production proof on the ticket and move it to Done; that pick was the Checking.
+
+### Reviewer runners on stacked PRs
+
+`--range base..head` on `dak send`, `dak add` or `dak reply` makes a runner (codex, cursor) review only those commits, for example `dak add <thread> codex:reviewer --range origin/reva-2440..HEAD`. In a read-only sandbox the Dak inbox check prints nothing new and exits 0; reviewer workspaces in temporary folders are hidden from `dak agents` (`--all` shows them).
+
 ### The merge queue
 
 Merge scripts keep it current: `dak queue set <pr> --state approved|testing|building|merging|merged|migrated|deployed|failed|held [--eta 4m] [--after <pr>] [--head sha] [--migration f] [--note "full suite"]`. Set `--eta` at each step so the person sees time left; use `--after` for a PR that waits on another, not the title. Approval is read from the person's verdict on the thread, so never mark a PR approved they have not approved. `dak queue` prints what waits for their review, what is moving and what waits its turn. When the person presses "I'm reviewing", you get a Dak message and `dak show` says so.
@@ -104,7 +120,10 @@ Priorities. Three tiers (urgent: a production bug, security, an unblocker; norma
 - Merge order: `dak queue order <pr> <pr>...` and `dak queue set <pr> --tier urgent --why "production bug"`. Dak refuses an order that puts a PR ahead of the one it waits for (`--after`).
 - Say what a held or waiting row is waiting on, in plain words: `--waiting "a migration renumber"` (cleared when its state changes). Dak adds "Waiting on #2413" and "Waiting on its pair" itself.
 - Pairs tested together: `dak queue pair 2420 2433`; they show as one row and merge together.
-- When the person approves an order you proposed (they pick your "Use this order" button), apply it with `--confirmed-by <that thread>`; it then counts as theirs and moves rows they had placed. Dak checks their pick.
+- When the person asks for an order (they pick your "Use this order" button, or write "can you move them lower?"), apply it with `--confirmed-by <that thread>` on `order`, `review-order` or `priority`; it then counts as theirs and moves rows they had placed. Dak checks that they answered there after your last question, in the last day, and your output quotes what they wrote: only use it when their words asked for this.
+- About to change a PR the person may start reviewing? `dak queue set <pr|thread> --rework "prefix being added"`: it greys out below the rest, `queue next` skips it, and it comes back by itself with your next version (`dak reply --pr`). `--rework none` ends it early.
+- Open but parked by the person's choice: `dak queue set <pr|thread> --state parked --waiting "department settings"`. It stays out of the review count until `dak queue unpark <pr|thread>`.
+- When a head moves after the approval, the queue row says so, and whether it is a rebase only or the changes differ. Report each push with `--head <sha>`: Dak compares against the approved diff (GitHub's for a PR, git's for a branch). A merge script should stop on "content changed".
 - The person can drag rows and change tiers; their order wins, and your reordering leaves their rows in place (the command says which it kept). So read the order rather than assume it: your merge loop asks `dak queue next --json` for the next ready PR or pair (approved, not held, what it waits for already merged), and gets exit code 3 when nothing is ready.
 
 ## 4. Wait for the answer

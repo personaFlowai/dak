@@ -70,18 +70,41 @@ export function tickRunners(run = runOnce) {
   }
 }
 
+/* A stacked PR's diff can carry the PRs below it. `--range base..head` on the thread narrows the
+   review to the PR's own commits: the runner reads that range's diff here, and findings outside
+   it are not asked for. Set with dak send/add/reply --range. */
+export function setRange(threadId: string, range: string | null) {
+  if (range !== null && !/^[\w./@^~-]+\.\.\.?[\w./@^~-]+$/.test(range)) throw new DakError("bad_range", "--range is base..head, such as origin/reva-2440..HEAD.");
+  store().exec("CREATE TABLE IF NOT EXISTS review_range (thread_id TEXT PRIMARY KEY, range TEXT NOT NULL)");
+  if (range === null) store().query("DELETE FROM review_range WHERE thread_id = ?").run(threadId);
+  else store().query("INSERT INTO review_range VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET range = excluded.range").run(threadId, range);
+}
+export function rangeOf(threadId: string): string | null {
+  store().exec("CREATE TABLE IF NOT EXISTS review_range (thread_id TEXT PRIMARY KEY, range TEXT NOT NULL)");
+  return (store().query("SELECT range FROM review_range WHERE thread_id = ?").get(threadId) as { range: string } | null)?.range ?? null;
+}
+
+async function gitDiff(range: string, cwd: string): Promise<string | null> {
+  const p = Bun.spawn(["git", "diff", "--no-color", "--find-renames", range], { cwd, stdout: "pipe", stderr: "ignore" });
+  const [text, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
+  return code === 0 && text.trim() ? text : null;
+}
+
 export async function runOnce(r: Runner, threadId: string) {
   const { thread, messages } = getThread(threadId);
   const pr = messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop();
   const meta = pr?.meta as PrMeta | undefined;
   const cwd = meta?.repo && existsSync(meta.repo) ? meta.repo : process.cwd();
-  const out = await spawn(r, prompt(thread.subject, messages, meta), cwd);
+  const range = rangeOf(threadId);
+  const own = range && meta ? await gitDiff(range, cwd) : null;
+  if (range && meta && !own) return post(r.name, threadId, `I could not read ${range} in ${cwd} (not fetched there?), so I did not review. Fetch it, or drop --range.`, true);
+  const out = await spawn(r, prompt(thread.subject, messages, meta, own && range ? { range, diff: own } : undefined), cwd);
   const parsed = parseOutput(out);
   if (!parsed || !meta) return post(r.name, threadId, parsed?.summary ?? out.trim(), false);
   return applyReview(r.name, threadId, meta, parsed);
 }
 
-function prompt(subject: string, messages: Message[], meta?: PrMeta): string {
+function prompt(subject: string, messages: Message[], meta?: PrMeta, only?: { range: string; diff: string }): string {
   const convo = messages.slice(-8).map((m) => `- ${m.author}${m.verdict ? ` (${m.verdict})` : ""}: ${m.body.trim().slice(0, 1500) || "(no text)"}`);
   if (!meta) return [`You are asked on a thread titled "${subject}". The conversation:`, ...convo, "", "Answer the latest message. Read files here if it helps. Do not modify anything."].join("\n");
   const chapters = meta.chapters.length
@@ -92,7 +115,9 @@ function prompt(subject: string, messages: Message[], meta?: PrMeta): string {
     `PR${meta.number ? ` #${meta.number}` : ""}: ${meta.title ?? subject}. Head ${meta.head_sha ?? "?"}, base ${meta.base_ref ?? meta.base_sha ?? "?"}.`,
     "Conversation:", ...convo, "",
     "Chapters:", chapters, "",
-    "Diff:", "```diff", readBlobText(meta.diff_blob).slice(0, 120_000), "```", "",
+    ...(only ? [`This PR is stacked: review only its own commits, ${only.range}. Leave out anything that belongs to the PRs below it.`, "",
+      "Diff of its own commits:", "```diff", only.diff.slice(0, 120_000), "```", ""]
+      : ["Diff:", "```diff", readBlobText(meta.diff_blob).slice(0, 120_000), "```", ""]),
     "Reply with ONLY one JSON object, no prose around it:",
     `{"summary": "two or three plain sentences", "verdict": "approve" | "changes" | "question",`,
     ` "findings": [{"file": "path", "line": 12, "side": "new" | "old", "severity": "high" | "medium" | "low", "body": "what is wrong and why it matters"}],`,

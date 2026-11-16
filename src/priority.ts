@@ -28,6 +28,39 @@ export function ensurePriority() {
   const rcols = new Set((s.query("PRAGMA table_info(review_order)").all() as { name: string }[]).map((c) => c.name));
   if (!rcols.has("type")) s.exec("ALTER TABLE review_order ADD COLUMN type TEXT");
   if (!rcols.has("blocks")) s.exec("ALTER TABLE review_order ADD COLUMN blocks TEXT");
+  // A hold: the agent says not to review it now. "rework" (it is about to change; it comes back by
+  // itself with the next version) or "parked" (the person's choice; it stays until unparked).
+  for (const c of ["hold", "hold_note", "hold_at", "hold_by"]) if (!rcols.has(c)) s.exec(`ALTER TABLE review_order ADD COLUMN ${c} TEXT`);
+}
+
+export type HoldKind = "rework" | "parked";
+export interface Hold { kind: HoldKind; note: string | null; at: string; by: string | null }
+
+// A thread's hold, if it still stands. A rework hold ends when a new version of the PR arrives
+// after it: the PR is back for review without anyone having to remember to lift it.
+export function holdOf(threadId: string | null, row?: any): Hold | null {
+  if (!threadId) return null;
+  ensurePriority();
+  const r = row ?? store().query("SELECT hold, hold_note, hold_at, hold_by FROM review_order WHERE thread_id = ?").get(threadId) as any;
+  if (!r?.hold) return null;
+  if (r.hold === "rework") {
+    const newer = store().query(`SELECT 1 FROM attachments a JOIN messages m ON m.id = a.message_id
+      WHERE m.thread_id = ? AND a.type = 'pr' AND m.created_at > ? LIMIT 1`).get(threadId, r.hold_at);
+    if (newer) return null;
+  }
+  return { kind: r.hold, note: r.hold_note ?? null, at: r.hold_at, by: r.hold_by ?? null };
+}
+
+// Put a hold on (kind) or take it off (null). Anyone may: it says what is true about the work.
+export function setHold(ref: string, kind: HoldKind | null, note: string | null, by: string): string {
+  ensurePriority();
+  const id = threadFor(ref);
+  const at = new Date().toISOString();
+  store().query(`INSERT INTO review_order (thread_id, tier, updated_at, hold, hold_note, hold_at, hold_by) VALUES (?, 'normal', ?, ?, ?, ?, ?)
+    ON CONFLICT(thread_id) DO UPDATE SET hold = ?, hold_note = ?, hold_at = ?, hold_by = ?, updated_at = ?`)
+    .run(id, at, kind, note, kind ? at : null, kind ? by : null, kind, note, kind ? at : null, kind ? by : null, at);
+  touchQueue();
+  return id;
 }
 
 export function tierOf(v: string | undefined): Tier | undefined {
@@ -44,19 +77,22 @@ export function byPriority<T extends { tier?: string | null; rank?: number | nul
 
 const me = () => person(loadConfig());
 
-/* An order the person approved on a thread: the agent asked with buttons, the person picked
-   one. Applied with --confirmed-by <thread>, the order counts as the person's own, so it moves
-   rows they placed by hand. Dak checks the pick itself, so an agent cannot claim one. */
-export function confirmedBy(threadId: string, agent: string): { choice: string; at: string } {
+/* An order the person asked for on a thread: a button they picked, or what they wrote ("can you
+   move them lower?"). Applied with --confirmed-by <thread>, the order counts as the person's own,
+   so it moves rows they placed by hand. Dak checks that the person really answered: their latest
+   message there, after the agent's last question, from the last day. What they wrote is returned
+   so the agent's output quotes it; Dak cannot read whether the words asked for this order. */
+export function confirmedBy(threadId: string, agent: string): { choice: string; at: string; quoted: boolean } {
   const p = me();
   const t = store().query("SELECT from_name, to_reader FROM threads WHERE id = ?").get(threadId) as { from_name: string; to_reader: string } | null;
   if (!t) throw new DakError("no_thread", `No thread ${threadId}.`, 404);
   if (![t.from_name, t.to_reader].includes(agent) || ![t.from_name, t.to_reader].includes(p)) throw new DakError("not_confirmed", `${threadId} is not between you and ${p}.`, 403);
-  const pick = store().query(`SELECT m.choice, m.created_at FROM messages m WHERE m.thread_id = ? AND m.author = ? AND m.choice IS NOT NULL
-    AND m.id > (SELECT max(id) FROM messages WHERE thread_id = ? AND author = ? AND options IS NOT NULL) ORDER BY m.id DESC LIMIT 1`)
-    .get(threadId, p, threadId, agent) as { choice: string; created_at: string } | null;
-  if (!pick) throw new DakError("not_confirmed", `${p} has not picked a button on ${threadId} since you last asked there.`, 403);
-  return { choice: pick.choice, at: pick.created_at };
+  const asked = (store().query("SELECT max(id) AS id FROM messages WHERE thread_id = ? AND author = ? AND options IS NOT NULL").get(threadId, agent) as { id: number | null }).id ?? 0;
+  const said = store().query(`SELECT m.choice, m.body, m.created_at FROM messages m WHERE m.thread_id = ? AND m.author = ? AND m.id > ?
+    AND (m.choice IS NOT NULL OR trim(m.body) != '') AND coalesce(m.extra, '') NOT LIKE '%"reviewing":true%' ORDER BY m.id DESC LIMIT 1`)
+    .get(threadId, p, asked) as { choice: string | null; body: string; created_at: string } | null;
+  if (!said || Date.now() - Date.parse(said.created_at) > 86_400_000) throw new DakError("not_confirmed", `${p} has not answered on ${threadId} since you last asked there (in the last day).`, 403);
+  return said.choice ? { choice: said.choice, at: said.created_at, quoted: false } : { choice: said.body.trim().slice(0, 200), at: said.created_at, quoted: true };
 }
 const isPerson = (by: string) => by === me();
 
@@ -138,7 +174,7 @@ export function waitingReason(r: { pr: number; state: string; after_pr: number |
 
 /* ---------- review order ---------- */
 
-function threadFor(ref: string): string {
+export function threadFor(ref: string): string {
   const t = String(ref).trim();
   if (/^t_[0-9a-f]+$/.test(t)) return t;
   const n = Number(t.replace(/^#/, ""));
@@ -147,10 +183,10 @@ function threadFor(ref: string): string {
   return id;
 }
 
-export const REVIEW_TYPES = ["pr", "brief", "decision"] as const;
+export const REVIEW_TYPES = ["pr", "brief", "decision", "tryit"] as const;
 export function reviewTypeOf(v: string | undefined) {
   if (v === undefined) return undefined;
-  if (!REVIEW_TYPES.includes(v as any)) throw new DakError("bad_type", "A type is pr, brief or decision. (A doc, spec or mock is a brief; an update needs --fyi, not a type.)");
+  if (!REVIEW_TYPES.includes(v as any)) throw new DakError("bad_type", "A type is pr, brief, decision or tryit. (A doc, spec or mock is a brief; a 'try it' on a live feature is tryit; an update needs --fyi, not a type.)");
   return v;
 }
 
@@ -195,15 +231,17 @@ export function orderReviews(refs: string[], by: string, opts: { tier?: Tier } =
   return { ordered, kept };
 }
 
-export type OrderedReview = AwaitingReview & Priority & { type: string; blocks: string | null };
+export type OrderedReview = AwaitingReview & Priority & { type: string; blocks: string | null; hold: Hold | null };
 export function reviewsInOrder(reader: string): OrderedReview[] {
   ensurePriority();
   const pr = new Map((store().query("SELECT * FROM review_order").all() as any[]).map((r) => [r.thread_id, r]));
   const typed = new Map([...pr].filter(([, r]) => r.type).map(([id, r]) => [id, r.type as string]));
   return awaitingReview(reader, typed).map((r) => {
     const p = pr.get(r.thread_id);
-    return { ...r, tier: (p?.tier ?? "normal") as Tier, rank: p?.rank ?? null, why: p?.why ?? null, rank_by: p?.rank_by ?? null, blocks: p?.blocks ?? null };
-  }).sort((a, b) => byPriority(a, b, (x, y) => x.waiting_since.localeCompare(y.waiting_since)));
+    return { ...r, tier: (p?.tier ?? "normal") as Tier, rank: p?.rank ?? null, why: p?.why ?? null, rank_by: p?.rank_by ?? null, blocks: p?.blocks ?? null,
+      hold: holdOf(r.thread_id, p ?? null) };
+  // Held rows (being reworked, parked) go below everything else, in their own order.
+  }).sort((a, b) => Number(!!a.hold) - Number(!!b.hold) || byPriority(a, b, (x, y) => x.waiting_since.localeCompare(y.waiting_since)));
 }
 
 // The page refreshes when the queue's stamp moves; a review reorder must move it too.

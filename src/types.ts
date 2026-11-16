@@ -36,6 +36,9 @@ export interface Message {
   handoff?: Handoff; // "ready for review": the head and the proofs, checked at send time
   cost?: Cost; // what the ask spends if the reader says yes
   reviewing?: boolean; // the reader saying "I'm on it": the thread stays on them until their verdict
+  approved?: { head_sha: string; diff_blob: string }; // on an approval: exactly what was approved
+  tryit?: { ticket?: string }; // a "try it" note: its first button means it works
+  tryit_result?: { result: "works" | "wrong"; ticket?: string }; // the person's pick on one
 }
 
 // Who else is on a thread, and why. The sender is the author and the addressee is asked
@@ -53,7 +56,11 @@ export interface Handoff {
   skipped: { name: string; reason: string }[];
 }
 export interface Cost { estimate: number; cap?: number; currency: string }
-export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: boolean }
+export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: boolean;
+  approved?: { head_sha: string; diff_blob: string }; // what an approval approved, recorded by Dak
+  tryit?: { ticket?: string }; // a "try it" note on a live feature: its first button means it works
+  tryit_result?: { result: "works" | "wrong"; ticket?: string }; // the person's pick on one
+}
 
 export type Attachment =
   | { id: string; type: "pr"; name: string; meta: PrMeta }
