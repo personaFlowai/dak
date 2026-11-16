@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+- PR size (+lines −lines · files) on every review and queue row, with large changes in bold.
+- The merge queue sits at the top of the sidebar, with a count of PRs waiting for your review.
+- One topic at a time: a bar above the conversation names the topic you are reading (PR number, title, where it stands, size, "topic 3 of 30") with previous and next ([ and ]). "All topics" brings back the single timeline.
+
 ## 0.2.1
 - The merge queue, rebuilt: PRs waiting for your review first (from your inbox), then in progress, then approved and waiting, then deployed today.
 - "Approved by you" is read from your verdict on the PR's thread, never typed; a row without one says so.

@@ -5,7 +5,7 @@ import { api, local } from "./api";
 import {
   S, me, esc, $, name, mark, when, standing, approvedNow, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
   setViewed, viewed, chapterFiles, keepUnsent, helperLabel, agentOf, type Summary, type AgentRow,
-  fullWhen,
+  fullWhen, sizeLabel,
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending } from "./doc";
@@ -14,7 +14,7 @@ import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
 import { draftKey, forgetConvo } from "./convo";
 import { archivedList, isArchived, peers } from "./convo";
-import { peerList, pairList, peerOf, peerName, isPair, topicFor, loadConvo, topicMenu, onThread } from "./convo";
+import { peerList, pairList, peerOf, peerName, isPair, topicFor, loadConvo, topicMenu, onThread, openTopics } from "./convo";
 import type { Message, Participant, Thread, Verdict } from "../src/types";
 
 const native = document.documentElement.classList.contains("native");
@@ -157,9 +157,10 @@ function renderSide() {
   $("#app")!.classList.toggle("side-closed", S.focus && review ? !S.focusSide : !S.sideOpen);
   $("#side")!.innerHTML = `
     <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
+    <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.reviews.length ? `<span class="count you" title="Waiting for your review">${S.reviews.length}</span>` : ""}</button>
     <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
     <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>
-    <div class="side-foot">${S.queue.length || S.reviews.length ? `<button class="row-btn" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span><span class="count">${S.queue.filter((r) => r.state !== "deployed").length + S.reviews.length}</span></button>` : ""}<button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
+    <div class="side-foot"><button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
     <div class="splitter" data-split="side" title="Drag to resize"></div>`;
   postControls();
 }
@@ -268,7 +269,7 @@ const prTitle = (pr: number | null, title: string, thread: string | null) =>
 
 function queueRow(r: (typeof S.queue)[number]): string {
   const approved = r.approval ? `Approved by you ${when(r.approval.at)}` : `<span class="warn">No approval from you on Dak</span>`;
-  const meta = [approved, r.head ? `<code>${esc(r.head.slice(0, 8))}</code>` : "", r.migration ? `migration <code>${esc(r.migration)}</code>` : ""].filter(Boolean).join(" · ");
+  const meta = [approved, sizeLabel(r.size), r.head ? `<code>${esc(r.head.slice(0, 8))}</code>` : "", r.migration ? `migration <code>${esc(r.migration)}</code>` : ""].filter(Boolean).join(" · ");
   const blocker = r.after_pr ? S.queue.find((x) => x.pr === r.after_pr) : null;
   const waitFor = r.after_pr ? ` · after #${r.after_pr}${blocker ? ` (${STATE_WORD[blocker.state].toLowerCase()})` : ""}` : "";
   const at = TRAIL.findIndex(([k]) => k === r.state);
@@ -290,7 +291,7 @@ function queueView(): string {
   const group = (title: string, hint: string, rows: string[]) => `<section class="qgroup"><h3>${title} <span class="count">${rows.length}</span></h3>
     ${rows.length ? `<ol class="qlist">${rows.join("")}</ol>` : `<p class="qempty">${hint}</p>`}</section>`;
   const reviewRows = reviews.map((r) => `<li class="qrow review"><div class="qmain"><div class="qhead">${prTitle(r.pr, r.subject, r.thread_id)}</div>
-      <div class="qmeta">From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div></div>
+      <div class="qmeta">${sizeLabel(r.size)}${r.size ? " · " : ""}From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div></div>
     <div class="qside">${r.reviewing_since ? `<b class="st reviewing">You're reviewing</b><span>since ${when(r.reviewing_since)}</span>`
       : `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`}</div></li>`);
   return `<div class="pane-body"><div class="queue-page">
@@ -710,6 +711,7 @@ document.addEventListener("click", async (e) => {
   if (d.to && S.compose) { S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
   if (d.queue !== undefined) { S.view = "queue"; return render(); }
+  if (d.allTopics !== undefined) { S.allTopics = !S.allTopics; local.set("allTopics", S.allTopics); S.scrollTo = "end"; return renderMain(); }
   if (d.reviewing) {
     // "I'm on it": the sender hears through Dak, and the PR stays waiting on you.
     await api(`/threads/${d.reviewing}/reviewing`, { method: "POST", body: { author: me } });
@@ -972,6 +974,11 @@ document.addEventListener("keydown", (e) => {
   if (k === "c" && pending) { e.preventDefault(); return commentOnSelection(); }
   if (k === "n") { e.preventDefault(); openCompose(); return; }
   if (k === "e" && S.view === "thread" && S.peer) { e.preventDefault(); return archive(S.peer, !isArchived(S.peer)); }
+  // [ and ]: the previous and next topic with this agent, in the topic bar's order.
+  if ((k === "[" || k === "]") && S.view === "thread" && S.cur) {
+    const open = openTopics(); const i = open.findIndex((t) => t.id === S.cur); const t = open[i + (k === "[" ? -1 : 1)];
+    if (t) { e.preventDefault(); return openThread(t.id); }
+  }
   if (k === "f" && S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "")) { e.preventDefault(); S.focus = !S.focus; S.dockOpen = false; local.set("focus", S.focus); return render(); }
   if (k === "a" && S.view === "thread") { e.preventDefault(); return openAsk(); }
   if (k === "r" && S.focus) { e.preventDefault(); S.dockOpen = true; renderMain(); $<HTMLTextAreaElement>("#message")?.focus(); return; }

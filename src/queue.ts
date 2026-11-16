@@ -5,7 +5,7 @@
    Who approved a PR is never typed in: it is read from the PR's Dak thread, so the page can
    only say "Approved by you" when you did. */
 import { loadConfig, person } from "./config";
-import { store, threadForPr } from "./store";
+import { latestPr, store, threadForPr, type PrSize } from "./store";
 import { DakError } from "./types";
 
 export const STATES = ["approved", "testing", "building", "merging", "merged", "migrated", "deployed", "failed", "held"] as const;
@@ -17,6 +17,7 @@ export interface QueueRow {
   eta_at: string | null; // when the script expects this step to finish
   after_pr: number | null; // waits for this PR first (a stack, a rebase)
   approval: { by: string; at: string } | null; // the person's own approval on the thread, if there is one
+  size: PrSize | null; // files and lines changed, from the PR on its thread
 }
 
 function ensure() {
@@ -44,7 +45,8 @@ function approvalOn(thread: string | null): QueueRow["approval"] {
   return ok;
 }
 
-const hydrate = (r: any): QueueRow => ({ ...r, state_since: r.state_since ?? r.updated_at, approval: approvalOn(r.thread_id) });
+const hydrate = (r: any): QueueRow => ({ ...r, state_since: r.state_since ?? r.updated_at, approval: approvalOn(r.thread_id),
+  size: r.thread_id ? latestPr(r.thread_id)?.size ?? null : null });
 
 // Order is when a PR joined; the page groups them. A deployed PR stays a day, so the morning
 // view shows what went out overnight.

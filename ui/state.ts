@@ -47,8 +47,9 @@ export const S = {
   archived: {} as Record<string, string>, // conversation (agent, or "a+b") → when you archived it
   showArchived: false,
   queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string;
-    state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null }[],
-  reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null }[], // PRs waiting on your review
+    state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null }[],
+  reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null }[], // PRs waiting on your review
+  allTopics: local.get("allTopics", false), // the conversation shows every topic at once, not just the one you are on
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
   newTopic: false, // the reply box is starting a new thread with this agent, not answering one
   newSubject: "", // scroll positions to put back after the next render
@@ -74,6 +75,15 @@ export const S = {
 // Mail counts as read only when you can see it: Dak in front and on screen. A conversation
 // left open in the background must not mark new messages read, or nothing would notify you.
 export const looking = () => !document.hidden && document.hasFocus();
+
+export interface PrSize { files: number; additions: number; deletions: number }
+// "+120 −30 · 6 files": how big a PR is, read at a glance. Big is flagged so it stands out.
+export function sizeLabel(z: PrSize | null | undefined): string {
+  if (!z) return "";
+  const lines = z.additions + z.deletions;
+  const tier = lines < 80 ? "small" : lines < 400 ? "medium" : "large";
+  return `<span class="size ${tier}" title="${lines} lines changed in ${z.files} file${z.files === 1 ? "" : "s"}"><span class="a">+${z.additions}</span> <span class="d">−${z.deletions}</span> · ${z.files} file${z.files === 1 ? "" : "s"}</span>`;
+}
 
 export const keepUnsent = () => { local.set("message", S.message); local.set("verdict", S.verdict); local.set("github", S.github); };
 export const drafts = (thread: string): Draft[] => local.get(`drafts:${thread}`, [] as Draft[]);

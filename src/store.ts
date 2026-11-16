@@ -415,11 +415,23 @@ export function listThreads(reader: string, opts: { box?: "to" | "from" | "all" 
 }
 
 // PRs waiting on a person's review, oldest first, and whether they have said they are on it.
-export interface AwaitingReview { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null }
+export interface PrSize { files: number; additions: number; deletions: number }
+export interface AwaitingReview { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null }
 export function awaitingReview(reader: string): AwaitingReview[] {
-  return (store().query(`SELECT t.id AS thread_id, t.subject, t.from_name AS "from", t.updated_at AS waiting_since, ${REVIEWING} AS reviewing_since,
-      (SELECT json_extract(a.meta, '$.number') FROM attachments a JOIN messages m ON m.id = a.message_id WHERE m.thread_id = t.id AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1) AS pr
-    FROM threads t WHERE t.to_reader = ? AND t.kind = 'pr' AND t.status = 'waiting' ORDER BY t.updated_at`).all(reader) as AwaitingReview[]);
+  const rows = store().query(`SELECT t.id AS thread_id, t.subject, t.from_name AS "from", t.updated_at AS waiting_since, ${REVIEWING} AS reviewing_since
+    FROM threads t WHERE t.to_reader = ? AND t.kind = 'pr' AND t.status = 'waiting' ORDER BY t.updated_at`).all(reader) as any[];
+  return rows.map((r) => { const p = latestPr(r.thread_id); return { ...r, pr: p?.number ?? null, size: p?.size ?? null }; });
+}
+
+// The newest PR on a thread: its number and how big it is, so a reader can tell a ten-line
+// fix from a four-hundred-line change before opening either.
+export function latestPr(threadId: string): { number: number | null; size: PrSize } | null {
+  const row = store().query(`SELECT a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
+    WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1`).get(threadId) as { meta: string } | null;
+  if (!row) return null;
+  const meta = JSON.parse(row.meta);
+  const files = (meta.files ?? []) as { additions: number; deletions: number }[];
+  return { number: meta.number ?? null, size: { files: files.length, additions: files.reduce((n, f) => n + f.additions, 0), deletions: files.reduce((n, f) => n + f.deletions, 0) } };
 }
 
 // Messages a reader has not seen yet, oldest first. Reading them can mark them read,

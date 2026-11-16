@@ -5,7 +5,7 @@ import { blobUrl } from "./api";
 import type { Attachment, Handoff, Message, Proof, Thread, Verdict } from "../src/types";
 import { describeCost } from "../src/handoff";
 import { I, linkInfo } from "./icons";
-import { timeline, topicPicker, draftKey, type Topic } from "./convo";
+import { timeline, topicPicker, draftKey, topicBar, type Topic } from "./convo";
 
 // The left pane is the conversation with the agent, and beside it a private
 // helper for questions: what you ask the helper never reaches the thread.
@@ -17,6 +17,7 @@ export function chatPane(t: Thread, review: boolean): string {
   const split = review ? `<div class="splitter" data-split="chat" title="Drag to resize"></div>` : "";
   if (review && S.pane === "ask") return `<div class="chat">${tabs}${askPane(t)}${split}</div>`;
   return `<div class="chat ${review ? "" : "solo"}">${tabs}
+    ${topicBar()}
     <div class="msgs" id="msgs">${timeline((m, topic) => message(m, topic))}</div>
     ${canReply(t) ? composer(t) : `<p class="readonly">Between ${esc(name(t.from))} and ${esc(name(t.to))}. You can read along; only they reply here.</p>`}
     ${split}</div>`;
