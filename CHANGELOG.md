@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.3
+- A session's name comes only from what it sends as (--from). Reading another inbox with --for no longer makes a session receive that reader's mail.
+
 ## 0.1.2
 - Side-by-side diffs: a clear Unified / Split switch, and columns that line up.
 - New Codex and Cursor sessions show their logo as soon as they write.

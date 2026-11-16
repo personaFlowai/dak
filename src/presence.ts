@@ -32,7 +32,8 @@ function ensure() {
     CREATE TABLE IF NOT EXISTS session_names (session_id TEXT PRIMARY KEY, name TEXT NOT NULL, at TEXT NOT NULL)`);
 }
 
-// The name a session goes by is the one it sends as. An agent that runs
+// The name a session goes by is the one it SENDS as (dak send/reply --from). Reading
+// someone's inbox (--for) never changes who you are, or a quick look would take their mail. An agent that runs
 // "dak send --from atlas" inside a Claude Code session is atlas from then on, so its
 // hooks deliver atlas's mail there, whatever folder it runs in. Without this, replies
 // to a name the folder does not produce reach no session at all.

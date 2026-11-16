@@ -206,6 +206,17 @@ describe("session names", () => {
       stdin: new TextEncoder().encode(JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/some-other-folder", session_id: "sess-claim-1" })), stdout: "pipe" });
     expect(hook.stdout.toString()).toContain("Got it");
   });
+
+  test("looking at another reader's inbox does not change who the session is", () => {
+    const env = { ...process.env, DAK_HOME: home, CLAUDE_CODE_SESSION_ID: "sess-claim-2" };
+    Bun.spawnSync(["bun", CLI, "send", "--to", "sam", "--from", "zari", "--subject", "Mine", "x"], { env, cwd: repo });
+    Bun.spawnSync(["bun", CLI, "inbox", "--for", "mitra", "--unread", "--peek", "--json"], { env, cwd: repo });
+    const r = dak("send", "--to", "zari", "--from", "sam", "--subject", "For zari", "hello", "--json");
+    expect(r.code).toBe(0);
+    const hook = Bun.spawnSync(["bun", CLI, "hook", "claude-code"], { env: { ...process.env, DAK_HOME: home },
+      stdin: new TextEncoder().encode(JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/x", session_id: "sess-claim-2" })), stdout: "pipe" });
+    expect(hook.stdout.toString()).toContain("For zari"); // still zari, not mitra
+  });
 });
 
 describe("done topics", () => {

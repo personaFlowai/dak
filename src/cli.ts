@@ -183,7 +183,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "inbox": {
       const reader = String(values.for ?? person(loadConfig())).toLowerCase();
-      touch(reader, { tool: detectTool(), where: process.cwd() }); claimName(reader);
+      touch(reader, { tool: detectTool(), where: process.cwd() });
       if (values.unread) {
         const msgs = takeUnread(reader, { peek: values.peek });
         out(json, msgs, () => msgs.length ? msgs.map(describe).join("\n\n") : "Nothing new.");
@@ -200,7 +200,7 @@ export async function main(argv: string[]): Promise<number> {
       const reader = String(values.for ?? values.from ?? "");
       if (!reader) throw new DakError("no_reader", "Say who is waiting with --for <name>.");
       const { thread } = getThread(id);
-      touch(reader.toLowerCase(), { tool: detectTool(), where: process.cwd() }); claimName(reader.toLowerCase());
+      touch(reader.toLowerCase(), { tool: detectTool(), where: process.cwd() });
       const deadline = Date.now() + parseDuration(values.timeout ?? "15m");
       while (true) {
         const msgs = takeUnread(reader.toLowerCase(), { threadId: thread.id });
@@ -255,7 +255,7 @@ export async function main(argv: string[]): Promise<number> {
       const reader = String(values.for ?? "").toLowerCase();
       if (!reader) throw new DakError("no_reader", "Say whose messages to watch with --for <name>.");
       while (true) {
-        touch(reader, { tool: detectTool(), where: process.cwd() }); claimName(reader);
+        touch(reader, { tool: detectTool(), where: process.cwd() });
         for (const m of takeUnread(reader)) console.log(JSON.stringify(m));
         await Bun.sleep(1000);
       }
