@@ -52,7 +52,8 @@ export const S = {
   find: { open: false, q: "", i: 0, list: false }, // find in the open PR
   archived: {} as Record<string, string>, // conversation (agent, or "a+b") → when you archived it
   showArchived: false,
-  phoneList: true, // on a phone: the list is showing, not what was opened from it
+  phoneList: true,
+  phoneFile: null as string | null, // on a phone: the file open on its own page, inside the current chapter // on a phone: the list is showing, not what was opened from it
   queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string;
     state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null;
     tier: string; rank: number | null; why: string | null; rank_by: string | null; pair_id: string | null; waiting_reason: string | null }[],
@@ -61,6 +62,8 @@ export const S = {
   reviewFilter: local.get("reviewFilter", "") as string, // the merge queue's "Waiting on you": all, or one type
   allTopics: local.get("allTopics", false), // the conversation shows every topic at once, not just the one you are on
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
+  newAtts: [] as { type: "file" | "link"; name: string; mime?: string; base64?: string; url?: string }[], // attached to the message being written
+  linkOpen: false,
   newTopic: false, // the reply box is starting a new thread with this agent, not answering one
   newSubject: "", // scroll positions to put back after the next render
   fileMode: {} as Record<string, "diff" | "full">,
@@ -125,7 +128,8 @@ export const toolOf = (n: string) => agentOf(n)?.tool ?? BY_NAME[n] ?? null;
 
 // One neutral mark for everyone: the tool's logo when known, else the first letter.
 export function mark(n: string, size: "sm" | "md" = "md") {
-  const t = toolOf(n);
+  // You are a person, never a tool, even if a session once sent as your name.
+  const t = n === me ? null : toolOf(n);
   const glyph = t && TOOLS[t]?.mark ? TOOLS[t].mark : `<span>${esc((n === me ? "Y" : n.charAt(0)).toUpperCase())}</span>`;
   return `<span class="mark ${size}" title="${esc(t ? `${name(n)} · ${TOOLS[t]?.label ?? t}` : name(n))}" aria-hidden="true">${glyph}</span>`;
 }

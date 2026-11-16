@@ -837,3 +837,30 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .app.phone .toolbar .tools [data-archive], .app.phone .toolbar .tools [data-unarchive], .app.phone .toolbar .tools [data-done] { display: none; }
 .app.phone .toolbar .tools { flex: none; gap: 6px; }
 .app.phone .toolbar .title { min-width: 0; }
+
+/* New message: the picker, then a plain message box; files and links ride as chips. */
+.newmsg { max-width: 560px; }
+.newmsg .search.big { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; height: 36px; }
+.newmsg .search.big input { flex: 1; border: 0; background: none; font: inherit; color: var(--text); outline: none; }
+.newmsg .picks { border: 0; max-height: none; }
+.nm-to { display: flex; align-items: center; gap: 8px; }
+.nm-to .sub { color: var(--text3); font-size: 12px; }
+.nm-to .link { margin-left: auto; }
+.attach { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.attach .chip-f { cursor: pointer; }
+.att-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 4px 1px 10px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-chip .x { border: 0; background: none; color: var(--text3); font-size: 14px; padding: 0 4px; }
+.link-in { display: inline-flex; gap: 6px; flex: 1; min-width: 220px; }
+.link-in .input { flex: 1; height: 28px; }
+
+/* The phone's file page: back to the chapter at the top, the diff, and the two actions in a bar
+   that stays at the bottom, above the reply bar. */
+.phone-file { display: flex; flex-direction: column; min-height: 100%; }
+.pf-top { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-size: 12.5px; color: var(--text3); border-bottom: 1px solid var(--line2); }
+.pf-top .link { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-text); font-size: 13px; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-top .link svg { width: 14px; height: 14px; flex: none; }
+.phone-file .fcards { padding: 8px 8px 0; }
+.pf-bar { position: sticky; bottom: 64px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 8px 76px; padding: 8px 10px; border-radius: 10px; background: var(--win); box-shadow: 0 0 0 .5px var(--line), 0 6px 18px -10px rgba(0,0,0,.4); }
+.phone-ch .chapter-end { padding: 12px 14px 90px; }
+.app.phone .phone-ch .notes-col { border-bottom: 0; }
+.phone-file .fhead .viewed-box, .phone-file .fhead [data-unfold] { display: none; } /* the bar below holds them */

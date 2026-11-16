@@ -216,5 +216,5 @@ export function topicPicker(): string {
     <select id="topic" aria-label="Topic your reply goes on">${sorted.map((t) =>
       `<option value="${t.thread.id}" ${!S.newTopic && t.thread.id === S.cur ? "selected" : ""}>${esc(topicLabel(t).slice(0, 70))}</option>`).join("")}
       <option value="__new" ${S.newTopic ? "selected" : ""}>New topic…</option></select></span></div>
-    ${S.newTopic ? `<input class="new-subject" id="new-subject" value="${esc(S.newSubject)}" placeholder="Subject" aria-label="Subject of the new topic">` : ""}`;
+`;
 }

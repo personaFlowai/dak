@@ -135,7 +135,8 @@ export function composer(t: Thread, docked = false): string {
   return `<form class="composer ${docked ? "docked" : ""}" id="composer" onsubmit="return false">
     ${docked ? `<div class="dock-top"><span>Reply to ${esc(name(other))}</span><button type="button" class="link" data-dock="close">Hide</button></div>` : ""}
     ${topicPicker()}
-    <textarea id="message" rows="3" aria-label="${esc(hint)}" placeholder="${esc(hint)}">${esc(S.message[key] ?? "")}</textarea>
+    <textarea id="message" rows="3" aria-label="${esc(hint)}" placeholder="${esc(S.newTopic ? "First line is the subject" : hint)}">${esc(S.message[key] ?? "")}</textarea>
+    ${attachBar()}
     <div class="row">
       ${opts.length ? `<label class="popup ${v ? `v-${v}` : ""}" title="What your reply says about the work"><select id="verdict" aria-label="Verdict">${opts.map(([k, l]) => `<option value="${k}" ${(v ?? "") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
       ${gh ? `<label class="check" title="Also post this review and its line comments on GitHub"><input type="checkbox" id="github" ${S.github[t.id] ? "checked" : ""}> GitHub</label>` : ""}
@@ -168,3 +169,13 @@ export function askPane(t: Thread): string {
       <div class="row"><span class="aside">Private to you</span><button type="button" class="btn primary" id="askgo" title="Ask (⌘↩)">Ask</button></div>
     </form></div>`;
 }
+
+// Attachments on a new message or reply: files and links, each removable before sending.
+export function attachBar(): string {
+  const list = S.newAtts.map((a, i) => `<span class="att-chip">${esc(a.name)}<button type="button" class="x" data-remove-att="${i}" aria-label="Remove">×</button></span>`).join("");
+  return `<div class="attach">${list}
+    <label class="chip-f" title="Attach a file">＋ File<input type="file" id="att-file" hidden multiple></label>
+    ${S.linkOpen ? `<span class="link-in"><input class="input" id="att-link" placeholder="https://linear.app/…" autocomplete="off"><button type="button" class="btn" data-add-link>Add</button></span>`
+      : `<button type="button" class="chip-f" data-open-link>＋ Link</button>`}</div>`;
+}
+

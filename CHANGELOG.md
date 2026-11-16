@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.8
+- New message, rebuilt: pick who (your agents first; any other session when you type its name), then write. For an agent you already talk to it opens their conversation as a new topic. No subject box: the first line is the subject. Files and links attach from the reply box; pulling in a GitHub PR is a link at the foot of the picker.
+- Phone: a file opens on a page of its own, with its diff, Reviewed and Next file at the bottom.
+- "I'm reviewing" shows on any thread waiting on you that carries a PR or a doc, however it began.
+- You always show as yourself, never with the logo of a session that sent as you.
+
 ## 0.2.7
 - "Waiting on you" is its own page at the top of the sidebar (PRs, briefs, decisions, filter by type); the merge queue holds only approved PRs on their way out.
 - Phone: files in a chapter start folded ("Show changes"), smaller type, and the toolbar keeps "I'm reviewing" and Approve.

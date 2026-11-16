@@ -91,6 +91,14 @@ function chapterView(a: Pr, chapters: (Chapter & { plain?: boolean })[], files: 
       <p class="hint">To comment, click a line number or select some code. Shift-click or drag for several lines.</p>
       ${fileList(a, files, byFile)}
     </header>`;
+  // On a phone a chapter is its notes and its file list; a file opens on a page of its own,
+  // with its diff and the buttons to mark it reviewed and go on.
+  if (onPhone()) {
+    const paths = [...byFile.keys()];
+    if (S.phoneFile && byFile.has(S.phoneFile)) return phoneFilePage(a, files, byFile, paths, chapters, last);
+    return `<article class="chapter phone-ch" data-key="${a.id}:${S.chapter}"><div class="notes-col">${notes.replace(/<p class="hint">[\s\S]*?<\/p>/, "")}</div>
+      <footer class="chapter-end">${last ? finish() : `<button class="btn primary" data-chapter="${S.chapter + 1}">Next: ${esc(chapters[S.chapter + 1].title)} ${I.next}</button>`}</footer></article>`;
+  }
   const code = `<div class="fcards">${[...byFile].map(([path, starts]) => fileSection(a, files.find((f) => f.path === path), path, starts)).join("")}</div>
     <footer class="chapter-end">
       ${last ? finish() : `<button class="btn primary" data-chapter="${S.chapter + 1}" title="Next chapter (J)">Next: ${esc(chapters[S.chapter + 1].title)} ${I.next}</button>`}
@@ -120,6 +128,22 @@ function finish(): string {
 
 // The chapter's files, each with the lines this chapter adds and removes in it. A click
 // brings that file to the top of the code column.
+function phoneFilePage(a: Pr, files: DiffFile[], byFile: Map<string, number[]>, paths: string[], chapters: Chapter[], last: boolean): string {
+  const path = S.phoneFile!;
+  const i = paths.indexOf(path);
+  const seen = viewed(a.id).has(path);
+  S.unfold.add(`${a.id}:${path}`); // the page is the open file
+  const next = paths[i + 1];
+  const onward = next ? `<button class="btn primary" data-phone-file="${esc(next)}">Next file ${I.next}</button>`
+    : last ? `<button class="btn primary" data-phone-file="">Done with the files</button>`
+    : `<button class="btn primary" data-chapter="${S.chapter + 1}">Next chapter ${I.next}</button>`;
+  return `<article class="phone-file" data-key="${a.id}:${S.chapter}:${esc(path)}">
+    <div class="pf-top"><button class="link" data-phone-file="">${I.prev} ${esc(chapters[S.chapter].title)}</button><span>${i + 1} of ${paths.length}</span></div>
+    <div class="fcards">${fileSection(a, files.find((f) => f.path === path), path, byFile.get(path)!)}</div>
+    <div class="pf-bar"><label class="viewed-box"><input type="checkbox" data-viewed="${esc(path)}" ${seen ? "checked" : ""}> Reviewed</label>${onward}</div>
+  </article>`;
+}
+
 function fileList(a: Pr, files: DiffFile[], byFile: Map<string, number[]>): string {
   const seen = viewed(a.id);
   const rows = [...byFile].map(([path, starts]) => {
@@ -127,7 +151,7 @@ function fileList(a: Pr, files: DiffFile[], byFile: Map<string, number[]>): stri
     let add = 0, del = 0;
     for (const h of f?.hunks ?? []) if (starts.includes(hunkStart(f!, h))) for (const l of h.lines) { if (l[0] === "+") add++; else if (l[0] === "-") del++; }
     const slash = path.lastIndexOf("/");
-    return `<li><button data-goto-file="${esc(path)}" title="${esc(path)}">${fileIcon(path)}<span class="fl-name"><b>${esc(path.slice(slash + 1))}</b><span>${esc(slash >= 0 ? path.slice(0, slash + 1) : "")}</span></span>
+    return `<li><button ${onPhone() ? `data-phone-file="${esc(path)}"` : `data-goto-file="${esc(path)}"`} title="${esc(path)}">${fileIcon(path)}<span class="fl-name"><b>${esc(path.slice(slash + 1))}</b><span>${esc(slash >= 0 ? path.slice(0, slash + 1) : "")}</span></span>
       <span class="n"><span class="a">+${add}</span> <span class="d">−${del}</span></span>${seen.has(path) ? `<span class="fl-ok" title="Reviewed">${I.check}</span>` : ""}</button></li>`;
   }).join("");
   return `<div class="keys"><h3>Files <span>${byFile.size}</span></h3><ul class="files-list">${rows}</ul></div>`;

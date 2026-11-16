@@ -87,6 +87,8 @@ export function detectTool(): string {
 
 export function touch(name: string, info: { tool?: string; where?: string; session?: string } = {}) {
   if (!name) return;
+  // A person is never a session: whatever sent as them, record no tool, folder or session.
+  if (loadConfig().readers.some((r) => r.name === name.toLowerCase() && r.kind === "person")) info = {};
   ensure();
   store().query(`INSERT INTO presence VALUES (?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET
       tool = coalesce(excluded.tool, tool), where_ = coalesce(excluded.where_, where_),

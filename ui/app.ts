@@ -10,7 +10,7 @@ import {
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending } from "./doc";
-import { chatPane, currentVerdict, composer, askPane, canReply } from "./chat";
+import { chatPane, currentVerdict, composer, askPane, canReply, attachBar } from "./chat";
 import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
 import { draftKey, forgetConvo } from "./convo";
@@ -230,7 +230,9 @@ function threadView(): string {
     ? `<button class="btn" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}" title="${t.status === "closed" ? "Bring this topic back" : "This topic is finished: take it out of the conversation"}">${t.status === "closed" ? "Reopen" : `${I.check} Done`}</button>` : "";
   // "I'm reviewing": tells the sender you are on it; the PR stays waiting on you until your verdict.
   const onIt = S.threads.find((x) => x.id === t.id)?.reviewing_since;
-  const reviewingBtn = t.kind === "pr" && t.to === me && t.status === "waiting"
+  // Anything waiting on you with something to read: a PR or a doc, however the thread began.
+  const readable = t.kind !== "note" || S.data!.messages.some((m) => m.attachments.some((x) => x.type === "pr" || x.type === "doc"));
+  const reviewingBtn = readable && t.to === me && t.status === "waiting"
     ? onIt ? `<span class="status reviewing" title="Since ${esc(fullWhen(onIt))}">You're reviewing</span>`
       : `<button class="btn" data-reviewing="${t.id}" title="Tell ${esc(name(t.from))} you are reviewing this">I'm reviewing</button>` : "";
   const right = `${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
@@ -434,46 +436,53 @@ function status(t: Thread): { label: string; cls: string } | null {
 
 /* ================= compose ================= */
 
+/* New message, in two steps. First pick who: your named agents, with what each is waiting on
+   you for; any other session shows only when you type its name. Then write: in that agent's
+   conversation as a new topic when there is one, or here when there is not. The first line
+   is the subject. Pulling in a GitHub PR to read is a link at the foot of the list. */
 function composeView(): string {
   const c = S.compose!;
-  const tabs = `<div class="seg" role="tablist"><button type="button" data-cmode="message" aria-pressed="${c.mode === "message"}">Message</button><button type="button" data-cmode="pr" aria-pressed="${c.mode === "pr"}">GitHub PR</button></div>`;
   if (c.mode === "pr") {
     const folders = [...new Set(S.agents.map((a) => a.where).filter(Boolean) as string[])];
-    return `<div class="pane-body"><form class="form" onsubmit="return false">${tabs}
-      <p class="lead">Pull a pull request in from GitHub to read it here. It lands in your Inbox. Without an agent's chapters it reads one file at a time.</p>
+    return `<div class="pane-body"><form class="form" onsubmit="return false">
+      <p class="lead">Pull a pull request in from GitHub to read it here. It lands in your Inbox; without an agent's chapters it reads one file at a time.</p>
       <div class="field"><label for="c-pr">Pull request</label><input class="input" id="c-pr" value="${esc(c.pr)}" placeholder="github.com/owner/repo/pull/123, or 123"></div>
       <div class="field"><label for="c-repo">Local checkout <span class="opt">optional, for the whole-file view and Ask</span></label>
         <input class="input" id="c-repo" list="c-folders" value="${esc(c.repo)}" placeholder="/Users/you/code/repo"><datalist id="c-folders">${folders.map((f) => `<option value="${esc(f)}">`).join("")}</datalist></div>
       ${c.error ? `<p class="err">${esc(c.error)}</p>` : ""}
-      <div class="btns"><button type="button" class="btn" data-close-compose>Cancel</button><button type="button" class="btn primary" id="c-send" ${c.sending ? "disabled" : ""}>${c.sending ? "Pulling" : "Pull in"}</button></div>
+      <div class="btns"><button type="button" class="btn" data-cmode="message">Back</button><button type="button" class="btn primary" id="c-send" ${c.sending ? "disabled" : ""}>${c.sending ? "Pulling" : "Pull in"}</button></div>
+    </form></div>`;
+  }
+  if (c.to) {
+    // Step 2, for an agent you have no conversation with yet.
+    return `<div class="pane-body"><form class="form newmsg" onsubmit="return false">
+      <div class="nm-to">${mark(c.to)}<b>${esc(name(c.to))}</b><span class="sub">New topic</span><button type="button" class="link" data-to="">Change</button></div>
+      <textarea id="c-body" rows="7" placeholder="First line is the subject">${esc(c.body)}</textarea>
+      ${attachBar()}
+      ${c.error ? `<p class="err">${esc(c.error)}</p>` : ""}
+      <div class="btns"><button type="button" class="btn" data-close-compose>Cancel</button><button type="button" class="btn primary" id="c-send" ${c.sending ? "disabled" : ""}>${c.sending ? "Sending" : "Send"}</button></div>
     </form></div>`;
   }
   const f = c.filter.trim().toLowerCase();
-  const list = S.agents.filter((a) => a.name !== me && (!f || `${a.name} ${a.where ?? ""} ${a.tool ?? ""} ${a.about ?? ""}`.toLowerCase().includes(f)));
-  const groups: [string, AgentRow[]][] = [
-    ["Agents", list.filter((a) => a.reader)],
-    ["Sessions reading Dak", list.filter((a) => !a.reader && a.listening)],
-    ["Running on this Mac", list.filter((a) => !a.reader && !a.listening && a.running)],
-    ["Seen before", list.filter((a) => !a.reader && !a.listening && !a.running)],
-  ];
+  const waiting = (n: string) => S.threads.filter((t) => t.from === n && t.to === me && t.status === "waiting").length;
+  const named = S.agents.filter((a) => a.name !== me && (a.reader || a.about) && a.kind !== "person");
+  const match = (a: AgentRow) => !f || `${a.name} ${a.about ?? ""} ${a.where ?? ""}`.toLowerCase().includes(f);
+  const others = f ? S.agents.filter((a) => a.name !== me && !named.includes(a) && match(a)).slice(0, 20) : [];
   const row = (a: AgentRow) => {
-    const st = a.listening ? "Reading Dak" : a.running ? "Running" : a.last_seen ? `Seen ${when(a.last_seen)}` : "";
-    const sub = a.about ?? (a.where ? a.where.replace(/^\/Users\/[^/]+/, "~") : TOOLS[a.tool ?? ""]?.label ?? "");
-    return `<button type="button" class="pick" data-to="${esc(a.name)}" aria-pressed="${a.name === c.to}">${mark(a.name)}
-      <span class="nm"><b>${esc(name(a.name))}</b><span>${esc(sub)}</span></span><span class="st">${st}</span></button>`;
+    const w = waiting(a.name);
+    // Your agents read by role; another session by its folder, so two of them can be told apart.
+    const what = a.about ?? (named.includes(a) ? TOOLS[a.tool ?? ""]?.label ?? "" : a.where ? a.where.split("/").slice(-2).join("/") : TOOLS[a.tool ?? ""]?.label ?? "");
+    const sub = [what, w ? `${w} waiting on you` : ""].filter(Boolean).join(" · ");
+    return `<button type="button" class="pick" data-to="${esc(a.name)}">${mark(a.name)}<span class="nm"><b>${esc(name(a.name))}</b><span>${esc(sub)}</span></span></button>`;
   };
-  const chosen = S.agents.find((a) => a.name === c.to);
-  const warn = chosen && !chosen.reader && !chosen.listening
-    ? `<p class="note-line">${esc(name(chosen.name))} is not reading Dak yet. The message waits for it, and arrives at its next turn once ${chosen.tool === "claude-code" ? "Claude Code is connected in Settings" : chosen.tool === "codex" ? "Codex is connected in Settings" : `it runs <code>dak inbox --for ${esc(chosen.name)}</code>`}.</p>` : "";
-  return `<div class="pane-body"><form class="form" onsubmit="return false">${tabs}
-    <div class="field"><span class="flabel">To</span><div class="picker">
-      <div class="search">${I.search}<input id="c-filter" value="${esc(c.filter)}" placeholder="Search agents, sessions or folders" aria-label="Search agents"></div>
-      <div class="picks">${groups.filter(([, g]) => g.length).map(([l, g]) => `<div class="group">${l}</div>${g.map(row).join("")}`).join("") || `<p class="empty">No agent matches.</p>`}</div></div></div>
-    ${warn}
-    <div class="field"><label for="c-subject">Subject</label><input class="input" id="c-subject" value="${esc(c.subject)}"></div>
-    <div class="field"><label for="c-body">Message</label><textarea id="c-body" rows="7">${esc(c.body)}</textarea></div>
-    ${c.error ? `<p class="err">${esc(c.error)}</p>` : ""}
-    <div class="btns"><button type="button" class="btn" data-close-compose>Cancel</button><button type="button" class="btn primary" id="c-send" ${c.sending || !c.to ? "disabled" : ""}>${c.sending ? "Sending" : c.to ? `Send to ${esc(name(c.to))}` : "Choose who it is for"}</button></div>
+  const mine = named.filter(match);
+  return `<div class="pane-body"><form class="form newmsg" onsubmit="return false">
+    <div class="search big">${I.search}<input id="c-filter" value="${esc(c.filter)}" placeholder="Who is it for?" aria-label="Who is it for" autocomplete="off"></div>
+    <div class="picks">${mine.length ? `<div class="group">Your agents</div>${mine.map(row).join("")}` : ""}
+      ${others.length ? `<div class="group">Other sessions</div>${others.map(row).join("")}` : ""}
+      ${!mine.length && !others.length ? `<p class="empty">No one matches “${esc(c.filter)}”.</p>` : ""}</div>
+    ${f ? "" : `<p class="note-line">Other sessions show when you type their name.</p>`}
+    <p class="note-line"><button type="button" class="link" data-cmode="pr">Pull in a GitHub PR to read</button></p>
   </form></div>`;
 }
 
@@ -492,12 +501,13 @@ async function sendCompose() {
   c.error = "";
   if (c.mode === "pr" && !c.pr.trim()) { c.error = "Paste the PR link or number."; return renderMain(); }
   if (c.mode === "message" && !c.to) { c.error = "Choose who it is for."; return renderMain(); }
-  if (c.mode === "message" && !c.subject.trim() && !c.body.trim()) { c.error = "Write a subject or a message."; return renderMain(); }
+  if (c.mode === "message" && !c.body.trim()) { c.error = "Write something first."; return renderMain(); }
   c.sending = true; renderMain();
   try {
     const r = c.mode === "pr"
       ? await api<{ thread: Thread }>("/prs", { method: "POST", body: { pr: c.pr.trim(), repo: c.repo.trim() } })
-      : await api<{ thread: Thread }>("/threads", { method: "POST", body: { to: c.to, from: me, subject: c.subject.trim() || c.body.trim().split("\n")[0].slice(0, 80), body: c.body } });
+      : await api<{ thread: Thread }>("/threads", { method: "POST", body: { to: c.to, from: me, subject: firstLine(c.body), body: c.body, attachments: S.newAtts } });
+    S.newAtts = [];
     local.set("compose", {});
     S.compose = null;
     await loadList();
@@ -647,14 +657,23 @@ async function archive(peer: string, on: boolean) {
 }
 
 // A new topic from the reply box: a fresh thread with the agent you are talking to.
+// The subject of a new topic: its first line, without Markdown marks, kept short.
+const firstLine = (body: string) => body.trim().split("\n")[0].replace(/^#+\s*|[*_`]/g, "").trim().slice(0, 90);
+
+function addLink() {
+  const v = $<HTMLInputElement>("#att-link")?.value.trim() ?? "";
+  if (!/^https?:\/\/\S+$/.test(v)) { toast("That is not a link: start it with https://", S.cur ?? ""); return; }
+  S.newAtts.push({ type: "link", name: v.replace(/^https?:\/\//, "").slice(0, 60), url: v }); S.linkOpen = false; renderMain();
+}
+
 async function sendNewTopic() {
   const key = draftKey(), body = (S.message[key] ?? "").trim();
-  const subject = S.newSubject.trim() || body.split("\n")[0].slice(0, 80);
-  if (!body && !subject) { S.sendError = "Write a subject or a message first."; return renderMain(); }
+  const subject = firstLine(body);
+  if (!body) { S.sendError = "Write something first."; return renderMain(); }
   S.sending = true; S.sendError = ""; renderMain();
   try {
-    const r = await api<{ thread: Thread }>("/threads", { method: "POST", body: { to: S.peer, from: me, subject, body } });
-    delete S.message[key]; keepUnsent();
+    const r = await api<{ thread: Thread }>("/threads", { method: "POST", body: { to: S.peer, from: me, subject, body, attachments: S.newAtts } });
+    delete S.message[key]; keepUnsent(); S.newAtts = [];
     S.newTopic = false; S.newSubject = ""; S.sending = false;
     await loadList();
     await openThread(r.thread.id);
@@ -673,8 +692,8 @@ async function send(force?: Verdict) {
   try {
     const r = await api<any>(`/threads/${t.id}/messages`, { method: "POST", body: {
       author: me, body, verdict: v, github: !!S.github[t.id] && !!prLink(),
-      comments: ds.map((d) => ({ attachment_id: d.attachment_id, anchor: d.anchor, body: d.body })) } });
-    saveDrafts(t.id, []); delete S.message[t.id]; delete S.verdict[t.id]; keepUnsent();
+      comments: ds.map((d) => ({ attachment_id: d.attachment_id, anchor: d.anchor, body: d.body })), attachments: S.newAtts } });
+    saveDrafts(t.id, []); delete S.message[t.id]; delete S.verdict[t.id]; keepUnsent(); S.newAtts = [];
     S.sel = null; S.editing = null; S.sending = false;
     await openThread(t.id, true);
     S.sendNote = r.github?.url ? `Posted on GitHub too${r.github.note ? `. ${r.github.note}` : ""}` : "";
@@ -755,6 +774,15 @@ document.addEventListener("input", (e) => {
 document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "topic-jump") return openThread(el.value);
+  if (el.id === "att-file") {
+    // Files ride along as base64; the server stores them as blobs like any other attachment.
+    for (const f of [...((el as HTMLInputElement).files ?? [])]) {
+      if (f.size > 25 * 1024 * 1024) { toast(`${f.name} is over 25 MB`, S.cur ?? ""); continue; }
+      const b64 = await new Promise<string>((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] ?? ""); r.readAsDataURL(f); });
+      S.newAtts.push({ type: "file", name: f.name, mime: f.type || "application/octet-stream", base64: b64 });
+    }
+    return renderMain();
+  }
   // A row's priority, set by you: it wins over the order an agent set.
   if (el.dataset.tierPr || el.dataset.tierReview) {
     const path = el.dataset.tierPr ? `/queue/${el.dataset.tierPr}/priority` : `/reviews/${el.dataset.tierReview}/priority`;
@@ -770,7 +798,7 @@ document.addEventListener("change", async (e) => {
     S.newTopic = false;
     return openThread(el.value);
   }
-  if (el.id === "chapter-pick") { S.chapter = Number(el.value); S.sel = null; S.editing = null; await prepare(); return renderMain(); }
+  if (el.id === "chapter-pick") { S.chapter = Number(el.value); S.phoneFile = null; S.sel = null; S.editing = null; await prepare(); return renderMain(); }
   if (el.id === "version") { useAtt(el.value); await prepare(); return renderMain(); }
   if (el.dataset.wakeClosed !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { wake_closed: el.checked } }); return renderMain(); }
   if (el.dataset.codexListen !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { codex_listen: el.checked } }); return renderMain(); }
@@ -813,7 +841,21 @@ document.addEventListener("click", async (e) => {
   if (d.compose !== undefined) return openCompose();
   if (d.cmode && S.compose) { S.compose.mode = d.cmode as any; S.compose.error = ""; return renderMain(); }
   if (d.closeCompose !== undefined) { S.compose = null; S.view = "thread"; return render(); }
-  if (d.to && S.compose) { S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); return renderMain(); }
+  if (d.to !== undefined && S.compose) {
+    // Someone you already talk to: write the new topic in their conversation, like a reply.
+    const existing = d.to ? topicFor(d.to) : null;
+    if (existing) {
+      const typed = S.compose.body;
+      S.compose = null; await openThread(existing);
+      S.newTopic = true; if (typed.trim()) S.message[draftKey()] = typed;
+      renderMain(); $<HTMLTextAreaElement>("#message")?.focus(); return;
+    }
+    S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); renderMain();
+    $<HTMLTextAreaElement>("#c-body")?.focus(); return;
+  }
+  if (d.openLink !== undefined) { S.linkOpen = true; renderMain(); $<HTMLInputElement>("#att-link")?.focus(); return; }
+  if (d.addLink !== undefined) { addLink(); return; }
+  if (d.removeAtt !== undefined) { S.newAtts.splice(Number(d.removeAtt), 1); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
   if (d.queue !== undefined) { S.view = "queue"; S.phoneList = false; return render(); }
   if (d.waiting !== undefined) { S.view = "waiting"; S.phoneList = false; return render(); }
@@ -857,6 +899,14 @@ document.addEventListener("click", async (e) => {
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
+  if (d.phoneFile !== undefined) {
+    // Each file is a page: open at its top, and back to the chapter where you were.
+    if (d.phoneFile) S.phoneFile = d.phoneFile; else S.phoneFile = null;
+    if (d.phoneFile && !S.phoneFile) return;
+    await prepare(); renderMain();
+    const r = $(".pane-body.review"); if (r) r.scrollTop = 0; const rd = $("#reading"); if (rd) rd.scrollTop = 0;
+    return;
+  }
   if (d.gotoFile) {
     // Bring the file to the top of the code column, under any pinned header.
     const card = document.querySelector<HTMLElement>(`.fcard[data-file="${CSS.escape(d.gotoFile)}"]`);
@@ -885,7 +935,7 @@ document.addEventListener("click", async (e) => {
   if (d.closePane !== undefined) { S.att = null; S.paneClosed = true; S.focus = false; S.dockOpen = false; local.set("focus", false); S.sel = null; S.editing = null; return render(); }
   if (d.att) { S.paneClosed = false; }
   if (d.att) { useAtt(d.att); S.sel = null; S.editing = null; await prepare(); return renderMain(); }
-  if (d.chapter !== undefined) { S.chapter = Number(d.chapter); S.sel = null; S.editing = null; await prepare(); renderMain(); $("#reading")?.scrollTo({ top: 0 }); return; }
+  if (d.chapter !== undefined) { S.chapter = Number(d.chapter); S.phoneFile = null; S.sel = null; S.editing = null; await prepare(); renderMain(); $("#reading")?.scrollTo({ top: 0 }); return; }
   if (d.mode) { const [path, mode] = d.mode.split("|"); S.fileMode[`${S.att}:${path}`] = mode as any; return renderMain(); }
   if (d.reviewed !== undefined) return toggleRead();
   if (d.jump) {
@@ -1047,6 +1097,7 @@ document.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).cl
 document.addEventListener("scroll", () => { if (pending) readSelection(); }, true);
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.target as HTMLElement)?.id === "att-link") { e.preventDefault(); return addLink(); }
   const id = document.activeElement?.id ?? "";
   const typing = /^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement?.tagName ?? "");
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
