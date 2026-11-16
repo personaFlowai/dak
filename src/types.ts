@@ -1,0 +1,116 @@
+// The protocol's shapes. Everything an agent sends or receives is one of these,
+// serialised as JSON by the CLI (--json) and the HTTP API alike.
+
+export type ThreadKind = "pr" | "doc" | "note";
+// informed: the sender said no reply is needed (an update, a heads-up).
+export type ThreadStatus = "waiting" | "answered" | "picked_up" | "informed" | "closed";
+export type Verdict = "approve" | "changes" | "question";
+
+export interface Reader {
+  name: string;
+  kind: "person" | "agent";
+}
+
+export interface Thread {
+  id: string;
+  to: string;
+  from: string;
+  subject: string;
+  kind: ThreadKind;
+  status: ThreadStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Message {
+  id: number; // global, increasing: doubles as the cursor for polling
+  thread_id: string;
+  author: string;
+  body: string;
+  verdict: Verdict | null;
+  created_at: string;
+  attachments: Attachment[];
+  comments: Comment[];
+  options?: string[]; // buttons the reader can answer with, in the sender's order
+  choice?: string; // on a reply: the option the reader picked
+}
+
+export type Attachment =
+  | { id: string; type: "pr"; name: string; meta: PrMeta }
+  | { id: string; type: "doc"; name: string; meta: DocMeta }
+  | { id: string; type: "file"; name: string; meta: FileMeta }
+  | { id: string; type: "link"; name: string; meta: { url: string } };
+
+export interface PrMeta {
+  url: string | null;
+  number: number | null;
+  title: string | null;
+  repo: string | null; // local path the diff came from, used by Explain
+  base_sha: string | null;
+  head_sha: string | null;
+  diff_blob: string;
+  files: PrFile[];
+  chapters: Chapter[];
+  prologue?: Prologue;
+}
+
+export interface Prologue {
+  why?: string; // the problem, in plain words
+  what?: string; // what the PR does about it
+  focus?: string[]; // where the reviewer should spend their attention
+}
+
+export interface PrFile {
+  path: string;
+  old_path: string | null;
+  status: "added" | "deleted" | "modified" | "renamed";
+  additions: number;
+  deletions: number;
+  new_blob: string | null; // whole file at head, so the file view outlives the branch
+}
+
+export interface Chapter {
+  title: string;
+  summary: string;
+  risk: "low" | "medium" | "high";
+  risk_why?: string;
+  // The context a reviewer needs beyond the code. All optional; check() asks for proof on a high-risk chapter.
+  why?: string; // why this part of the change exists
+  check?: string[]; // what to check: concrete questions to answer while reading
+  proof?: string; // how the risk is proven: the test, the run, the number
+  noticed?: string; // what a person using the product will notice, or that nothing visible changes
+  reviewer_note?: { by: string; text: string }; // from whoever read the code, if not the author
+  hunks: { file: string; start: number }[];
+  key_changes?: { text: string; file: string; side?: "old" | "new"; line: number }[];
+}
+
+export interface DocMeta {
+  blob: string;
+  version: number;
+}
+
+export interface FileMeta {
+  blob: string;
+  size: number;
+  mime: string;
+}
+
+export type Anchor =
+  | { kind: "code"; file: string; side: "old" | "new"; start_line: number; end_line: number }
+  | { kind: "doc"; version: number; block_index: number; block_hash: string; quote: string; exact?: boolean }; // exact: quote is words the reader selected
+
+export interface Comment {
+  id: number;
+  thread_id: string;
+  message_id: number;
+  attachment_id: string | null;
+  author: string;
+  anchor: Anchor | null;
+  body: string;
+}
+
+export class DakError extends Error {
+  constructor(public code: string, message: string, public status = 400) {
+    super(message);
+  }
+}

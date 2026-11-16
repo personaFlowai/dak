@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+mac/.build/
+mac/Dak.app/
+
+# Bun writes these next to the source while compiling
+*.bun-build
+.build/

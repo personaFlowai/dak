@@ -1,0 +1,413 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { loadConfig, person, token } from "./config";
+import {
+  addMessage, blobPath, createThread, getThread, latestMessageId, listThreads, markRead, putBlob,
+  requireReader, takeUnread, archives, setArchived, setStatus, search, type NewAttachment, type NewComment,
+} from "./store";
+import { explain, ask } from "./explain";
+import { HELPERS, setHelper, setModel, writeConfig, type HelperName } from "./config";
+import { connected, connect, disconnect, type HookTool } from "./claude-hooks";
+import { codexDefaultModel } from "./presence";
+import { postReview } from "./github";
+import { waitForMail } from "./wake";
+import { INSTRUCTIONS, installSkill } from "./skill";
+import { snapshotPr } from "./pr";
+import { agentForKey, agentKey, closeDoor, doorStatus, instructionsFor, openDoor, revokeKey } from "./tunnel";
+import type { PrMeta } from "./types";
+import { agents, touch } from "./presence";
+import { DakError, type Verdict } from "./types";
+// Embedded at compile time, so the single dak binary carries its own screens.
+import indexHtml from "../dist/ui/index.html" with { type: "text" };
+import appJs from "../dist/ui/app.js" with { type: "text" };
+import styleCss from "../dist/ui/style.css" with { type: "text" };
+
+// DAK_DEV=1 reads the screens from dist/ui on every request, so a rebuild shows without a restart.
+const asset = (file: string, embedded: string) =>
+  process.env.DAK_DEV ? readFileSync(join(import.meta.dir, "..", "dist", "ui", file), "utf8") : embedded;
+
+const json = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+
+const fail = (e: unknown) => {
+  if (e instanceof DakError) return json({ error: { code: e.code, message: e.message } }, e.status);
+  console.error(e);
+  return json({ error: { code: "internal", message: "Something went wrong inside Dak. The server log has the details." } }, 500);
+};
+
+export function serve(port?: number) {
+  const cfg = loadConfig();
+  // A connected tool's copy of the Dak instructions follows this version of Dak.
+  for (const t of ["claude", "codex"] as const) { try { if (connected(t)) installSkill(t); } catch { /* never block the server */ } }
+  const p = port ?? cfg.port;
+  const secret = token();
+  const allowedHosts = new Set([`127.0.0.1:${p}`, `localhost:${p}`]);
+
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port: p,
+    idleTimeout: 60,
+    async fetch(req, server) {
+      const url = new URL(req.url);
+      // A wake request waits for hours; Bun's idle timeout would cut it after a minute.
+      if (url.pathname === "/v1/wake") server.timeout(req, 0);
+      if (url.pathname.startsWith("/x/")) {
+        try { return await outside(req, url); } catch (e) { return fail(e); }
+      }
+      // A page on another site can point a request here (or rebind a domain to
+      // 127.0.0.1); checking Host and Origin refuses both before anything runs.
+      if (!allowedHosts.has(req.headers.get("host") ?? "")) return new Response("Wrong host", { status: 403 });
+      const origin = req.headers.get("origin");
+      if (origin && !allowedHosts.has(origin.replace(/^http:\/\//, ""))) return new Response("Wrong origin", { status: 403 });
+
+      try {
+        if (url.pathname === "/" || url.pathname === "/index.html") {
+          const c = loadConfig();
+          const boot = `<script>window.DAK=${JSON.stringify({ token: secret, me: person(c), readers: c.readers })}</script>`;
+          return new Response(asset("index.html", indexHtml as unknown as string).replace("<!--BOOT-->", boot), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+        }
+        if (url.pathname === "/app.js") return new Response(asset("app.js", appJs), { headers: { "content-type": "text/javascript; charset=utf-8" } });
+        if (url.pathname === "/style.css") return new Response(asset("style.css", styleCss), { headers: { "content-type": "text/css; charset=utf-8" } });
+        if (!url.pathname.startsWith("/v1/")) return new Response("Not found", { status: 404 });
+
+        const auth = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
+        if (auth !== secret) throw new DakError("unauthorised", "Send the token from ~/.dak/token as: Authorization: Bearer <token>", 401);
+        return await api(req, url);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  });
+}
+
+// The only routes reachable through a tunnel. The caller is whoever its agent key
+// names; it sends as that agent, to the person, and reads only its own threads.
+async function outside(req: Request, url: URL): Promise<Response> {
+  const agent = agentForKey(req.headers.get("authorization")?.replace(/^Bearer /, "") ?? null);
+  if (!agent) throw new DakError("unauthorised", "Send your Dak key as: Authorization: Bearer <key>", 401);
+  const parts = url.pathname.split("/").filter(Boolean).slice(1);
+  const me = person(loadConfig());
+  const body = async () => {
+    const text = await req.text();
+    if (text.length > 64_000) throw new DakError("too_large", "Keep a message under 64 KB.", 413);
+    try { return JSON.parse(text || "{}"); } catch { throw new DakError("bad_json", "The request body must be JSON."); }
+  };
+  const ownThread = (id: string) => {
+    const t = getThread(id).thread;
+    if (t.from !== agent && t.to !== agent) throw new DakError("no_thread", `No thread ${id}.`, 404);
+    return t;
+  };
+  touch(agent, { tool: "grok" === agent ? "grok" : "http" });
+  if (parts[0] === "send" && req.method === "POST") {
+    const b = await body();
+    const atts = b.link ? [{ type: "link", name: String(b.link), meta: { url: String(b.link) } } as any] : [];
+    return json(createThread({ to: me, from: agent, subject: String(b.subject ?? "").slice(0, 200) || String(b.body ?? "").split("\n")[0].slice(0, 80), kind: "note", body: String(b.body ?? ""), attachments: atts, options: optionsOf(b), ...(b.needs_reply === false ? { needs_reply: false } : {}) }), 201);
+  }
+  if (parts[0] === "reply" && parts[1] && req.method === "POST") {
+    ownThread(parts[1]);
+    const b = await body();
+    const m = addMessage(parts[1], { author: agent, body: String(b.body ?? ""), options: optionsOf(b), ...(b.needs_reply === false || b.done === true ? { needs_reply: false } : {}) });
+    if (b.done === true) setStatus(parts[1], "closed");
+    return json(m, 201);
+  }
+  if (parts[0] === "wait" && parts[1] && req.method === "GET") {
+    ownThread(parts[1]);
+    const deadline = Date.now() + Math.min(Number(url.searchParams.get("timeout") ?? 25), 55) * 1000;
+    while (Date.now() < deadline) {
+      const msgs = takeUnread(agent, { threadId: parts[1] });
+      if (msgs.length) return json({ messages: msgs });
+      await Bun.sleep(700);
+    }
+    return json({ messages: [], timed_out: true });
+  }
+  if (parts[0] === "inbox" && req.method === "GET") return json(takeUnread(agent));
+  throw new DakError("not_found", "The outside routes are /x/send, /x/reply/<id>, /x/wait/<id> and /x/inbox.", 404);
+}
+
+async function api(req: Request, url: URL): Promise<Response> {
+  const parts = url.pathname.split("/").filter(Boolean).slice(1); // after "v1"
+  const q = url.searchParams;
+  const method = req.method;
+  const body = async () => { try { return await req.json() as any; } catch { throw new DakError("bad_json", "The request body must be JSON."); } };
+
+  if (parts[0] === "me" && method === "GET") {
+    const c = loadConfig();
+    return json({ me: person(c), readers: c.readers });
+  }
+
+  if (parts[0] === "threads" && parts.length === 1) {
+    if (method === "GET") {
+      const reader = q.get("for") ?? person(loadConfig());
+      const box = (q.get("box") ?? "all") as any;
+      return json(listThreads(reader, { box }));
+    }
+    if (method === "POST") {
+      const b = await body();
+      const atts = httpAttachments(b.attachments);
+      const kind = atts.some((a) => a.type === "doc") ? "doc" : "note";
+      if (b.from) touch(String(b.from), { tool: b.from === person(loadConfig()) ? null as any : "http" });
+      return json(createThread({ to: b.to, from: b.from ?? "", subject: b.subject ?? "", kind, body: b.body ?? "", attachments: atts, options: optionsOf(b), ...(b.needs_reply === false ? { needs_reply: false } : {}) }), 201);
+    }
+  }
+
+  if (parts[0] === "threads" && parts[1]) {
+    const id = parts[1];
+    if (parts.length === 2 && method === "GET") {
+      const t = getThread(id);
+      const readAs = q.get("read_as");
+      if (readAs && t.messages.length) markRead(readAs, id, t.messages[t.messages.length - 1].id);
+      return json(t);
+    }
+    // Done: the topic leaves the conversation until the agent sends something that needs you.
+    if (parts[2] === "done" && method === "POST") {
+      const b = await body();
+      setStatus(id, b.done === false ? "answered" : "closed");
+      return json(getThread(id).thread);
+    }
+    if (parts[2] === "messages" && method === "POST") {
+      const b = await body();
+      const verdict = b.verdict as Verdict | undefined;
+      if (verdict && !["approve", "changes", "question"].includes(verdict)) throw new DakError("bad_verdict", "A verdict is approve, changes or question.");
+      const comments: NewComment[] = Array.isArray(b.comments) ? b.comments : [];
+      const message = addMessage(id, { author: b.author ?? b.from ?? "", body: b.body ?? "", verdict: verdict ?? null, comments, attachments: httpAttachments(b.attachments), options: optionsOf(b),
+        ...(b.choice ? { choice: choiceOn(id, String(b.choice)) } : {}), ...(typeof b.needs_reply === "boolean" ? { needs_reply: b.needs_reply } : {}) });
+      if (b.done === true) setStatus(id, "closed"); // the sender says the work is finished
+      // Posting to GitHub happens after the reply is saved: a GitHub failure never loses the review.
+      let github: { url?: string; event?: string; note?: string; error?: string } | undefined;
+      if (b.github) {
+        const prAtt = getThread(id).messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop();
+        if (!prAtt) github = { error: "This thread has no PR to post to." };
+        else {
+          const forPr = comments.filter((c) => !c.attachment_id || c.attachment_id === prAtt.id);
+          try { github = await postReview(prAtt.meta as PrMeta, b.body ?? "", verdict ?? null, forPr as any); }
+          catch (e: any) { github = { error: e.message }; }
+        }
+      }
+      return json({ ...message, ...(github ? { github } : {}) }, 201);
+    }
+    if (parts[2] === "wait" && method === "GET") {
+      const reader = q.get("for");
+      if (!reader) throw new DakError("no_reader", "Say who is waiting with ?for=<name>.");
+      getThread(id);
+      const deadline = Date.now() + Math.min(Number(q.get("timeout") ?? 25), 55) * 1000;
+      while (Date.now() < deadline) {
+        const msgs = takeUnread(reader, { threadId: id });
+        if (msgs.length) return json({ thread: getThread(id).thread, messages: msgs });
+        await Bun.sleep(500);
+      }
+      return json({ thread: getThread(id).thread, messages: [], timed_out: true });
+    }
+  }
+
+  if (parts[0] === "inbox" && method === "GET") {
+    const reader = q.get("for");
+    if (!reader) throw new DakError("no_reader", "Say whose inbox with ?for=<name>.");
+    touch(reader, { tool: "http" });
+    if (q.get("unread")) return json(takeUnread(reader, { peek: q.get("peek") === "1" }));
+    return json(listThreads(reader));
+  }
+
+  if (parts[0] === "wake" && method === "POST") {
+    const text = await waitForMail(await body(), Number(req.headers.get("x-dak-pid") ?? 0), req.signal);
+    return text ? new Response(text, { headers: { "content-type": "text/plain; charset=utf-8" } }) : new Response(null, { status: 204 });
+  }
+  if (parts[0] === "search" && method === "GET") {
+    // Each hit carries a short window of text around the match, not a whole PR's metadata.
+    const q = (url.searchParams.get("q") ?? "").trim(), low = q.toLowerCase();
+    // A match inside an attachment's details (a chapter title, a key change) shows that sentence, not the raw record.
+    const readable = (text: string) => {
+      const brace = text.indexOf(" {");
+      if (brace < 0) return text;
+      try {
+        const found: string[] = [];
+        const walk = (v: any) => { if (typeof v === "string") { if (v.toLowerCase().includes(low)) found.push(v); } else if (v && typeof v === "object") Object.values(v).forEach(walk); };
+        walk(JSON.parse(text.slice(brace + 1)));
+        return found[0] ?? text.slice(0, brace);
+      } catch { return text; }
+    };
+    return json(search(q).map((raw) => {
+      const h = { ...raw, text: readable(raw.text) };
+      const i = Math.max(0, h.text.toLowerCase().indexOf(low));
+      const text = h.text.length > 160 ? (i > 60 ? "…" : "") + h.text.slice(Math.max(0, i - 60), i + 100).replace(/\s+/g, " ") + "…" : h.text.replace(/\s+/g, " ");
+      return { ...h, text };
+    }));
+  }
+  if (parts[0] === "archives") {
+    const reader = person(loadConfig());
+    if (method === "GET") return json(archives(reader));
+    if (method === "PUT" || method === "DELETE") { const b = await body(); return json(setArchived(reader, String(b.peer ?? ""), method === "PUT")); }
+  }
+  if (parts[0] === "settings" && method === "GET") return json(settings());
+  if (parts[0] === "settings" && method === "PUT") {
+    const b = await body();
+    if (b.helper) {
+      if (!["claude", "codex", "cursor", "custom"].includes(b.helper)) throw new DakError("bad_helper", "The helper is claude, codex, cursor or custom.");
+      setHelper(b.helper as HelperName, Array.isArray(b.command) ? b.command.map(String) : undefined);
+    }
+    if (b.model && typeof b.model === "object") {
+      if (!["claude", "codex", "cursor"].includes(b.model.helper)) throw new DakError("bad_helper", "A model belongs to claude, codex or cursor.");
+      try { setModel(b.model.helper, String(b.model.value ?? "")); }
+      catch { throw new DakError("bad_model", "A model name is letters, digits, dots, dashes and slashes."); }
+    }
+    if (b.reader?.name) {
+      const c = loadConfig();
+      const r = c.readers.find((x) => x.name === String(b.reader.name).toLowerCase());
+      if (!r) throw new DakError("unknown_reader", `No reader ${b.reader.name}.`, 404);
+      for (const k of ["about", "tool", "where"] as const) {
+        if (k in b.reader) { const v = String(b.reader[k] ?? "").trim(); if (v) (r as any)[k] = v; else delete (r as any)[k]; }
+      }
+      writeConfig(c);
+    }
+    return json(settings());
+  }
+  if (parts[0] === "connect" && (parts[1] === "claude" || parts[1] === "codex" || parts[1] === "cursor")) {
+    const t = parts[1] as HookTool;
+    if (method === "POST") connect(t, dakBinary());
+    else if (method === "DELETE") disconnect(t);
+    return json(settings());
+  }
+
+  if (parts[0] === "ask" && method === "POST") {
+    const b = await body();
+    if (!b.thread_id) throw new DakError("bad_request", "Ask needs thread_id.");
+    return json(await ask({ thread_id: b.thread_id, question: b.question, attachment_id: b.attachment_id, file: b.file,
+      side: b.side === "old" ? "old" : "new", start_line: b.start_line ? Number(b.start_line) : undefined,
+      end_line: b.end_line ? Number(b.end_line) : undefined, quote: b.quote, history: Array.isArray(b.history) ? b.history.slice(-6) : [] }));
+  }
+
+  if (parts[0] === "prs" && method === "POST") {
+    // Pull a GitHub PR in for review, as a thread from "github" to the person.
+    const b = await body();
+    const pr = String(b.pr ?? "").trim();
+    if (!pr) throw new DakError("bad_request", "Give a PR number or its GitHub link.");
+    const repo = String(b.repo ?? "").trim() || undefined;
+    const { meta } = snapshotPr({ pr, repo });
+    const me = person(loadConfig());
+    return json(createThread({ to: me, from: "github", subject: meta.title ?? `PR ${pr}`, kind: "pr",
+      body: String(b.note ?? ""), attachments: [{ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta }] }), 201);
+  }
+
+  if (parts[0] === "door") {
+    const c = loadConfig();
+    if (method === "GET") return json(withInstructions(doorStatus()));
+    if (method === "POST") {
+      const b = await body();
+      const agent = String(b.agent ?? "grok").toLowerCase();
+      if (!/^[a-z0-9_-]{1,40}$/.test(agent)) throw new DakError("bad_name", "An agent name is letters, digits, - or _.");
+      if (b.rotate) agentKey(agent, true);
+      return json(withInstructions(await openDoor(agent, c.port, b.tool === "ngrok" ? "ngrok" : "cloudflare")));
+    }
+    if (method === "DELETE") { const s = doorStatus() as any; closeDoor(); if (s.agent && url.searchParams.get("revoke")) revokeKey(s.agent); return json({ open: false }); }
+  }
+
+  if (parts[0] === "agents" && method === "GET") return json(agents({ scan: q.get("scan") === "1" }));
+
+  if (parts[0] === "summary" && method === "GET") {
+    const reader = q.get("for") ?? person(loadConfig());
+    const list = listThreads(reader, { box: "all" });
+    const waiting = list.filter((t) => t.unread > 0);
+    return json({ latest_id: latestMessageId(), unread: waiting.length,
+      threads: waiting.slice(0, 10).map((t) => ({ id: t.id, subject: t.subject, from: t.last_author || t.from, kind: t.kind, preview: t.last_body.slice(0, 140) })) });
+  }
+
+  if (parts[0] === "blobs" && parts[1] && method === "GET") {
+    const file = Bun.file(blobPath(parts[1]));
+    const type = q.get("type") || "application/octet-stream";
+    return new Response(file, { headers: { "content-type": type, "cache-control": "private, max-age=31536000, immutable" } });
+  }
+
+  if (parts[0] === "explain" && method === "POST") {
+    const b = await body();
+    for (const k of ["thread_id", "attachment_id", "file", "start_line"]) if (b[k] === undefined) throw new DakError("bad_request", `Explain needs ${k}.`);
+    return json(await explain({ thread_id: b.thread_id, attachment_id: b.attachment_id, file: b.file, side: b.side === "old" ? "old" : "new",
+      start_line: Number(b.start_line), end_line: Number(b.end_line ?? b.start_line), question: b.question }));
+  }
+
+  if (parts[0] === "events" && method === "GET") {
+    // Other processes (the CLI) write the same file, so the server watches the
+    // newest message id rather than relying on its own writes.
+    let last = latestMessageId();
+    let timer: ReturnType<typeof setInterval>;
+    const stream = new ReadableStream({
+      start(ctrl) {
+        const enc = new TextEncoder();
+        ctrl.enqueue(enc.encode(`event: hello\ndata: ${last}\n\n`));
+        timer = setInterval(() => {
+          try {
+            const id = latestMessageId();
+            if (id !== last) { last = id; ctrl.enqueue(enc.encode(`event: message\ndata: ${id}\n\n`)); }
+            else ctrl.enqueue(enc.encode(`: keep-alive\n\n`));
+          } catch { clearInterval(timer); }
+        }, 800);
+      },
+      cancel() { clearInterval(timer); },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" } });
+  }
+
+  throw new DakError("not_found", `No route ${method} ${url.pathname}.`, 404);
+}
+
+function withInstructions(s: any) {
+  if (!s.open || !s.url) return s;
+  return { ...s, instructions: instructionsFor(s.agent, s.url, agentKey(s.agent), person(loadConfig())) };
+}
+
+function dakBinary(): string {
+  // Compiled: this very binary. From source: the dak on PATH.
+  return process.execPath.endsWith("/bun") ? "dak" : process.execPath;
+}
+
+function which(bin: string): boolean {
+  return Bun.spawnSync(["/bin/sh", "-c", `command -v ${bin}`], { stdout: "pipe", env: { ...process.env, PATH: `${process.env.PATH}:${process.env.HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin` } }).exitCode === 0;
+}
+
+let ghCache: { at: number; login: string | null } | null = null;
+function ghLogin(): string | null {
+  if (ghCache && Date.now() - ghCache.at < 60_000) return ghCache.login;
+  const p = Bun.spawnSync(["gh", "api", "user", "--jq", ".login"], { stdout: "pipe", stderr: "pipe" });
+  ghCache = { at: Date.now(), login: p.exitCode === 0 ? p.stdout.toString().trim() : null };
+  return ghCache.login;
+}
+
+function settings() {
+  const c = loadConfig();
+  return {
+    me: person(c),
+    readers: c.readers,
+    helper: c.helper,
+    command: c.explain.command,
+    models: c.models,
+    helpers: Object.entries(HELPERS).map(([id, h]) => ({ id, label: h.label, installed: which(h.command[0]) })),
+    claude_connected: connected("claude"),
+    codex_connected: connected("codex"),
+    cursor_connected: connected("cursor"),
+    default_models: { codex: codexDefaultModel() },
+    github_login: ghLogin(),
+    instructions: INSTRUCTIONS, // what Settings offers to copy into Cursor's rules, or any other agent
+  };
+}
+
+// Over HTTP a doc or file arrives inline: { type: "doc", name, content } or
+// { type: "file", name, base64, mime }. Links are { type: "link", url }.
+function httpAttachments(list: any): NewAttachment[] {
+  if (!Array.isArray(list)) return [];
+  return list.map((a: any) => {
+    if (a?.type === "doc") return { type: "doc", name: String(a.name ?? "doc.md"), meta: { blob: putBlob(String(a.content ?? "")), version: Number(a.version ?? 1) } };
+    if (a?.type === "file") {
+      const bytes = Buffer.from(String(a.base64 ?? ""), "base64");
+      return { type: "file", name: String(a.name ?? "file"), meta: { blob: putBlob(bytes), size: bytes.length, mime: String(a.mime ?? "application/octet-stream") } };
+    }
+    if (a?.type === "link") return { type: "link", name: String(a.name ?? a.url), meta: { url: String(a.url) } };
+    throw new DakError("bad_attachment", "An attachment is a doc, a file or a link. PRs are sent with the CLI, which can read the repo.");
+  }) as NewAttachment[];
+}
+
+const optionsOf = (b: any): string[] | undefined => (Array.isArray(b?.options) ? b.options.map(String) : undefined);
+
+// A choice must be one of the buttons offered on this thread, so the sender can match it exactly.
+function choiceOn(threadId: string, choice: string): string {
+  const offered = getThread(threadId).messages.flatMap((m) => m.options ?? []);
+  if (!offered.includes(choice)) throw new DakError("bad_choice", `"${choice}" is not one of the options on this thread.`);
+  return choice;
+}

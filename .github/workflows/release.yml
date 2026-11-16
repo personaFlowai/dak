@@ -1,0 +1,32 @@
+# A tag like v0.2.0 builds the CLI and the Mac app for Apple silicon and Intel, and
+# attaches them to a GitHub release. install.sh downloads from the latest release.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.42
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - name: Build the CLI for both chips
+        run: bun run build:release
+      - name: Build the Mac app for both chips
+        run: |
+          for arch in arm64 x64; do
+            DAK_ARCH=$arch sh mac/build.sh
+            ditto -c -k --keepParent mac/Dak.app "dist/release/Dak-macos-$arch.zip"
+          done
+      - name: Checksums
+        run: cd dist/release && shasum -a 256 dak-darwin-* Dak-macos-*.zip > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/release/dak-darwin-* dist/release/Dak-macos-*.zip dist/release/SHA256SUMS --title "Dak $GITHUB_REF_NAME" --generate-notes

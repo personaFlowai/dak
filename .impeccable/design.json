@@ -1,0 +1,480 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-16T03:37:28.470944+00:00",
+  "title": "Design System: Dak",
+  "extensions": {
+    "colorMeta": {
+      "india-post-red": {
+        "role": "primary",
+        "displayName": "Petrol",
+        "dark": "#e0233f",
+        "tonalRamp": [
+          "#3d0510",
+          "#5e0818",
+          "#8a0c22",
+          "#1f6f8b",
+          "#e0233f",
+          "#f0627a",
+          "#f7a8b5",
+          "#fde6ea"
+        ]
+      },
+      "india-post-red-hover": {
+        "role": "primary",
+        "displayName": "Red Hover",
+        "dark": "#f03a55"
+      },
+      "india-post-red-text": {
+        "role": "primary",
+        "displayName": "Red Text",
+        "dark": "#ff6b7f"
+      },
+      "red-tint": {
+        "role": "primary",
+        "displayName": "Red Tint",
+        "dark": "rgba(224,35,63,.14)"
+      },
+      "red-tint-strong": {
+        "role": "primary",
+        "displayName": "Red Tint Strong",
+        "dark": "rgba(224,35,63,.22)"
+      },
+      "post-yellow": {
+        "role": "tertiary",
+        "displayName": "Post Yellow (icon stamp only)",
+        "tonalRamp": [
+          "#3d2e01",
+          "#6b5002",
+          "#a07803",
+          "#d9a204",
+          "#f2b705",
+          "#f7cd4f",
+          "#fbe39a",
+          "#fef6dd"
+        ]
+      },
+      "window": {
+        "role": "neutral",
+        "displayName": "Window",
+        "dark": "#1e1e1e",
+        "tonalRamp": [
+          "#1d1d1f",
+          "#3a3a3c",
+          "#48484d",
+          "#86868b",
+          "#b0b0b5",
+          "#d8d8dc",
+          "#f3f3f3",
+          "#ffffff"
+        ]
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "Sidebar",
+        "dark": "#262626"
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "dark": "#232323"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "dark": "#f2f2f7",
+        "tonalRamp": [
+          "#1d1d1f",
+          "#3a3a3c",
+          "#48484d",
+          "#86868b",
+          "#b0b0b5",
+          "#d8d8dc",
+          "#f3f3f3",
+          "#ffffff"
+        ]
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Ink Secondary",
+        "dark": "#c7c7cc"
+      },
+      "ink-tertiary": {
+        "role": "neutral",
+        "displayName": "Ink Tertiary",
+        "dark": "#8e8e93"
+      },
+      "ink-quaternary": {
+        "role": "neutral",
+        "displayName": "Ink Quaternary",
+        "dark": "#5a5a5f"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "dark": "rgba(255,255,255,.1)"
+      },
+      "hairline-soft": {
+        "role": "neutral",
+        "displayName": "Hairline Soft",
+        "dark": "rgba(255,255,255,.06)"
+      },
+      "hover-wash": {
+        "role": "neutral",
+        "displayName": "Hover Wash",
+        "dark": "rgba(255,255,255,.06)"
+      },
+      "press-wash": {
+        "role": "neutral",
+        "displayName": "Press Wash",
+        "dark": "rgba(255,255,255,.1)"
+      },
+      "selection-grey": {
+        "role": "neutral",
+        "displayName": "Selection Grey",
+        "dark": "rgba(255,255,255,.1)"
+      },
+      "added-green": {
+        "role": "functional",
+        "displayName": "Added Green",
+        "dark": "#63d08a",
+        "tonalRamp": [
+          "#0a2914",
+          "#10421f",
+          "#175d2c",
+          "#1f7a3f",
+          "#3fa564",
+          "#63d08a",
+          "#a6e6bc",
+          "#e3f7ea"
+        ]
+      },
+      "added-bg": {
+        "role": "functional",
+        "displayName": "Added Wash",
+        "dark": "rgba(99,208,138,.09)"
+      },
+      "removed-red": {
+        "role": "functional",
+        "displayName": "Removed Red",
+        "dark": "#ff8a80",
+        "tonalRamp": [
+          "#3c0c08",
+          "#5e130c",
+          "#861b11",
+          "#b42318",
+          "#d9483c",
+          "#ff8a80",
+          "#ffc1bb",
+          "#ffeceb"
+        ]
+      },
+      "removed-bg": {
+        "role": "functional",
+        "displayName": "Removed Wash",
+        "dark": "rgba(255,138,128,.08)"
+      },
+      "caution-amber": {
+        "role": "functional",
+        "displayName": "Caution Amber",
+        "dark": "#f0b04a",
+        "tonalRamp": [
+          "#2e1b00",
+          "#4d2e00",
+          "#734500",
+          "#9a5b00",
+          "#c98012",
+          "#f0b04a",
+          "#f7d49a",
+          "#fdf1dd"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "A document's title only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "A PR overview's title."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "A chapter's title; doc h2 16.5px, settings h2 15px."
+      },
+      "body-reading": {
+        "displayName": "Reading body",
+        "purpose": "Document paragraphs in a 700px column; PR overview 14px/1.6."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The interface base: rows, buttons, inputs, messages."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Sentence-case grey section labels, 11 to 12px, never uppercase."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Diff tables and file paths in SF Mono."
+      }
+    },
+    "syntax": {
+      "light": {
+        "keyword": "#9b2393",
+        "string": "#c41a16",
+        "comment": "#707f8c",
+        "function": "#326d74",
+        "number": "#1c00cf",
+        "type": "#0b4f79",
+        "attribute": "#815f03"
+      },
+      "dark": {
+        "keyword": "#fc5fa3",
+        "string": "#fc6a5d",
+        "comment": "#7f8c98",
+        "function": "#67b7a4",
+        "number": "#d0bf69",
+        "type": "#5dd8ff",
+        "attribute": "#ffa14f"
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 0 0 .5px var(--line), 0 1px 2px rgba(0,0,0,.06), 0 8px 24px -12px rgba(0,0,0,.18)",
+        "dark": "0 0 0 .5px var(--line), 0 1px 2px rgba(0,0,0,.3), 0 10px 28px -12px rgba(0,0,0,.6)",
+        "purpose": "Composer, editing comment, selection popover, toast."
+      },
+      {
+        "name": "push-button",
+        "value": "0 0 0 .5px var(--line), 0 1px 1.5px rgba(0,0,0,.08)",
+        "purpose": "Push buttons, verdict pop-up, selected segment."
+      },
+      {
+        "name": "primary-button",
+        "value": "0 1px 1.5px rgba(0,0,0,.15)",
+        "purpose": "The red primary button."
+      },
+      {
+        "name": "ring",
+        "value": "0 0 0 .5px var(--line)",
+        "purpose": "A sent comment card inside a diff."
+      },
+      {
+        "name": "focus",
+        "value": "outline: 3px solid color-mix(in srgb, var(--red) 40%, transparent); outline-offset: 1px",
+        "purpose": "Every focusable element."
+      },
+      {
+        "name": "file-bar-blur",
+        "value": "background: color-mix(in srgb, var(--win) 92%, transparent); backdrop-filter: blur(12px)",
+        "purpose": "Sticky file path bar over a scrolling diff."
+      }
+    ],
+    "motion": [
+      {
+        "name": "spinner",
+        "value": "rotate 360deg, .8s linear infinite",
+        "purpose": "Helper is reading the code; red leading arc."
+      },
+      {
+        "name": "line-flash",
+        "value": "inset red-tint-strong wash fading out, 1.4s ease-out",
+        "purpose": "A line jumped to from a key change."
+      },
+      {
+        "name": "splitter",
+        "value": "background .15s",
+        "purpose": "Resize line turning red on hover."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce disables spinner and flash",
+        "purpose": "Accessibility."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "1100px"
+      },
+      {
+        "name": "narrow",
+        "value": "760px"
+      }
+    ],
+    "layout": {
+      "toolbar": "52px",
+      "sidebar": "264px",
+      "conversation": "340px",
+      "rail": "232px",
+      "docMargin": "280px",
+      "trafficLightInset": "84px",
+      "windowMin": "900x600",
+      "windowDefault": "1440x900"
+    },
+    "nativeShell": {
+      "titleVisibility": "hidden",
+      "titlebarAppearsTransparent": true,
+      "styleMask": "fullSizeContentView",
+      "material": "NSVisualEffectView .sidebar, behindWindow, followsWindowActiveState",
+      "trafficLights": "centred in 52pt toolbar, x 20pt, 20pt apart, re-placed on resize",
+      "systemSurfaces": [
+        "menu bar (Settings, New Message, Edit, Window)",
+        "status item with unread count and Waiting on you menu",
+        "Dock badge",
+        "notifications"
+      ]
+    },
+    "icons": {
+      "interface": "Phosphor regular, currentColor, 16px default",
+      "toolMarks": "Simple Icons (Claude, Cursor), Phosphor (GitHub, OpenAI, terminal), initial otherwise"
+    },
+    "appIcon": {
+      "tile": "824pt rounded square, 185pt radius, on 1024 canvas, soft drop shadow, pale sky gradient (#c4d2de to #f0f4f7)",
+      "subject": "Pillar box: a lit petrol cylinder in #1f6f8b with highlight #48a0bc and shade #11465a, two-tier dark plinth, domed cap with knob, outlined door and keyhole, cream collection plate",
+      "letter": "cream (#faf8f4) letter with a post-yellow (#f2b705) stamp, tilting into the slot",
+      "favicon": "red 7px-radius square with a thin post-yellow frame"
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one red action per view: Send, Approve, Add comment, Start reading, Next chapter.",
+      "html": "<button class=\"ds-btn-primary\">Send</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:0;border-radius:6px;font:500 13px -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#fff;background:var(--red,#1f6f8b);box-shadow:0 1px 1.5px rgba(0,0,0,.15);cursor:default}.ds-btn-primary:hover{background:var(--red-hover,#185c74)}.ds-btn-primary:focus-visible{outline:3px solid color-mix(in srgb,var(--red,#1f6f8b) 40%,transparent);outline-offset:1px}.ds-btn-primary:disabled{opacity:.45}"
+    },
+    {
+      "name": "Push Button",
+      "kind": "button",
+      "refersTo": "button-push",
+      "description": "AppKit-style default button: Cancel, Mark as read, Comment, Disconnect.",
+      "html": "<button class=\"ds-btn\">Mark as read</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:0;border-radius:6px;font:500 13px -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:var(--text,#1d1d1f);background:var(--win,#fff);box-shadow:0 0 0 .5px var(--line,rgba(0,0,0,.1)),0 1px 1.5px rgba(0,0,0,.08);cursor:default}.ds-btn:hover{background:var(--panel,#fafafa)}.ds-btn:active{background:var(--press,rgba(0,0,0,.075))}.ds-btn:focus-visible{outline:3px solid color-mix(in srgb,var(--red,#1f6f8b) 40%,transparent);outline-offset:1px}"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "description": "Changes / Whole file in a diff; choices in forms.",
+      "html": "<span class=\"ds-seg\"><button aria-pressed=\"true\">Changes</button><button aria-pressed=\"false\">Whole file</button></span>",
+      "css": ".ds-seg{display:inline-flex;padding:2px;gap:2px;border-radius:7px;background:var(--line2,rgba(0,0,0,.06))}.ds-seg button{height:24px;padding:0 12px;border:0;border-radius:5px;background:none;font:12.5px -apple-system,system-ui,sans-serif;color:var(--text2,#48484d)}.ds-seg button[aria-pressed=true]{background:var(--win,#fff);color:var(--text,#1d1d1f);font-weight:500;box-shadow:0 0 0 .5px var(--line,rgba(0,0,0,.1)),0 1px 2px rgba(0,0,0,.1)}.ds-seg button:focus-visible{outline:3px solid color-mix(in srgb,var(--red,#1f6f8b) 40%,transparent)}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Inputs and textareas; focus shifts the border toward red with a red-tint halo.",
+      "html": "<input class=\"ds-input\" placeholder=\"Reply to Atlas\">",
+      "css": ".ds-input{width:100%;border:1px solid var(--line,rgba(0,0,0,.1));border-radius:6px;background:var(--win,#fff);padding:6px 9px;font:13px/1.45 -apple-system,system-ui,sans-serif;color:var(--text,#1d1d1f);outline:none}.ds-input:focus{border-color:color-mix(in srgb,var(--red,#1f6f8b) 55%,var(--line,rgba(0,0,0,.1)));box-shadow:0 0 0 3px var(--red-tint,rgba(31,111,139,.08))}"
+    },
+    {
+      "name": "Sidebar Row",
+      "kind": "nav",
+      "refersTo": "source-list-row",
+      "description": "Mac source-list row: mailbox, agent, settings. Selection is neutral grey.",
+      "html": "<nav class=\"ds-side\"><button class=\"ds-row\" aria-current=\"true\"><svg viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M208 32H48a16 16 0 0 0-16 16v160a16 16 0 0 0 16 16h160a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16Zm0 16v104h-28.7a15.9 15.9 0 0 0-11.3 4.7L148.7 176h-41.4L88 156.7a15.9 15.9 0 0 0-11.3-4.7H48V48Z\"/></svg><span>Inbox</span><b>1</b></button><button class=\"ds-row\"><svg viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M227.3 28.7a16 16 0 0 0-15.6-4.1L19.6 79a16 16 0 0 0-2.5 29.8l85.4 40.4 40.4 85.4a15.9 15.9 0 0 0 14.4 9.1h1.4a15.9 15.9 0 0 0 14-11.7l54.5-192a16 16 0 0 0-4-15.4ZM157.8 232 118.7 149l55-55a8 8 0 0 0-11.3-11.4l-55 55L24 98.2 216 44Z\"/></svg><span>Sent</span></button></nav>",
+      "css": ".ds-side{display:grid;gap:1px;width:240px;padding:8px;background:var(--side,#f3f3f3)}.ds-row{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border:0;border-radius:6px;background:none;font:13px -apple-system,system-ui,sans-serif;color:var(--text,#1d1d1f);text-align:left}.ds-row span{flex:1}.ds-row b{font-weight:400;font-size:12px;color:var(--text3,#86868b);font-variant-numeric:tabular-nums}.ds-row svg{width:16px;height:16px;color:var(--text2,#48484d)}.ds-row:hover{background:var(--hover,rgba(0,0,0,.045))}.ds-row[aria-current=true]{background:var(--sel,rgba(0,0,0,.075));font-weight:500}"
+    },
+    {
+      "name": "Thread Item (unread)",
+      "kind": "custom",
+      "description": "A thread in the list; unread adds a red dot, red time and bold subject.",
+      "html": "<button class=\"ds-item ds-unread\"><span class=\"ds-top\"><span class=\"ds-mark\">C</span><span class=\"ds-who\">Cursor</span><time>6:55 pm</time></span><span class=\"ds-subj\">Review of #2396: no findings</span><span class=\"ds-sub\">Note · Waiting on you</span></button>",
+      "css": ".ds-item{display:grid;gap:1px;width:260px;padding:8px 8px 9px;border:0;border-radius:7px;background:none;text-align:left;font-family:-apple-system,system-ui,sans-serif}.ds-item:hover{background:var(--hover,rgba(0,0,0,.045))}.ds-top{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text3,#86868b)}.ds-unread .ds-top::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--red,#1f6f8b)}.ds-mark{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;font-size:10px;font-weight:600;color:var(--text2,#48484d);background:var(--line2,rgba(0,0,0,.06))}.ds-who{flex:1;font-weight:500;color:var(--text2,#48484d)}.ds-unread .ds-who,.ds-unread .ds-subj{font-weight:600;color:var(--text,#1d1d1f)}.ds-unread time{color:var(--red-text,#1a6580);font-weight:600}.ds-subj{font-size:13px;line-height:1.35;color:var(--text,#1d1d1f)}.ds-sub{font-size:11.5px;color:var(--text3,#86868b)}"
+    },
+    {
+      "name": "Attachment Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "PR, document, link or file attached to a message; on when open in the review pane.",
+      "html": "<span class=\"ds-chips\"><button class=\"ds-chip ds-on\">Changes <span class=\"ds-a\">+210</span> <span class=\"ds-d\">−57</span></button><button class=\"ds-chip\">brief.md v1</button></span>",
+      "css": ".ds-chips{display:flex;gap:6px}.ds-chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border:0;border-radius:6px;font:12px -apple-system,system-ui,sans-serif;color:var(--text2,#48484d);background:var(--line2,rgba(0,0,0,.06))}.ds-chip:hover{background:var(--press,rgba(0,0,0,.075))}.ds-chip.ds-on{background:var(--red-tint,rgba(31,111,139,.08));color:var(--red-text,#1a6580)}.ds-a{font:11px ui-monospace,monospace;color:var(--add,#1f7a3f)}.ds-d{font:11px ui-monospace,monospace;color:var(--del,#b42318)}"
+    },
+    {
+      "name": "Chapter Step",
+      "kind": "custom",
+      "refersTo": "chapter-step-on",
+      "description": "PR reading-order rail: numbered chapters, current in red tint, read with a green check.",
+      "html": "<div class=\"ds-rail\"><button class=\"ds-step ds-on\"><span class=\"ds-num\">1</span><span class=\"ds-t\">The work service learns about taps<small class=\"ds-care\">Needs care</small></span></button><button class=\"ds-step\"><span class=\"ds-num\">2</span><span class=\"ds-t\">WhatsApp taps go through the service<small>Low risk</small></span></button></div>",
+      "css": ".ds-rail{display:grid;gap:1px;width:220px;font-family:-apple-system,system-ui,sans-serif}.ds-step{display:grid;grid-template-columns:20px 1fr;gap:8px;padding:6px 8px;border:0;border-radius:6px;background:none;text-align:left}.ds-step:hover{background:var(--hover,rgba(0,0,0,.045))}.ds-step.ds-on{background:var(--red-tint,rgba(31,111,139,.08))}.ds-num{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--text3,#86868b);box-shadow:inset 0 0 0 1px var(--line,rgba(0,0,0,.1))}.ds-on .ds-num{color:var(--text,#1d1d1f);box-shadow:inset 0 0 0 1.5px var(--text2,#48484d)}.ds-t{display:grid;gap:2px;font-size:12.5px;line-height:1.35;color:var(--text,#1d1d1f)}.ds-on .ds-t{font-weight:600}.ds-t small{font-size:11px;font-weight:500;color:var(--text3,#86868b)}.ds-t small.ds-care{color:var(--warn,#9a5b00);font-weight:600}"
+    },
+    {
+      "name": "Composer",
+      "kind": "custom",
+      "refersTo": "composer",
+      "description": "Floating reply box with verdict pop-up and the red Send.",
+      "html": "<form class=\"ds-composer\"><textarea placeholder=\"Reply to Atlas\"></textarea><div class=\"ds-crow\"><select><option>Comment</option><option>Approve</option><option>Request changes</option></select><span></span><button type=\"button\">Send</button></div></form>",
+      "css": ".ds-composer{display:grid;gap:8px;width:320px;padding:8px;border-radius:10px;background:var(--win,#fff);box-shadow:0 0 0 .5px var(--line,rgba(0,0,0,.1)),0 1px 2px rgba(0,0,0,.06),0 8px 24px -12px rgba(0,0,0,.18);font-family:-apple-system,system-ui,sans-serif}.ds-composer textarea{border:0;outline:none;resize:none;min-height:56px;padding:4px 6px;background:transparent;font:13px/1.45 inherit;color:var(--text,#1d1d1f)}.ds-crow{display:flex;align-items:center;gap:10px}.ds-crow span{flex:1}.ds-crow select{height:28px;padding:0 10px;border:0;border-radius:6px;font-size:13px;background:var(--win,#fff);box-shadow:0 0 0 .5px var(--line,rgba(0,0,0,.1)),0 1px 1.5px rgba(0,0,0,.08)}.ds-crow button{height:28px;padding:0 12px;border:0;border-radius:6px;font-weight:500;font-size:13px;color:#fff;background:var(--red,#1f6f8b)}.ds-crow button:hover{background:var(--red-hover,#185c74)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Post Office on the Desktop",
+    "overview": "Dak is a macOS mail client whose post is agent work. It is built to disappear into the system it runs on: a translucent source-list sidebar, a 52px unified toolbar with the traffic lights centred in it, San Francisco type, neutral greys, and hairlines instead of cards. Nothing about it reads as a web dashboard. The agent's explanation and the conversation sit beside the thing under review, and the reading surface stays quiet so the PR or the document is what you look at.\n\nThe one loud thing is India Post red, and it is rationed. It marks the primary action, the current selection inside the content, and what is waiting on you. Everything else is ink on grey. The post-office identity lives in the name (डाक, \"the post\"), in that red, and in the app icon, an India Post pillar box with a letter going into its slot; the screens themselves carry no stamps, textures or postal decoration.\n\nDensity is a Mac app's, not a website's: a 13px base, 28px controls, 6px corners, tight rows. Reading surfaces open up (14 to 14.5px at 1.6 line height in a 700 to 720px column) because reading is the job. Light and dark follow the system appearance through one set of tokens.",
+    "keyCharacteristics": [
+      "Native shell first: hidden title, full-size content, translucent sidebar material, native menus, Dock badge, menu bar count, notifications.",
+      "One accent, rationed: India Post red for the primary action, in-content selection and \"waiting on you\".",
+      "One ink for every agent: a tool logo or an initial, never a per-agent colour.",
+      "Hairlines and tonal washes for structure; shadows only on things that float.",
+      "System type only: SF Pro for UI and reading, SF Mono for code.",
+      "One icon family (Phosphor regular) and real tool logos from Simple Icons, all in currentColor."
+    ],
+    "rules": [
+      {
+        "name": "The Rationed Red Rule",
+        "body": "India Post red means one of three things: this is the primary action, this is what you have selected inside the content, or this is waiting on you. One red-filled button per view. If red is doing something else, it is wrong.",
+        "section": "colors"
+      },
+      {
+        "name": "The Native Selection Rule",
+        "body": "The sidebar selects like a Mac source list, in neutral grey (`selection-grey`). Red tint is for selection inside the reading surface (a chapter, a line range, a paragraph, a pick), where it ties the selection to what you are commenting on.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Ink Rule",
+        "body": "Agents never get colours of their own. Every agent is drawn in `ink-secondary` on `hairline-soft`, distinguished by its tool's logo or its initial.",
+        "section": "colors"
+      },
+      {
+        "name": "The System Voice Rule",
+        "body": "Only the system stacks. No web font is loaded, and none should be.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Every label, button and heading is sentence case. No uppercase labels, no letter-spaced small caps.",
+        "section": "typography"
+      },
+      {
+        "name": "The Beside Rule",
+        "body": "The conversation sits beside the thing under review, never above it or in a modal. At desktop widths both are always visible.",
+        "section": "layout"
+      },
+      {
+        "name": "The Hairlines Not Cards Rule",
+        "body": "Lists, threads, settings and document comments are rows divided by hairlines. A box with a shadow means it floats; nothing that sits in the flow gets one.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep exactly one red-filled button per view, on the action that sends or advances.",
+      "**Do** draw every agent with the agent mark: tool logo or initial, `ink-secondary` on `hairline-soft`.",
+      "**Do** use Phosphor regular icons at 16px (17px in icon buttons, 14px in buttons, 13px in chips), in currentColor.",
+      "**Do** separate rows with 1px hairlines and reserve the Float shadow for the composer, open editors, popovers and toasts.",
+      "**Do** write every label in sentence case and every timestamp and count with tabular figures.",
+      "**Do** give every new colour a dark value in the `prefers-color-scheme: dark` block, and lift red to the brighter dark accent there.",
+      "**Do** keep the conversation beside the review at desktop widths."
+    ],
+    "donts": [
+      "**Don't** give an agent its own colour, coloured avatar or coloured pill.",
+      "**Don't** use India Post red for decoration, success, headings or anything not primary, selected or waiting on you.",
+      "**Don't** use post yellow anywhere in the interface; it lives in the icon.",
+      "**Don't** load a web font or use a non-system face.",
+      "**Don't** wrap list content in shadowed cards or build a dashboard of tiles.",
+      "**Don't** use uppercase or letter-spaced labels.",
+      "**Don't** add a second icon family or brand marks whose licence does not allow it."
+    ]
+  }
+}

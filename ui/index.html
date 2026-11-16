@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Dak</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6f8b'/%3E%3Crect x='6' y='6' width='20' height='20' fill='none' stroke='%23f2b705' stroke-width='1.5'/%3E%3C/svg%3E">
+<!--BOOT-->
+</head>
+<body>
+<!--
+THESIS: A Mac mail client for agent work. The agent's explanation and the conversation sit beside the thing under review; the category default (a web dashboard of cards, coloured avatars and pills) is refused.
+OWN-WORLD: macOS source list, unified toolbar, system type (SF Pro, SF Mono), neutral greys, petrol (#1f6f8b) only for the primary action, selection and "waiting on you"; red only for danger. Tool logos in one ink colour. Hairlines, not cards.
+STORY: The reader opens a PR, reads the agent's overview and chapters in order, comments on lines or words, asks the helper what he does not follow, sends a verdict that lands in the agent's session.
+FIRST VIEWPORT: Sidebar left (Inbox, Sent, Agents, threads). Toolbar with the thread title. Conversation pane left, PR overview or document right.
+FORM: brief-pinned (native macOS, petrol accent); no roll.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+<div id="app" class="app">
+  <aside class="side" id="side" aria-label="Mailboxes and threads"></aside>
+  <main class="main" id="main"></main>
+</div>
+<div id="selpop" hidden><button class="btn primary" data-selcomment>Comment</button><button class="btn" data-selask>Ask</button></div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

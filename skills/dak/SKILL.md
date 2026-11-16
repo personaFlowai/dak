@@ -1,0 +1,98 @@
+---
+name: dak
+description: Send a pull request, a design doc or a note to a person or another agent through Dak (the local review inbox on this Mac), read your Dak inbox, reply on a thread, and wait for a verdict. Use whenever someone needs to review or approve your work, instead of pasting a PR link or a document into chat, and when a hook says you have Dak mail.
+---
+
+# Dak
+
+Dak is the review inbox on this Mac. You send work to a reader (a person, such as `sam`, or an agent, such as `atlas`). They read it in the Dak app, leave comments anchored to lines or paragraphs and a verdict, and the answer comes back to you on the same thread. Every command takes `--json`.
+
+Before the first send, check Dak is there: `dak agents --json` lists the readers and sessions. If `dak` is not found, it is not installed on this machine: say so and stop.
+
+## 1. Send a PR, with chapters
+
+A PR without chapters reads one file at a time. Chapters turn it into a five-minute read: the reviewer knows why each part exists, where to look, what could go wrong and how you know it does not.
+
+Write `chapters.json`:
+
+```json
+{ "prologue": {
+    "why": "The problem, as a person using the product sees it. No file names.",
+    "what": "What this PR does about it, in two or three sentences.",
+    "focus": ["The one or two places worth a careful look, and why"] },
+  "chapters": [{
+    "title": "Taps go through the work service",
+    "summary": "What changed in this part, in one or two plain sentences.",
+    "why": "Why this part exists: what would be wrong without it.",
+    "risk": "low | medium | high",
+    "risk_why": "Medium or high only: what could go wrong, in plain words.",
+    "proof": "How you know it does not: the test name, the run, the before and after number. Required for high.",
+    "noticed": "What a person using the product will notice, or 'Nothing visible'.",
+    "check": ["A question the reviewer should answer while reading this chapter"],
+    "hunks": [{ "file": "src/core/work/actions.ts", "start": 62 }],
+    "key_changes": [{ "text": "The permission check moves here", "file": "src/core/work/actions.ts", "line": 66 }]
+  }] }
+```
+
+How to write them well:
+
+- **Order is reading order**, not file order. Group hunks by what they do. Start with the part everything else depends on. Three to six chapters for most PRs; a small PR can have one.
+- **Write for someone who knows the product, not the code.** Plain words, no ticket history.
+- **`why` and `summary` answer different questions.** `summary` is what changed. `why` is what would be broken or missing without it.
+- **Risk is a claim, so it needs evidence.** `risk_why` says what could go wrong; `proof` names what shows it does not (a test that fails without the change, a measured run, a query plan). A risk you only assert is a risk the reviewer has to take on trust.
+- **`check` is what you would ask yourself**, e.g. "Does any caller still read the old field?" Two or three, concrete, answerable from the diff.
+- **`noticed`** is what changes on screen or in a message. Say "Nothing visible" for internal changes.
+- **`key_changes`**: the two to four lines worth looking at first. `side: "old"` for a removed line.
+- **`hunks[].start`** is the hunk's first line on the new side (the old side for a deleted file). Every hunk must be in exactly one chapter. List them with `git diff main...HEAD | grep -n '^@@'`.
+- **A reviewer can write them, or add to them.** If a code reviewer (Cursor, Codex) has read the diff, ask it to write the chapters, or to add `"reviewer_note": { "by": "cursor", "text": "..." }` to the chapters it has an opinion on. The reader sees the note under the chapter's heading.
+
+Then:
+
+1. Check: `dak chapters check chapters.json --pr <number>` (or `--base main`). Fix every line it prints; `dak send` refuses the same mistakes.
+2. Send: `dak send --to <reader> --from <you> --pr <number> --chapters chapters.json "What you need from them" --json`. Use `--base main` instead of `--pr` for a branch with no PR yet. Keep the thread id it prints.
+3. Wait (section 4).
+
+## 2. Send a doc or a note
+
+- A doc to review: `dak send --to <reader> --from <you> --doc docs/brief.md "What you need decided" --json`. Comments come back anchored to paragraphs, with the words quoted.
+- A note: `dak send --to <reader> --from <you> --subject "<subject>" "<message>" --json`. Add `--file path` (images show inline) or `--link url` (an artifact, a page).
+- Say what you need in the message: "Approve to merge", "Pick A or B".
+- **A choice gets buttons.** `--option "Merge #2401 first" --option "Hold both"` (up to six, short). The reader answers in one click; the reply's `choice` is the exact text of the button. Use buttons whenever the answer is one of a few known options.
+- **An update gets `--fyi`.** "Merged", "tests running", "deployed" need no answer: add `--fyi` so the thread does not sit in the reader's inbox as waiting. After the reader approved, a plain text reply counts as an update anyway; a new version, a question or buttons always ask.
+- **Links to Linear, Notion, GitHub or Figma** go in with `--link <url>` and show as named cards (the issue id and title, the page name). Put the ticket and the doc you are working from on every send.
+
+## 3. Read your inbox
+
+- `dak inbox --for <you> --unread --json` returns new messages and marks them read.
+- `dak show <thread> --json` returns the whole thread.
+- If the Claude Code hook is connected, new mail arrives at the start and end of your turns with the thread id in it. Act on it in that turn.
+
+## 4. Wait for the answer
+
+In Claude Code with Dak connected, you do not need to wait at all: finish your turn, and the answer wakes this session when it arrives. Otherwise:
+
+`dak wait <thread> --for <you> --timeout 30m --json`
+
+Exit code 2 means nothing yet. Carry on with other work and wait again later; do not ask in chat whether they have looked. Run long waits in the background.
+
+## 5. Act on the verdict, and reply on the same thread
+
+| Verdict | Do |
+|---|---|
+| `approve` | Go ahead (merge, ship, proceed) as the message says. |
+| `changes` | Do exactly what the comments say, then send the new version on the same thread. |
+| `question` | Answer first, then wait again. Change nothing until answered. |
+| none | A plain message: read it and answer if it asks something. If it has a `choice`, the reader clicked that button. |
+
+Each comment has an anchor: `{kind: "code", file, side, start_line, end_line}` or `{kind: "doc", quote, ...}`. `side: "old"` is a line the PR removed.
+
+- Answer: `dak reply <thread> --from <you> "Fixed in 4e1c2a0: the check now runs before the write" --json`
+- An update that needs no answer: `dak reply <thread> --from <you> --fyi "Tests running" --json`
+- **When the work is finished** (merged, shipped, no longer needed), close it: `dak reply <thread> --from <you> --done "Merged as 4e1c2a0" --json`. The topic leaves the reader's conversation, so their list holds only open work. A later new version or question brings it back. Do this every time a PR you sent merges.
+- A question with buttons on the same thread: `dak reply <thread> --from <you> "Which goes first?" --option "#2401 first" --option "#2402 first" --option "Hold both" --json`, then `dak wait`. The answer's `choice` is the button text, exactly as you wrote it. Over HTTP: `options: [...]` on the message.
+- A new version of the PR: `dak reply <thread> --from <you> --pr <number> --chapters chapters.json "What changed since version 1" --json`
+- A new version of the doc: `dak reply <thread> --from <you> --doc docs/brief.md "What changed" --json`
+
+Always reply on the thread you were answered on. A new thread for the same work splits the conversation the reader is following.
+
+`dak help`, `dak help chapters` and `docs/agents.md` in the Dak repo have the rest.

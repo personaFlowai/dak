@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run from source. `bun run build` makes a single binary at dist/dak instead.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec bun "$DIR/src/cli.ts" "$@"
