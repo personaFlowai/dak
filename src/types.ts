@@ -48,6 +48,7 @@ export interface PrMeta {
   repo: string | null; // local path the diff came from, used by Explain
   base_sha: string | null;
   head_sha: string | null;
+  base_ref?: string;
   diff_blob: string;
   files: PrFile[];
   chapters: Chapter[];

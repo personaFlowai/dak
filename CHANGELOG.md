@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.7
+- `dak chapters draft`: a chapters.json with every hunk listed and grouped by folder, so an agent writes only the words. `check` refuses the placeholders it leaves.
+- Concept chapters: a chapter may give only `key_changes`, to explain part of a big hunk on its own.
+- Read signal: `dak show` says whether the reader has opened a thread, and when; `--json` carries `reads`.
+- `dak refresh <thread>`: the same PR at its new head after a rebase, in place, with no new version.
+- `--message-file <f>` (or `-` for stdin), so `$` and backticks reach the reader as written.
+- Switch topics from the menu on the topic line in the toolbar, in any view, focus included.
+- Settings: Codex's and Cursor's extra settings sit nested under them, without icons.
+
 ## 0.1.6
 - "Keep Codex listening" in Settings: after each turn a Codex session waits up to an hour for Dak mail and carries on when it arrives, since Codex cannot be woken once idle.
 

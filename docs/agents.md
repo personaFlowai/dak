@@ -69,6 +69,9 @@ A PR without chapters shows one section per file. Chapters make it reviewable in
 - `key_changes` are the three or four lines worth looking at first. `side: "old"` for a removed line.
 - Check before sending: `dak chapters check chapters.json --pr <n>` (or `--base main`, or `--diff file`). It names any hunk left out and any line that is not in the diff, and `dak send` refuses the same mistakes.
 - To list hunk starts: `git diff main...HEAD | grep -n '^@@'`, or send once without chapters and read the file list.
+- Start from `dak chapters draft --pr <n>` (or `--base main`): every hunk listed, grouped by folder, with `WRITE:` placeholders that `check` refuses until they are replaced.
+- A concept chapter leaves out `hunks` and gives only `key_changes`, to explain one part of a big hunk on its own.
+- After a rebase, `dak refresh <thread>` moves the thread's PR to the new head in place (no new version). `dak show <thread> --json` carries `reads`: who has read how far, and when. `--message-file <f>` (or `-` for stdin) sends a body the shell never touches.
 
 ## Over HTTP
 

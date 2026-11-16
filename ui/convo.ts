@@ -159,6 +159,19 @@ export function timeline(render: (m: Message, topic: Topic) => string): string {
   return out.join("");
 }
 
+// The topic line in the toolbar: a menu of this agent's open topics, so you can move between
+// them from any view, focus included, without leaving it.
+export function topicMenu(subject: string): string {
+  const open = S.convo.filter((t) => t.thread.status !== "closed" || t.thread.id === S.cur)
+    .sort((a, b) => b.thread.updated_at.localeCompare(a.thread.updated_at));
+  if (open.length < 2) return esc(subject);
+  return `<span class="topic-link" title="Switch topic"><b>${esc(subject)}</b>${I.next}
+    <select id="topic-jump" aria-label="Switch topic">${open.map((t) => {
+      const waiting = t.thread.to === me && t.thread.status === "waiting";
+      return `<option value="${t.thread.id}" ${t.thread.id === S.cur ? "selected" : ""}>${waiting ? "● " : ""}${esc(topicLabel(t).slice(0, 70))}</option>`;
+    }).join("")}</select></span>`;
+}
+
 // Which topic your reply goes on: a quiet label, defaulting to the topic you are on. Clicking it
 // opens the menu of open topics, plus "New topic" for a message about something else.
 export function topicPicker(): string {

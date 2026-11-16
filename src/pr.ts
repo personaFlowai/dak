@@ -52,6 +52,8 @@ export function snapshotPr(opts: {
 
   const meta: PrMeta = {
     url, number, title, repo: existsSync(repo) ? repo : null, base_sha: base, head_sha: head,
+    // The branch it was diffed against, so dak refresh can diff against it again.
+    ...(!opts.pr && !opts.diffFile ? { base_ref: opts.base ?? "main" } : {}),
     diff_blob: putBlob(diff),
     files: files.map((f) => ({
       path: f.path, old_path: f.old_path, status: f.status, additions: f.additions, deletions: f.deletions,
@@ -86,14 +88,17 @@ export function loadChapters(path: string): Chapter[] {
   const list = Array.isArray(raw) ? raw : raw?.chapters;
   if (!Array.isArray(list)) throw new DakError("bad_chapters", "Chapters must be a JSON array, or an object with a chapters array.");
   return list.map((c: any, i: number) => {
-    if (!c?.title || !Array.isArray(c.hunks)) throw new DakError("bad_chapters", `Chapter ${i + 1} needs a title and a hunks array.`);
+    // A concept chapter has no hunks of its own: it explains part of a big hunk (a migration,
+    // say) through its key_changes, so it may leave hunks out.
+    if (!c?.title) throw new DakError("bad_chapters", `Chapter ${i + 1} needs a title.`);
+    if (!Array.isArray(c.hunks) && !Array.isArray(c.key_changes)) throw new DakError("bad_chapters", `Chapter ${i + 1} needs hunks, or key_changes for a concept chapter.`);
     const risk = ["low", "medium", "high"].includes(c.risk) ? c.risk : "low";
     const str = (v: any) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
     const note = c.reviewer_note && str(c.reviewer_note.text) ? { by: str(c.reviewer_note.by) ?? "reviewer", text: str(c.reviewer_note.text)! } : undefined;
     return { title: String(c.title), summary: String(c.summary ?? ""), risk, risk_why: c.risk_why ? String(c.risk_why) : undefined,
       why: str(c.why), proof: str(c.proof), noticed: str(c.noticed), reviewer_note: note,
       check: Array.isArray(c.check) ? c.check.map(String).filter((x: string) => x.trim()).slice(0, 6) : undefined,
-      hunks: c.hunks.map((h: any) => ({ file: String(h.file), start: Number(h.start) })),
+      hunks: (c.hunks ?? []).map((h: any) => ({ file: String(h.file), start: Number(h.start) })),
       key_changes: Array.isArray(c.key_changes) ? c.key_changes.map((k: any) => ({
         text: String(k.text), file: String(k.file), side: k.side === "old" ? "old" : "new", line: Number(k.line) })) : [] };
   });
@@ -108,6 +113,8 @@ export function checkChapters(chapters: Chapter[], files: DiffFile[]): string[] 
   const seen = new Map<string, number>();
   chapters.forEach((c, i) => {
     // A risk level with no reason teaches the reader nothing.
+    if (/WRITE:/.test(`${c.title} ${c.summary}`)) problems.push(`Chapter ${i + 1} still has placeholder text from dak chapters draft.`);
+    if (!c.hunks.length && !(c.key_changes ?? []).length) problems.push(`Chapter ${i + 1} ("${c.title}") has no hunks and no key_changes: give it one or the other.`);
     if (c.risk !== "low" && !c.risk_why?.trim()) problems.push(`Chapter ${i + 1} ("${c.title}") is ${c.risk} risk but has no risk_why: say in one sentence what could go wrong.`);
     // A high risk the reader has to take on trust is a risk they cannot sign off.
     if (c.risk === "high" && !c.proof?.trim()) problems.push(`Chapter ${i + 1} ("${c.title}") is high risk but has no proof: name the test, run or number that shows it is safe.`);
@@ -125,6 +132,23 @@ export function checkChapters(chapters: Chapter[], files: DiffFile[]): string[] 
   });
   for (const [key, label] of all) if (!seen.has(key)) problems.push(`${label} is in no chapter.`);
   return problems;
+}
+
+// A starting chapters.json: one chapter per folder, every hunk in place, the words left to
+// write. The prologue and each chapter's text are placeholders to replace.
+export function draftChapters(files: DiffFile[]) {
+  const byDir = new Map<string, { file: string; start: number }[]>();
+  for (const f of files) {
+    const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : ".";
+    for (const h of f.hunks) byDir.set(dir, [...(byDir.get(dir) ?? []), { file: f.path, start: hunkStart(f, h) }]);
+  }
+  return {
+    prologue: { why: "WRITE: the problem, as a person using the product sees it", what: "WRITE: what this change does about it", focus: ["WRITE: where to look closely, and why"] },
+    chapters: [...byDir].map(([dir, hunks]) => ({
+      title: `WRITE: what changes in ${dir}`, summary: "WRITE: one or two plain sentences", risk: "low",
+      hunks, key_changes: [] as unknown[],
+    })),
+  };
 }
 
 export function diffForChapters(opts: { repo?: string; pr?: string; base?: string; diffFile?: string }): DiffFile[] {

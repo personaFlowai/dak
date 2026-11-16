@@ -13,7 +13,7 @@ import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
 import { draftKey, forgetConvo } from "./convo";
 import { archivedList, isArchived, peers } from "./convo";
-import { peerList, pairList, peerOf, peerName, isPair, topicFor, loadConvo } from "./convo";
+import { peerList, pairList, peerOf, peerName, isPair, topicFor, loadConvo, topicMenu } from "./convo";
 import type { Message, Thread, Verdict } from "../src/types";
 
 const native = document.documentElement.classList.contains("native");
@@ -218,7 +218,7 @@ function threadView(): string {
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
-    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${esc(t.subject)}`, right);
+    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${topicMenu(t.subject)}`, right);
   if (!review) return head + `<div class="solo-wrap">${chatPane(t, false)}</div>`;
   // Focus: chapters and code only; the reply floats at the bottom until you open it.
   if (S.focus) return head + `<div class="focus-wrap"><div class="pane-body review">${reviewBody(a!)}</div>
@@ -409,11 +409,11 @@ function settingsView(): string {
         <button class="btn ${s.claude_connected ? "" : "primary"}" data-connect="${s.claude_connected ? "off" : "on"}" data-tool="claude">${s.claude_connected ? "Disconnect" : "Connect"}</button></div>
       <div class="conn"><span class="mark md">${TOOLS.codex.mark}</span><span class="nm"><b>Codex</b><span>${s.codex_connected ? "Connected. Sessions read their Dak mail each turn, and a Dak section in ~/.codex/AGENTS.md tells them how to use it. Codex asks once to trust the hook." : "Adds Dak's hook to ~/.codex/hooks.json (a copy is kept) and a Dak section to ~/.codex/AGENTS.md. Codex asks you to trust the hook the first time a session runs it."}</span></span>
         <button class="btn ${s.codex_connected ? "" : "primary"}" data-connect="${s.codex_connected ? "off" : "on"}" data-tool="codex">${s.codex_connected ? "Disconnect" : "Connect"}</button></div>
-      ${s.codex_connected ? `<div class="conn sub"><span class="mark md"></span><span class="nm"><b>Keep Codex listening between turns</b><span>Codex cannot be woken once idle. With this on, a Codex session waits up to an hour after each turn and picks up Dak mail the moment it arrives. It looks busy while it waits; type to it or press Esc to stop waiting. Turning it on the first time, Codex asks you to approve Dak's hook again.</span></span>
+      ${s.codex_connected ? `<div class="conn sub"><span class="nm"><b>Keep Codex listening between turns</b><span>Codex cannot be woken once idle. With this on, a Codex session waits up to an hour after each turn and picks up Dak mail the moment it arrives. It looks busy while it waits; type to it or press Esc to stop waiting. Turning it on the first time, Codex asks you to approve Dak's hook again.</span></span>
         <label class="check"><input type="checkbox" data-codex-listen ${s.codex_listen ? "checked" : ""}> ${s.codex_listen ? "On" : "Off"}</label></div>` : ""}
       <div class="conn"><span class="mark md">${TOOLS.cursor.mark}</span><span class="nm"><b>Cursor</b><span>${s.cursor_connected ? "Connected. A Cursor agent gets your reply as a follow-up when it finishes a turn." : "Adds Dak to ~/.cursor/hooks.json and keeps a copy. Your reply reaches a Cursor agent when it finishes its turn."}</span></span>
         <button class="btn ${s.cursor_connected ? "" : "primary"}" data-connect="${s.cursor_connected ? "off" : "on"}" data-tool="cursor">${s.cursor_connected ? "Disconnect" : "Connect"}</button></div>
-      <div class="conn sub"><span class="mark md"></span><span class="nm"><b>Teach Cursor to use Dak</b><span>Cursor keeps its global rules in Settings → Rules → User Rules. Copy the instructions and paste them there. For any other agent, the same text comes from <code>dak skill --plain</code>.</span></span>
+      <div class="conn sub"><span class="nm"><b>Teach Cursor to use Dak</b><span>Cursor keeps its global rules in Settings → Rules → User Rules. Copy the instructions and paste them there. For any other agent, the same text comes from <code>dak skill --plain</code>.</span></span>
         <button class="btn" data-copy-instructions>Copy instructions</button></div>
       ${doorView()}</section>
 
@@ -577,6 +577,7 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement;
+  if (el.id === "topic-jump") return openThread(el.value);
   if (el.id === "topic") {
     // Moving the reply to another topic, or to a new one, takes what you typed with it.
     const from = draftKey(), to = el.value === "__new" ? `new:${S.peer}` : el.value;

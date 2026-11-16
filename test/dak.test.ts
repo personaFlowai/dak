@@ -340,6 +340,61 @@ describe("PRs", () => {
     expect(r.json().error.message).toContain("taps.ts new line 99, which is not in the diff");
   });
 
+  test("chapters draft lists every hunk by folder; check refuses its placeholders until they are written", () => {
+    const d = dak("chapters", "draft", "--base", "main");
+    expect(d.code).toBe(0);
+    const draft = JSON.parse(d.out);
+    const chapters = Array.isArray(draft) ? draft : draft.chapters;
+    expect(chapters.flatMap((c: any) => c.hunks).map((h: any) => h.file).sort()).toEqual(["service.ts", "taps.ts"]);
+    writeFileSync(join(repo, "draft.json"), d.out);
+    const r = dak("chapters", "check", "draft.json", "--base", "main", "--json");
+    expect(r.code).toBe(1);
+    expect(r.json().problems.join(" ")).toContain("placeholder");
+  });
+
+  test("a concept chapter has no hunks of its own, only key changes inside another chapter's hunk", () => {
+    writeFileSync(join(repo, "concept.json"), JSON.stringify([
+      { title: "All", summary: "Both files.", risk: "low", hunks: [{ file: "taps.ts", start: 1 }, { file: "service.ts", start: 1 }] },
+      { title: "The new limit", summary: "Why ten.", risk: "low", key_changes: [{ text: "Ten", file: "taps.ts", line: 2 }] }]));
+    expect(dak("chapters", "check", "concept.json", "--base", "main").code).toBe(0);
+    writeFileSync(join(repo, "empty.json"), JSON.stringify([
+      { title: "All", summary: "", risk: "low", hunks: [{ file: "taps.ts", start: 1 }, { file: "service.ts", start: 1 }] },
+      { title: "Nothing", summary: "", risk: "low", hunks: [] }]));
+    const r = dak("chapters", "check", "empty.json", "--base", "main", "--json");
+    expect(r.json().problems.join(" ")).toContain("no hunks and no key_changes");
+  });
+
+  test("--message-file keeps $ and backticks as written", () => {
+    writeFileSync(join(repo, "msg.txt"), "Costs $5 and `$HOME` stays.\n");
+    const r = dak("send", "--to", "sam", "--from", "atlas", "--subject", "Dollars", "--message-file", "msg.txt", "--json");
+    expect(r.json().message.body).toBe("Costs $5 and `$HOME` stays.\n");
+  });
+
+  test("show says whether the reader has opened the thread, and when", () => {
+    const id = dak("send", "--to", "sam", "--from", "atlas", "--subject", "Seen?", "hello", "--json").json().thread.id;
+    expect(dak("show", id).out).toContain("sam has not opened it");
+    expect(dak("show", id, "--json").json().reads.find((r: any) => r.reader === "sam")).toBeUndefined();
+    dak("inbox", "--for", "sam", "--unread");
+    const mark = dak("show", id, "--json").json().reads.find((r: any) => r.reader === "sam");
+    expect(mark.seen_at).toBeTruthy();
+    expect(dak("show", id).out).toContain("sam read it all");
+  });
+
+  test("refresh moves a thread's PR to the new head in place, with no new message", () => {
+    const sent = dak("send", "--to", "sam", "--from", "atlas", "--base", "main", "--subject", "Moving", "--json").json();
+    const before = sent.message.attachments[0].meta.head_sha;
+    writeFileSync(join(repo, "extra.ts"), "export const x = 1;\n");
+    git("add", "extra.ts"); git("commit", "-qm", "more");
+    const r = dak("refresh", sent.thread.id, "--json");
+    expect(r.code).toBe(0);
+    const t = dak("show", sent.thread.id, "--json").json();
+    expect(t.messages.length).toBe(1);
+    const meta = t.messages[0].attachments[0].meta;
+    expect(meta.head_sha).not.toBe(before);
+    expect(meta.files.map((f: any) => f.path)).toContain("extra.ts");
+    git("reset", "-q", "--hard", "HEAD~1");
+  });
+
   test("a PR is snapshotted, so the whole file still opens after the branch is gone", async () => {
     writeFileSync(join(repo, "ok.json"), JSON.stringify([
       { title: "Return ten", summary: "a() now returns 10.", risk: "medium", risk_why: "Callers expect 1.", hunks: [{ file: "taps.ts", start: 1 }],

@@ -17,7 +17,7 @@ Before the first send, check Dak is there: `dak agents --json` lists the readers
 
 A PR without chapters reads one file at a time. Chapters turn it into a five-minute read: the reviewer knows why each part exists, where to look, what could go wrong and how you know it does not.
 
-Write `chapters.json`:
+Start from a draft: `dak chapters draft --pr <number> > chapters.json` (or `--base main`) lists every hunk, grouped by folder, with `WRITE:` placeholders. Regroup the hunks by what they do and replace every placeholder; `dak chapters check` refuses any left. The finished file looks like:
 
 ```json
 { "prologue": {
@@ -47,6 +47,7 @@ How to write them well:
 - **`check` is what you would ask yourself**, e.g. "Does any caller still read the old field?" Two or three, concrete, answerable from the diff.
 - **`noticed`** is what changes on screen or in a message. Say "Nothing visible" for internal changes.
 - **`key_changes`**: the two to four lines worth looking at first. `side: "old"` for a removed line.
+- **A concept chapter** has no `hunks`, only `key_changes`: use it to explain one part of a big hunk (a long migration, say) on its own. Its hunks still belong to another chapter.
 - **`hunks[].start`** is the hunk's first line on the new side (the old side for a deleted file). Every hunk must be in exactly one chapter. List them with `git diff main...HEAD | grep -n '^@@'`.
 - **A reviewer can write them, or add to them.** If a code reviewer (Cursor, Codex) has read the diff, ask it to write the chapters, or to add `"reviewer_note": { "by": "cursor", "text": "..." }` to the chapters it has an opinion on. The reader sees the note under the chapter's heading.
 
@@ -68,7 +69,8 @@ Then:
 ## 3. Read your inbox
 
 - `dak inbox --for <you> --unread --json` returns new messages and marks them read.
-- `dak show <thread> --json` returns the whole thread.
+- `dak show <thread> --json` returns the whole thread, and `reads`: who has read how far, and when (`seen_at`). Use it to tell "not opened yet" from "read, no answer" before chasing.
+- A message with `$`, backticks or quotes in it: write it to a file and pass `--message-file msg.md` (or `--message-file -` for stdin), so the shell does not touch it.
 - If the Claude Code hook is connected, new mail arrives at the start and end of your turns with the thread id in it. Act on it in that turn.
 
 ## 4. Wait for the answer
@@ -94,6 +96,7 @@ Each comment has an anchor: `{kind: "code", file, side, start_line, end_line}` o
 - An update that needs no answer: `dak reply <thread> --from <you> --fyi "Tests running" --json`
 - **When the work is finished** (merged, shipped, no longer needed), close it: `dak reply <thread> --from <you> --done "Merged as 4e1c2a0" --json`. The topic leaves the reader's conversation, so their list holds only open work. A later new version or question brings it back. Do this every time a PR you sent merges.
 - A question with buttons on the same thread: `dak reply <thread> --from <you> "Which goes first?" --option "#2401 first" --option "#2402 first" --option "Hold both" --json`, then `dak wait`. The answer's `choice` is the button text, exactly as you wrote it. Over HTTP: `options: [...]` on the message.
+- The same PR after a rebase or a fixup, with nothing new to say: `dak refresh <thread> --json`. The reader sees the current head in place; no new version, no notification. The chapters stay if they still match; otherwise pass `--chapters`.
 - A new version of the PR: `dak reply <thread> --from <you> --pr <number> --chapters chapters.json "What changed since version 1" --json`
 - A new version of the doc: `dak reply <thread> --from <you> --doc docs/brief.md "What changed" --json`
 

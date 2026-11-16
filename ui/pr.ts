@@ -63,6 +63,13 @@ function chapterView(a: Pr, chapters: (Chapter & { plain?: boolean })[], files: 
   const ch = chapters[S.chapter];
   const byFile = new Map<string, number[]>();
   for (const h of ch.hunks) byFile.set(h.file, [...(byFile.get(h.file) ?? []), h.start]);
+  // A concept chapter has no hunks of its own: show the hunks its key changes point into.
+  if (!ch.hunks.length) for (const k of ch.key_changes ?? []) {
+    const f = files.find((x) => x.path === k.file);
+    const side = k.side ?? "new";
+    const h = f?.hunks.find((x) => side === "old" ? k.line >= x.old_start && k.line < x.old_start + Math.max(x.old_lines, 1) : k.line >= x.new_start && k.line < x.new_start + Math.max(x.new_lines, 1));
+    if (f && h && !(byFile.get(f.path) ?? []).includes(hunkStart(f, h))) byFile.set(f.path, [...(byFile.get(f.path) ?? []), hunkStart(f, h)]);
+  }
   const keys = (ch.key_changes ?? []).map((k) => `<li><button data-jump="${esc(k.file)}|${k.side ?? "new"}|${k.line}"><span>${esc(k.text)}</span><code>${esc(k.file.split("/").pop()!)}:${k.line}${k.side === "old" ? " removed" : ""}</code></button></li>`).join("");
   const last = S.chapter === chapters.length - 1;
   const pad = (n: number) => String(n).padStart(2, "0");

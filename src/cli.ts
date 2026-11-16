@@ -4,14 +4,14 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { loadConfig, writeConfig, configPath, dakHome, person, HELPERS } from "./config";
 import {
-  addMessage, createThread, getThread, listThreads, putBlob, requireReader, setStatus, takeUnread,
+  addMessage, createThread, getThread, listThreads, putBlob, refreshPr, requireReader, setStatus, takeUnread,
   type NewAttachment,
 } from "./store";
 import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presence";
 import { SKILL, INSTRUCTIONS } from "./skill";
 import pkg from "../package.json";
 import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
-import { snapshotPr, loadChapters, checkChapters, diffForChapters } from "./pr";
+import { snapshotPr, loadChapters, checkChapters, diffForChapters, draftChapters } from "./pr";
 import { DakError, type Message, type Verdict } from "./types";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
@@ -35,7 +35,10 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
                     [--done]                               the work is finished: the topic leaves the reader's list
                     [--fyi]                                an update that needs no answer (after an approval, text-only replies are updates anyway)
   dak show <thread>                              the whole thread
+  dak refresh <thread> [--pr n | --base ref | --diff f] [--chapters f]
+                                                 the same PR at its new head (after a rebase), in place: no new version
   dak close <thread>
+  dak chapters draft [--pr n | --base ref | --diff f]   a chapters.json with every hunk listed, grouped by folder
   dak chapters check <file> [--pr n | --base ref | --diff f] [--repo .]
   dak agents                                     readers and every session Dak has seen or can see running
   dak whoami                                     your name on Dak in this session (fills in --from and --for)
@@ -79,8 +82,27 @@ function parseDuration(s: string): number {
   return +m[1] * ({ ms: 1, s: 1000, m: 60000, h: 3600000 } as any)[m[2] ?? "s"];
 }
 
+// --message-file (or --body-file) takes the text from a file, or from stdin with "-", so a
+// "$" or a quote never has to survive a shell. Agents should prefer it for anything long.
+// "Read by pratik at 14:02 (all)" or "pratik has not opened it": whether the other side has
+// seen the latest message, judged against what they had not written themselves.
+function readLine(t: ReturnType<typeof getThread>): string {
+  const others = [t.thread.to, t.thread.from];
+  return [...new Set(others)].map((who) => {
+    const theirs = t.messages.filter((m) => m.author !== who);
+    if (!theirs.length) return "";
+    const r = t.reads.find((x) => x.reader === who);
+    const last = theirs[theirs.length - 1].id;
+    if (!r || r.up_to < theirs[0].id) return `${who} has not opened it`;
+    const at = r.seen_at ? ` at ${new Date(r.seen_at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
+    return r.up_to >= last ? `${who} read it all${at}` : `${who} read up to message ${r.up_to}${at}, not the latest`;
+  }).filter(Boolean).join(" · ");
+}
+
 function readBody(positionals: string[], values: any): string {
-  if (values["body-file"]) return readFileSync(values["body-file"], "utf8");
+  const file = values["message-file"] ?? values["body-file"];
+  if (file === "-") return readFileSync(0, "utf8");
+  if (file) return readFileSync(file, "utf8");
   return positionals.join(" ");
 }
 
@@ -121,7 +143,7 @@ const OPTIONS = {
   pr: { type: "string" }, repo: { type: "string" }, base: { type: "string" }, diff: { type: "string" },
   chapters: { type: "string" }, doc: { type: "string", multiple: true }, file: { type: "string", multiple: true },
   link: { type: "string", multiple: true }, verdict: { type: "string" }, timeout: { type: "string" },
-  "body-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
+  "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
   force: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
@@ -276,7 +298,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "show": {
       const t = getThread(positionals[0] ?? "");
-      out(json, t, () => `${t.thread.subject}\n${t.thread.from} → ${t.thread.to} · ${t.thread.status}\n\n${t.messages.map(describe).join("\n\n")}`);
+      out(json, t, () => `${t.thread.subject}\n${t.thread.from} → ${t.thread.to} · ${t.thread.status}\n${readLine(t)}\n\n${t.messages.map(describe).join("\n\n")}`);
       return 0;
     }
     case "skill": {
@@ -289,13 +311,37 @@ export async function main(argv: string[]): Promise<number> {
       out(json, { name, tool: detectTool(), where: process.cwd() }, () => name);
       return 0;
     }
+    case "refresh": {
+      // Same PR, new head (a rebase, a fixup): the thread's newest PR is re-read in place.
+      // Its chapters stay unless --chapters gives new ones; they must still match the diff.
+      const id = positionals[0] ?? "";
+      const { meta } = refreshPr(id, (old) => {
+        const pr = values.pr ?? (values.base || values.diff ? undefined : old.number ? String(old.number) : undefined);
+        const baseRef = values.base ?? (pr || values.diff ? undefined : old.base_ref);
+        if (!pr && !baseRef && !values.diff) throw new DakError("usage", "That diff came from a file: pass --diff <file> (or --base <ref>).");
+        const { meta: fresh, files } = snapshotPr({ repo: values.repo ?? old.repo ?? ".", pr, base: baseRef, diffFile: values.diff, chaptersFile: values.chapters });
+        if (values.chapters) return fresh;
+        const problems = old.chapters.length ? checkChapters(old.chapters, files) : [];
+        if (problems.length) throw new DakError("bad_chapters", "The old chapters no longer match the new head; pass --chapters:\n  " + problems.join("\n  "));
+        return { ...fresh, chapters: old.chapters, ...(old.prologue ? { prologue: old.prologue } : {}) };
+      });
+      out(json, { thread: id, head_sha: meta.head_sha }, () => `Refreshed ${id} to ${meta.head_sha?.slice(0, 7) ?? "the new diff"}.`);
+      return 0;
+    }
     case "close": {
       setStatus(positionals[0] ?? "", "closed");
       out(json, { closed: positionals[0] }, () => `Closed ${positionals[0]}.`);
       return 0;
     }
     case "chapters": {
-      if (positionals[0] !== "check" || !positionals[1]) throw new DakError("usage", "dak chapters check <file> [--pr n | --base ref | --diff f]");
+      // draft: every hunk already listed (file and new-side start), grouped by folder, so the
+      // agent writes only the words. Prints chapters.json; save it, then fill it in.
+      if (positionals[0] === "draft") {
+        const files = diffForChapters({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff });
+        console.log(JSON.stringify(draftChapters(files), null, 2));
+        return 0;
+      }
+      if (positionals[0] !== "check" || !positionals[1]) throw new DakError("usage", "dak chapters draft|check <file> [--pr n | --base ref | --diff f]");
       const chapters = loadChapters(positionals[1]);
       const files = diffForChapters({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff });
       const problems = checkChapters(chapters, files);

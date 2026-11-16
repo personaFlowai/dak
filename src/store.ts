@@ -54,6 +54,9 @@ export function store(): Database {
   const cols = new Set((db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("options")) db.exec("ALTER TABLE messages ADD COLUMN options TEXT");
   if (!cols.has("choice")) db.exec("ALTER TABLE messages ADD COLUMN choice TEXT");
+  // When a reader last got further into a thread: the "read" signal a sender sees.
+  const readCols = new Set((db.query("PRAGMA table_info(reads)").all() as { name: string }[]).map((c) => c.name));
+  if (!readCols.has("seen_at")) db.exec("ALTER TABLE reads ADD COLUMN seen_at TEXT");
   settleUpdates();
   return db;
 }
@@ -210,9 +213,24 @@ export function setStatus(threadId: string, status: ThreadStatus) {
   store().query("UPDATE threads SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), threadId);
 }
 
+// The newest PR on a thread, swapped for a fresh snapshot of the same PR: after a rebase the
+// reader sees the current head without a new version, a new message or a notification.
+export function refreshPr(threadId: string, rebuild: (old: any) => any): { id: string; meta: any } {
+  getThreadRow(threadId);
+  const row = store().query(`SELECT a.id, a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
+    WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC, a.rowid DESC LIMIT 1`).get(threadId) as { id: string; meta: string } | null;
+  if (!row) throw new DakError("no_pr", `Thread ${threadId} has no PR to refresh.`);
+  const meta = rebuild(JSON.parse(row.meta));
+  store().query("UPDATE attachments SET meta = ? WHERE id = ?").run(JSON.stringify(meta), row.id);
+  // The open window reloads a thread when updated_at moves; no message, so no notification.
+  store().query("UPDATE threads SET updated_at = ? WHERE id = ?").run(now(), threadId);
+  return { id: row.id, meta };
+}
+
 export function markRead(reader: string, threadId: string, upTo: number) {
-  store().query(`INSERT INTO reads VALUES (?,?,?) ON CONFLICT(reader, thread_id)
-    DO UPDATE SET last_seen = max(last_seen, excluded.last_seen)`).run(reader, threadId, upTo);
+  store().query(`INSERT INTO reads (reader, thread_id, last_seen, seen_at) VALUES (?,?,?,?) ON CONFLICT(reader, thread_id)
+    DO UPDATE SET seen_at = CASE WHEN excluded.last_seen > last_seen THEN excluded.seen_at ELSE seen_at END,
+      last_seen = max(last_seen, excluded.last_seen)`).run(reader, threadId, upTo, now());
 }
 
 /* ---------- archives ---------- */
@@ -267,10 +285,15 @@ export function getMessage(id: number): Message {
   return hydrate([r])[0];
 }
 
-export function getThread(id: string): { thread: Thread; messages: Message[] } {
+export interface ReadMark { reader: string; up_to: number; seen_at: string | null }
+
+// Who has read how far, so a sender can tell "not opened yet" from "read, no answer".
+// A reader's own messages count as read, so only readers other than the author show.
+export function getThread(id: string): { thread: Thread; messages: Message[]; reads: ReadMark[] } {
   const thread = getThreadRow(id);
   const rows = store().query("SELECT * FROM messages WHERE thread_id = ? ORDER BY id").all(id) as any[];
-  return { thread, messages: hydrate(rows) };
+  const reads = store().query("SELECT reader, last_seen AS up_to, seen_at FROM reads WHERE thread_id = ? ORDER BY reader").all(id) as ReadMark[];
+  return { thread, messages: hydrate(rows), reads };
 }
 
 export interface ThreadSummary extends Thread { unread: number; last_body: string; last_author: string; message_count: number }
