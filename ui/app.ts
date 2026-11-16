@@ -178,7 +178,7 @@ function toolbar(title: string, sub = "", right = ""): string {
 
 function renderMain() {
   const main = $("#main")!;
-  const keep = { reading: $("#reading")?.scrollTop ?? 0, msgs: $("#msgs")?.scrollTop, body: $(".pane-body")?.scrollTop ?? 0,
+  const keep = { phonePr: $(".phone-pr")?.scrollTop ?? 0, reading: $("#reading")?.scrollTop ?? 0, msgs: $("#msgs")?.scrollTop, body: $(".pane-body")?.scrollTop ?? 0,
     // Beside mode: each column keeps its place while you stay on the same chapter.
     chapter: $(".chapter.beside")?.dataset.key, code: $("#code-scroll")?.scrollTop ?? 0, notes: $(".notes-col > header")?.scrollTop ?? 0 };
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
@@ -200,6 +200,7 @@ function renderMain() {
     else m.scrollTop = S.pane === "ask" || to === "end" || keep.msgs === undefined ? m.scrollHeight : keep.msgs;
   }
   const pb = $(".pane-body"); if (pb && !r) pb.scrollTop = keep.body;
+  const pp = $(".phone-pr"); if (pp) pp.scrollTop = keep.phonePr; // closing a file sheet leaves the page where it was
   if (S.restore) { for (const [sel, top] of Object.entries(S.restore)) { const el = $(sel); if (el) el.scrollTop = top; } S.restore = null; }
   else savePlace();
   markQuotes();
@@ -721,7 +722,7 @@ async function choose(topic: string, mid: number, i: number) {
 // Open Ask with the selection attached and the cursor in the question box.
 function openAsk() {
   S.pane = "ask";
-  if (S.focus) S.dockOpen = true;
+  if (S.focus || onPhone()) S.dockOpen = true;
   renderMain();
   $<HTMLTextAreaElement>("#askq")?.focus();
 }
@@ -913,7 +914,7 @@ document.addEventListener("click", async (e) => {
     $(".psheet-body")?.scrollTo({ top: 0 });
     return;
   }
-  if (d.phoneTab) { S.phoneTab = d.phoneTab as any; S.phoneFile = null; renderMain(); $(".pane-body.review")?.scrollTo({ top: 0 }); return; }
+  if (d.phoneTab) { S.phoneTab = d.phoneTab as any; S.phoneFile = null; renderMain(); $(".phone-pr")?.scrollTo({ top: 0 }); return; }
   if (d.gotoFile) {
     // Bring the file to the top of the code column, under any pinned header.
     const card = document.querySelector<HTMLElement>(`.fcard[data-file="${CSS.escape(d.gotoFile)}"]`);
@@ -938,10 +939,18 @@ document.addEventListener("click", async (e) => {
   }
   if (d.moreTopics !== undefined) { S.topicCap += 20; await loadConvo(); return renderMain(); }
   if (d.att && d.in && d.in !== S.cur) { const att = d.att; await openThread(d.in); useAtt(att); await prepare(); return renderMain(); }
-  if (d.pane) { S.pane = d.pane as any; if (S.focus) S.dockOpen = d.pane === "ask"; return renderMain(); }
+  if (d.pane) { S.pane = d.pane as any; if (S.focus || onPhone()) S.dockOpen = d.pane === "ask"; return renderMain(); }
   if (d.closePane !== undefined) { S.att = null; S.paneClosed = true; S.focus = false; S.dockOpen = false; local.set("focus", false); S.sel = null; S.editing = null; return render(); }
   if (d.att) { S.paneClosed = false; }
   if (d.att) { useAtt(d.att); S.sel = null; S.editing = null; await prepare(); return renderMain(); }
+  // On a phone every chapter is on one page: go there and bring the chapter into view.
+  if (d.chapter !== undefined && onPhone()) {
+    S.phoneTab = "guide"; S.phoneFile = null; renderMain();
+    const i = Math.max(0, Number(d.chapter));
+    const pp = $(".phone-pr"), sec = $(`#pch-${i}`);
+    if (pp && sec) pp.scrollTop = sec.offsetTop - ($(".ptabs")?.offsetHeight ?? 0);
+    return;
+  }
   if (d.chapter !== undefined) { S.chapter = Number(d.chapter); S.phoneFile = null; S.sel = null; S.editing = null; await prepare(); renderMain(); $("#reading")?.scrollTo({ top: 0 }); return; }
   if (d.mode) { const [path, mode] = d.mode.split("|"); S.fileMode[`${S.att}:${path}`] = mode as any; return renderMain(); }
   if (d.reviewed !== undefined) return toggleRead();
@@ -999,7 +1008,7 @@ function toggleSide() {
 // The end of the last chapter: put the cursor in the reply, wherever the reply is.
 function writeReview() {
   S.pane = "chat";
-  if (S.focus) S.dockOpen = true;
+  if (S.focus || onPhone()) S.dockOpen = true;
   renderMain();
   const m = $<HTMLTextAreaElement>("#message");
   if (m) { m.focus(); m.closest("form")?.classList.add("flash"); setTimeout(() => m.closest("form")?.classList.remove("flash"), 900); }

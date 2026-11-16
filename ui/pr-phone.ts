@@ -6,7 +6,7 @@ import { hunkStart, type DiffFile } from "../src/diff";
 import type { Chapter } from "../src/types";
 import { I } from "./icons";
 
-export type PhoneTab = "overview" | "guide" | "diff";
+export type PhoneTab = "overview" | "guide";
 
 // Which hunks of which files a chapter covers. A concept chapter (key changes only) covers
 // the hunks its key changes point into.
@@ -42,13 +42,15 @@ function fileRows(a: Pr, files: DiffFile[], by: Map<string, number[]> | null, ch
 export function phoneTabs(a: Pr, plain: boolean): string {
   const add = a.meta.files.reduce((n, f) => n + f.additions, 0), del = a.meta.files.reduce((n, f) => n + f.deletions, 0);
   const tab = (k: PhoneTab, label: string) => `<button class="ptab ${S.phoneTab === k ? "on" : ""}" data-phone-tab="${k}">${label}</button>`;
-  return `<nav class="ptabs">${tab("overview", "Overview")}${plain ? "" : tab("guide", "Guide")}${tab("diff", `Diff <span class="a">+${add}</span> <span class="d">−${del}</span>`)}</nav>`;
+  // Two views: what it is and why, then the chapters with their files. A PR sent without
+  // chapters reads one file per chapter, so there is no separate diff view to keep apart.
+  return `<nav class="ptabs">${tab("overview", "Overview")}${tab("guide", `Chapters <span class="a">+${add}</span> <span class="d">−${del}</span>`)}</nav>`;
 }
 
 export function phoneGuide(a: Pr, files: DiffFile[], done: Set<number>): string {
   const chapters = chaptersOf(a);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `<div class="pguide">${chapters.map((c, i) => `<section class="pch">
+  return `<div class="pguide">${chapters.map((c, i) => `<section class="pch" id="pch-${i}">
     <div class="pch-meta"><span>${pad(i + 1)} / ${pad(chapters.length)}</span>
       <label class="viewed-box"><input type="checkbox" data-chapter-reviewed="${i}" ${done.has(i) ? "checked" : ""}> Reviewed</label></div>
     <h2>${esc(c.title)}</h2>
@@ -57,7 +59,6 @@ export function phoneGuide(a: Pr, files: DiffFile[], done: Set<number>): string 
     ${fileRows(a, files, chapterHunks(c, files), i)}</section>`).join("")}</div>`;
 }
 
-export const phoneDiff = (a: Pr, files: DiffFile[]) => `<div class="pguide">${fileRows(a, files, null, -1)}</div>`;
 
 // The sheet: the chapter it came from, the file, and its diff, over the page.
 export function phoneSheet(a: Pr, files: DiffFile[], done: Set<number>, fileSection: (a: Pr, df: DiffFile | undefined, path: string, starts: number[]) => string): string {

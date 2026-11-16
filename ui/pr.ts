@@ -1,6 +1,6 @@
 import { local } from "./api";
 import { esc, S, me, name, chaptersOf, reviewed, viewed, chapterFiles, drafts, findAtt, when, mark, helperMark, plain, onPhone, type Pr, type Sel } from "./state";
-import { phoneDiff, phoneGuide, phoneSheet, phoneTabs } from "./pr-phone";
+import { phoneGuide, phoneSheet, phoneTabs } from "./pr-phone";
 import { hunkStart, type DiffFile, type Hunk } from "../src/diff";
 import type { Anchor, Chapter } from "../src/types";
 import { highlightLine } from "./hl";
@@ -29,9 +29,7 @@ export function prView(a: Pr): string {
   S.chapter = Math.min(S.chapter, chapters.length - 1);
 
   if (onPhone()) {
-    const tab = plain && S.phoneTab === "guide" ? "diff" : S.phoneTab;
-    const body = tab === "overview" ? overview(a, chapters, files, done).replace(/data-chapter="0"/, `data-phone-tab="${plain ? "diff" : "guide"}"`)
-      : tab === "guide" ? phoneGuide(a, files, done) : phoneDiff(a, files);
+    const body = S.phoneTab === "overview" ? overview(a, chapters, files, done) : phoneGuide(a, files, done);
     return `<div class="pr phone-pr">${phoneTabs(a, plain)}${body}${S.phoneFile ? phoneSheet(a, files, done, fileSection) : ""}</div>`;
   }
   const rail = `<nav class="rail" aria-label="Reading order">

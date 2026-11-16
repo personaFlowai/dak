@@ -905,3 +905,8 @@ html, body { height: 100%; }
 body { overflow-x: hidden; }
 .navbtns { display: inline-flex; gap: 0; flex: none; }
 .navbtns .icon-btn[disabled] { opacity: .3; }
+/* The PR page on a phone scrolls on its own: the box around it is set up for the Mac's columns. */
+.app.phone .phone-pr { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+/* No zoom in the home-screen app: type fields at 16px (iOS zooms below that) and no double-tap zoom. */
+.app.phone textarea, .app.phone input, .app.phone select { font-size: 16px; }
+html { touch-action: manipulation; }

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.6
+- Phone PR view: Overview and Chapters (the separate Diff tab is gone); the page scrolls, and keeps its place when a file sheet closes; Start reading and the risk rows go to that chapter; the Ask button opens on the first tap; no zooming in the home-screen app.
+
 ## 0.3.5
 - `--confirmed-by <thread>` on `dak queue order` and `review-order`: an order the person approved with a button on that thread is applied as theirs, over rows they placed by hand. Dak checks the pick itself.
 
