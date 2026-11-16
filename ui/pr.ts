@@ -127,7 +127,10 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
   // A Markdown file reads as a document by default; its changed paragraphs are marked.
   const isMd = /\.md$/i.test(path) && !!pf?.new_blob && S.docs.has(pf.new_blob);
   const preview = isMd && S.fileMode[`${a.id}:${path}`] !== "diff" && S.fileMode[`${a.id}:${path}`] !== "full";
-  const rows = folded || preview ? "" : mode === "full" ? fullRows(a, df, path, full!) : diffRows(a, path, hunks, full);
+  // Side by side applies to the changes; the whole file is one column by nature.
+  const split = S.split && mode !== "full";
+  cols = split ? 6 : 3;
+  const rows = folded || preview ? "" : mode === "full" ? fullRows(a, df, path, full!) : split ? splitRows(a, path, hunks, full) : diffRows(a, path, hunks, full);
   return `<section class="fcard ${seen ? "viewed" : ""}">
     <header class="fhead">${fileIcon(path)}<span class="fname" title="${esc(path)}"><b>${esc(file)}</b><span class="dir">${esc(dir)}</span></span>
       ${talk ? `<span class="talk" title="${talk} comment${talk === 1 ? "" : "s"}">${I.chat}${talk}</span>` : ""}
@@ -135,7 +138,7 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
       ${seen ? `<button class="link" data-unfold="${esc(path)}">${folded ? "Show" : "Hide"}</button>` : ""}
       ${isMd && !folded ? `<button class="link" data-mode="${esc(path)}|${preview ? "diff" : "preview"}">${preview ? "Show diff" : "Preview"}</button>` : ""}
       <label class="viewed-box"><input type="checkbox" data-viewed="${esc(path)}" ${seen ? "checked" : ""}> Reviewed</label></header>
-    ${folded ? "" : preview ? mdPreview(df, pf!.new_blob!) : `<div class="diffwrap"><table class="diff"><colgroup><col class="c-ln"><col class="c-sg"><col></colgroup><tbody>${rows || `<tr class="gap"><td colspan="3">${df?.binary ? "Binary file" : "No changes to show"}</td></tr>`}</tbody></table></div>`}
+    ${folded ? "" : preview ? mdPreview(df, pf!.new_blob!) : `<div class="diffwrap"><table class="diff ${split ? "split" : ""}"><colgroup>${split ? `<col class="c-ln"><col class="c-sg"><col><col class="c-ln"><col class="c-sg"><col>` : `<col class="c-ln"><col class="c-sg"><col>`}</colgroup><tbody>${rows || `<tr class="gap"><td colspan="${cols}">${df?.binary ? "Binary file" : "No changes to show"}</td></tr>`}</tbody></table></div>`}
   </section>`;
 }
 
@@ -151,7 +154,7 @@ function mdPreview(df: DiffFile | undefined, blob: string): string {
 function gap(path: string, lines: number, context: string, canOpen: boolean) {
   if (lines <= 0 && !context) return "";
   const open = canOpen && lines > 0 ? `<button class="unfold" data-mode="${esc(path)}|full" title="Show the whole file">${I.lineUp}${lines.toLocaleString()} unchanged line${lines === 1 ? "" : "s"}</button>` : "";
-  return `<tr class="gap"><td colspan="3"><span class="ctx">${esc(context)}</span>${open}</td></tr>`;
+  return `<tr class="gap"><td colspan="${cols}"><span class="ctx">${esc(context)}</span>${open}</td></tr>`;
 }
 
 function diffRows(a: Pr, path: string, hunks: Hunk[], full?: string[]) {
@@ -167,6 +170,46 @@ function diffRows(a: Pr, path: string, hunks: Hunk[], full?: string[]) {
       if (s === "+") { cls = "add"; nl = n++; } else if (s === "-") { cls = "del"; ol = o++; } else { ol = o++; nl = n++; }
       const html = nl && full?.[nl - 1] !== undefined ? full[nl - 1] : highlightLine(l.slice(1), path);
       rows += row(a, path, nl ? "new" : "old", nl || ol, cls, s === "+" ? "+" : s === "-" ? "−" : "", html);
+    }
+    shownTo = h.new_start + Math.max(h.new_lines, 0) - 1;
+  }
+  if (full && hunks.length) rows += gap(path, full.length - shownTo - (full[full.length - 1] === "" ? 1 : 0), "", true);
+  return rows;
+}
+
+// Side by side: removed lines on the left, added on the right, a run of removals paired with
+// the run of additions that follows it. Each half keeps its own line address (file|side|line),
+// so comments, selection, jumps and find work exactly as in one column.
+function splitRows(a: Pr, path: string, hunks: Hunk[], full?: string[]) {
+  const s = S.sel;
+  const half = (side: "old" | "new", line: number, cls: string, sign: string, html: string) => {
+    if (!line) return `<td class="ln empty"></td><td class="sg empty"></td><td class="tx empty"></td>`;
+    const key = esc(`${path}|${side}|${line}`);
+    const sel = s && s.att === a.id && s.file === path && s.side === side && line >= s.start && line <= s.end ? " sel" : "";
+    const c = `${cls}${sel}`;
+    return `<td class="ln ${c}" data-key="${key}"><button data-line="${esc(path)}|${side}|${line}" aria-label="Select ${side === "old" ? "removed " : ""}line ${line}">${line}</button></td><td class="sg ${c}" data-key="${key}">${sign}</td><td class="tx ${c}" data-key="${key}">${html || " "}</td>`;
+  };
+  const code = (side: "old" | "new", line: number, text: string) => side === "new" && full?.[line - 1] !== undefined ? full[line - 1] : highlightLine(text, path);
+  let rows = "", shownTo = 0;
+  for (const h of hunks) {
+    rows += gap(path, h.new_start - 1 - shownTo, h.header, !!full);
+    let o = h.old_start, n = h.new_start;
+    const lines = h.lines.filter((l) => l[0] !== "\\");
+    for (let i = 0; i < lines.length;) {
+      if (lines[i][0] === " ") {
+        const t = lines[i].slice(1);
+        rows += `<tr>${half("old", o, "", "", highlightLine(t, path))}${half("new", n, "", "", code("new", n, t))}</tr>` + notesAt(a, path, "old", o) + notesAt(a, path, "new", n);
+        o++; n++; i++; continue;
+      }
+      const del: string[] = [], add: string[] = [];
+      while (i < lines.length && lines[i][0] === "-") del.push(lines[i++].slice(1));
+      while (i < lines.length && lines[i][0] === "+") add.push(lines[i++].slice(1));
+      for (let k = 0; k < Math.max(del.length, add.length); k++) {
+        const ol = k < del.length ? o + k : 0, nl = k < add.length ? n + k : 0;
+        rows += `<tr>${half("old", ol, "del", "−", ol ? highlightLine(del[k], path) : "")}${half("new", nl, "add", "+", nl ? code("new", nl, add[k]) : "")}</tr>`
+          + (ol ? notesAt(a, path, "old", ol) : "") + (nl ? notesAt(a, path, "new", nl) : "");
+      }
+      o += del.length; n += add.length;
     }
     shownTo = h.new_start + Math.max(h.new_lines, 0) - 1;
   }
@@ -213,7 +256,9 @@ function notesAt(a: Pr, path: string, side: "old" | "new", line: number) {
   return out;
 }
 
-const note = (html: string) => `<tr class="note"><td colspan="3">${html}</td></tr>`;
+// Columns in the table being drawn: 3 unified (number, sign, code), 6 side by side.
+let cols = 3;
+const note = (html: string) => `<tr class="note"><td colspan="${cols}">${html}</td></tr>`;
 export const selKey = (s: Sel) => `${s.att}|${s.file}|${s.side}|${s.start}|${s.end}`;
 export const selLabel = (s: Sel) => `${s.file.split("/").pop()} ${s.side === "old" ? "removed " : ""}line${s.end > s.start ? `s ${s.start}–${s.end}` : ` ${s.start}`}`;
 const lineLabel = (an: { file: string; start_line: number; end_line: number; side: string }) =>

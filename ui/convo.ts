@@ -101,9 +101,12 @@ export const forgetConvo = () => cache.clear();
 export async function loadConvo() {
   if (!S.peer || !S.data) { S.convo = []; return; }
   const all = everyThread().filter((t) => peerOf(t) === S.peer);
-  S.olderTopics = Math.max(0, all.length - S.topicCap);
-  const shown = all.slice(0, S.topicCap);
+  // The newest topics, plus every topic waiting on you however old: the cap trims history,
+  // never something that needs you.
+  const needsYou = (t: Summary) => t.to === me && t.status === "waiting";
+  const shown = [...all.slice(0, S.topicCap), ...all.slice(S.topicCap).filter(needsYou)];
   if (!shown.some((t) => t.id === S.cur)) shown.push(S.data.thread as Summary);
+  S.olderTopics = all.length - shown.length;
   cache.set(S.data.thread.id, S.data);
   S.convo = await Promise.all(shown.map(async (t) => {
     const hit = cache.get(t.id);

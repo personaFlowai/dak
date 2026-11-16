@@ -72,11 +72,11 @@ function hits(): Hit[] {
 
 // Scroll the column that holds the code, not every ancestor: in beside mode the page around it must not move.
 function scrollToRow(key: string) {
-  const r = document.querySelector(`tr[data-key="${CSS.escape(key)}"]`) as HTMLElement | null;
+  const r = document.querySelector(`[data-key="${CSS.escape(key)}"]`) as HTMLElement | null;
   if (!r) return;
   const box = r.closest<HTMLElement>("#code-scroll, #reading");
   if (box) box.scrollTo({ top: box.scrollTop + r.getBoundingClientRect().top - box.getBoundingClientRect().top - box.clientHeight / 2 });
-  r.classList.remove("flash"); void r.offsetWidth; r.classList.add("flash");
+  document.querySelectorAll<HTMLElement>(`[data-key="${CSS.escape(key)}"]`).forEach((el) => { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); });
 }
 
 async function openFind() {
@@ -108,9 +108,10 @@ function tintHits() {
   if (!S.find.open) return;
   const list = hits(), cur = list[S.find.i];
   for (const h of list) {
-    const r = document.querySelector(`tr[data-key="${CSS.escape(hitKey(h))}"]`);
-    r?.classList.add("found");
-    if (h === cur) r?.classList.add("found-on");
+    document.querySelectorAll(`[data-key="${CSS.escape(hitKey(h))}"]`).forEach((r) => {
+      r.classList.add("found");
+      if (h === cur) r.classList.add("found-on");
+    });
   }
 }
 
@@ -238,10 +239,11 @@ function paneHead(a: any): string {
   const i = same.findIndex(({ x }) => x.id === a.id);
   const title = a.type === "pr" ? (a.meta.title ? `${a.name} · ${a.meta.title}` : a.name) : a.name;
   const versions = same.length > 1 ? `<label class="popup"><select id="version" aria-label="Version">${same.map(({ x, m }, n) => `<option value="${x.id}" ${x.id === a.id ? "selected" : ""}>Version ${n + 1} of ${same.length} · ${when(m.created_at)}</option>`).join("")}</select></label>${i < same.length - 1 ? `<button class="link" data-att="${same[same.length - 1].x.id}">Newest</button>` : ""}` : "";
+  const splitBtn = a.type === "pr" ? `<button class="icon-btn" data-split-view aria-pressed="${S.split}" title="${S.split ? "One column" : "Side by side"}" aria-label="Side by side diff">${I.columns}</button>` : "";
   const findBtn = a.type === "pr" && !S.find.open ? `<button class="icon-btn" data-find-open title="Find in this PR (⌘F)" aria-label="Find in this PR">${I.search}</button>` : "";
   // Expand and close sit together: both act on this pane, not on the conversation.
   const focusBtn = `<button class="icon-btn" data-focus title="${S.focus ? "Show the conversation (F)" : "Focus on the review (F)"}" aria-label="${S.focus ? "Leave focus" : "Focus"}">${S.focus ? I.collapse : I.expand}</button>`;
-  return `${a.type === "pr" && S.find.open ? findBar(hits()) : ""}<div class="pane-head"><span class="ptitle" title="${esc(title)}">${esc(title)}</span>${versions}${findBtn}${focusBtn}
+  return `${a.type === "pr" && S.find.open ? findBar(hits()) : ""}<div class="pane-head"><span class="ptitle" title="${esc(title)}">${esc(title)}</span>${versions}${splitBtn}${findBtn}${focusBtn}
     <button class="icon-btn" data-close-pane title="Close (Esc)" aria-label="Close">${I.close}</button></div>`;
 }
 
@@ -649,6 +651,7 @@ document.addEventListener("click", async (e) => {
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
+  if (d.splitView !== undefined) { S.split = !S.split; local.set("split", S.split); return renderMain(); }
   if (d.searchOpen !== undefined) return openSearch();
   if (d.hitThread) return openSearchHit(d.hitThread, Number(d.hitMid));
   if (d.findOpen !== undefined) return openFind();
@@ -785,8 +788,8 @@ document.addEventListener("mouseover", (e) => {
   if (file !== lineDrag.file || side !== lineDrag.side) return;
   const lo = Math.min(lineDrag.from, Number(n)), hi = Math.max(lineDrag.from, Number(n));
   if (hi > lo) dragged = true;
-  document.querySelectorAll("tr.drag").forEach((r) => r.classList.remove("drag"));
-  for (let i = lo; i <= hi; i++) document.querySelector(`tr[data-key="${CSS.escape(`${file}|${side}|${i}`)}"]`)?.classList.add("drag");
+  document.querySelectorAll(".drag").forEach((r) => r.classList.remove("drag"));
+  for (let i = lo; i <= hi; i++) document.querySelectorAll(`[data-key="${CSS.escape(`${file}|${side}|${i}`)}"]`).forEach((r) => r.classList.add("drag"));
 });
 function finishLineDrag(e: MouseEvent) {
   const d = lineDrag!; lineDrag = null;
@@ -803,9 +806,16 @@ function readCodeSelection() {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.rangeCount) return;
   const range = sel.getRangeAt(0);
-  const rowOf = (n: Node) => (n.nodeType === 1 ? n as Element : n.parentElement)?.closest<HTMLElement>("tr[data-key]");
+  const rowOf = (n: Node) => (n.nodeType === 1 ? n as Element : n.parentElement)?.closest<HTMLElement>("[data-key]");
   const a = rowOf(range.startContainer), z = rowOf(range.endContainer);
   if (!a || !z || a === z && sel.toString().trim().length < 2) return;
+  // Side by side: the selection runs down one column, so its two ends name the range.
+  if (a.tagName === "TD") {
+    const [fa, sa, la] = a.dataset.key!.split("|"), [fz, sz, lz] = z.dataset.key!.split("|");
+    if (fa !== fz || sa !== sz) return;
+    S.sel = { att: S.att!, file: fa, side: sa as "old" | "new", start: Math.min(+la, +lz), end: Math.max(+la, +lz) };
+    S.editing = null; sel.removeAllRanges(); renderMain(); return;
+  }
   const rows: HTMLElement[] = [];
   for (let r: Element | null = a; r; r = r.nextElementSibling) { if ((r as HTMLElement).dataset.key) rows.push(r as HTMLElement); if (r === z) break; }
   const keys = rows.map((r) => r.dataset.key!.split("|"));
