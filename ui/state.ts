@@ -53,7 +53,9 @@ export const S = {
   archived: {} as Record<string, string>, // conversation (agent, or "a+b") → when you archived it
   showArchived: false,
   phoneList: true,
-  phoneFile: null as string | null, // on a phone: the file open on its own page, inside the current chapter // on a phone: the list is showing, not what was opened from it
+  phoneFile: null as string | null, // on a phone: the file open in the sheet
+  phoneFileChapter: -1, // the chapter that file was opened from, or -1 from the Diff tab
+  phoneTab: "guide" as "overview" | "guide" | "diff", // on a phone: which view of the PR // on a phone: the list is showing, not what was opened from it
   queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string;
     state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null;
     tier: string; rank: number | null; why: string | null; rank_by: string | null; pair_id: string | null; waiting_reason: string | null }[],

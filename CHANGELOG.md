@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9
+- Phone PR view, like a PR app: tabs for Overview, Guide (every chapter in one scroll, each with its files and a Reviewed box per file) and Diff. A file opens as a sheet over the page; closing it leaves you where you were.
+- New message lists who you have talked to in the last two weeks, newest first, instead of a fixed list; anyone else by name.
+- Settings no longer runs child processes while a page loads (Bun 1.1.42 crashed in spawnSync there).
+
 ## 0.2.8
 - New message, rebuilt: pick who (your agents first; any other session when you type its name), then write. For an agent you already talk to it opens their conversation as a new topic. No subject box: the first line is the subject. Files and links attach from the reply box; pulling in a GitHub PR is a link at the foot of the picker.
 - Phone: a file opens on a page of its own, with its diff, Reviewed and Next file at the bottom.

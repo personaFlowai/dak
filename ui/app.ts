@@ -465,7 +465,11 @@ function composeView(): string {
   }
   const f = c.filter.trim().toLowerCase();
   const waiting = (n: string) => S.threads.filter((t) => t.from === n && t.to === me && t.status === "waiting").length;
-  const named = S.agents.filter((a) => a.name !== me && (a.reader || a.about) && a.kind !== "person");
+  // Who you have been talking to lately, newest first; anyone else turns up when you search.
+  const lastWith = (n: string) => S.threads.filter((t) => t.from === n || t.to === n).reduce((m, t) => t.updated_at > m ? t.updated_at : m, "");
+  const fortnight = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const named = S.agents.filter((a) => a.name !== me && a.kind !== "person" && lastWith(a.name) > fortnight)
+    .sort((x, y) => lastWith(y.name).localeCompare(lastWith(x.name))).slice(0, 8);
   const match = (a: AgentRow) => !f || `${a.name} ${a.about ?? ""} ${a.where ?? ""}`.toLowerCase().includes(f);
   const others = f ? S.agents.filter((a) => a.name !== me && !named.includes(a) && match(a)).slice(0, 20) : [];
   const row = (a: AgentRow) => {
@@ -478,10 +482,10 @@ function composeView(): string {
   const mine = named.filter(match);
   return `<div class="pane-body"><form class="form newmsg" onsubmit="return false">
     <div class="search big">${I.search}<input id="c-filter" value="${esc(c.filter)}" placeholder="Who is it for?" aria-label="Who is it for" autocomplete="off"></div>
-    <div class="picks">${mine.length ? `<div class="group">Your agents</div>${mine.map(row).join("")}` : ""}
+    <div class="picks">${mine.length ? `<div class="group">Recent</div>${mine.map(row).join("")}` : ""}
       ${others.length ? `<div class="group">Other sessions</div>${others.map(row).join("")}` : ""}
       ${!mine.length && !others.length ? `<p class="empty">No one matches “${esc(c.filter)}”.</p>` : ""}</div>
-    ${f ? "" : `<p class="note-line">Other sessions show when you type their name.</p>`}
+    ${f ? "" : `<p class="note-line">Anyone else shows when you type their name.</p>`}
     <p class="note-line"><button type="button" class="link" data-cmode="pr">Pull in a GitHub PR to read</button></p>
   </form></div>`;
 }
@@ -803,7 +807,7 @@ document.addEventListener("change", async (e) => {
   if (el.dataset.wakeClosed !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { wake_closed: el.checked } }); return renderMain(); }
   if (el.dataset.codexListen !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { codex_listen: el.checked } }); return renderMain(); }
   if (el.dataset.login !== undefined) { (window as any).webkit?.messageHandlers?.dak?.postMessage({ login: el.checked }); return; }
-  if (el.dataset.chapterReviewed !== undefined) return toggleRead();
+  if (el.dataset.chapterReviewed !== undefined) return toggleRead(el.dataset.chapterReviewed ? Number(el.dataset.chapterReviewed) : S.chapter);
   if (el.dataset.check && S.att) {
     const [ch, i] = el.dataset.check.split("|").map(Number);
     const key = `checks:${S.att}:${ch}`, done = new Set(local.get(key, [] as number[]));
@@ -900,13 +904,13 @@ document.addEventListener("click", async (e) => {
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
   if (d.phoneFile !== undefined) {
-    // Each file is a page: open at its top, and back to the chapter where you were.
-    if (d.phoneFile) S.phoneFile = d.phoneFile; else S.phoneFile = null;
-    if (d.phoneFile && !S.phoneFile) return;
-    await prepare(); renderMain();
-    const r = $(".pane-body.review"); if (r) r.scrollTop = 0; const rd = $("#reading"); if (rd) rd.scrollTop = 0;
+    // A file opens as a sheet over the page; closing it leaves the page where it was.
+    S.phoneFile = d.phoneFile || null; S.phoneFileChapter = Number(d.ch ?? -1);
+    renderMain();
+    $(".psheet-body")?.scrollTo({ top: 0 });
     return;
   }
+  if (d.phoneTab) { S.phoneTab = d.phoneTab as any; S.phoneFile = null; renderMain(); $(".pane-body.review")?.scrollTo({ top: 0 }); return; }
   if (d.gotoFile) {
     // Bring the file to the top of the code column, under any pinned header.
     const card = document.querySelector<HTMLElement>(`.fcard[data-file="${CSS.escape(d.gotoFile)}"]`);
@@ -1019,9 +1023,9 @@ function saveComment() {
   renderMain();
 }
 
-function toggleRead() {
-  const a = findAtt(S.att); if (!a || a.type !== "pr" || S.chapter < 0) return;
-  const files = chapterFiles(chaptersOf(a)[S.chapter]);
+function toggleRead(i = S.chapter) {
+  const a = findAtt(S.att); if (!a || a.type !== "pr" || i < 0) return;
+  const files = chapterFiles(chaptersOf(a)[i]);
   const v = viewed(a.id);
   setViewed(a.id, files, !files.every((f) => v.has(f)));
   renderMain();

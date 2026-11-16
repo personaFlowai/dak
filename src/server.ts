@@ -5,7 +5,7 @@ import { recentWakes, settleWakes, tickSleepers } from "./sleeper";
 import { next, queue, queueStamp, removeQueue, setQueue } from "./queue";
 import { describeReview, orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
 import type { Participant } from "./types";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, person, token } from "./config";
 import {
@@ -467,16 +467,29 @@ function dakBinary(): string {
   return process.execPath.endsWith("/bun") ? "dak" : process.execPath;
 }
 
+/* Settings is read on every page load, so it must not block the server on child processes:
+   Bun (1.1.42) has crashed in spawnSync while a page was loading. Finding a program is a
+   look along PATH; the GitHub login is fetched in the background and cached. */
 function which(bin: string): boolean {
-  return Bun.spawnSync(["/bin/sh", "-c", `command -v ${bin}`], { stdout: "pipe", env: { ...process.env, PATH: `${process.env.PATH}:${process.env.HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin` } }).exitCode === 0;
+  const dirs = `${process.env.PATH}:${process.env.HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin`.split(":");
+  return dirs.some((d) => { try { return !!d && statSync(join(d, bin)).isFile(); } catch { return false; } });
 }
 
 let ghCache: { at: number; login: string | null } | null = null;
+let ghLoading = false;
 function ghLogin(): string | null {
-  if (ghCache && Date.now() - ghCache.at < 60_000) return ghCache.login;
-  const p = Bun.spawnSync(["gh", "api", "user", "--jq", ".login"], { stdout: "pipe", stderr: "pipe" });
-  ghCache = { at: Date.now(), login: p.exitCode === 0 ? p.stdout.toString().trim() : null };
-  return ghCache.login;
+  if ((!ghCache || Date.now() - ghCache.at > 60_000) && !ghLoading) {
+    ghLoading = true;
+    (async () => {
+      try {
+        const p = Bun.spawn(["gh", "api", "user", "--jq", ".login"], { stdout: "pipe", stderr: "ignore" });
+        const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
+        ghCache = { at: Date.now(), login: code === 0 ? out.trim() : null };
+      } catch { ghCache = { at: Date.now(), login: null }; }
+      finally { ghLoading = false; }
+    })();
+  }
+  return ghCache?.login ?? null;
 }
 
 function settings() {
