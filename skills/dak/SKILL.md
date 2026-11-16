@@ -104,6 +104,7 @@ Priorities. Three tiers (urgent: a production bug, security, an unblocker; norma
 - Merge order: `dak queue order <pr> <pr>...` and `dak queue set <pr> --tier urgent --why "production bug"`. Dak refuses an order that puts a PR ahead of the one it waits for (`--after`).
 - Say what a held or waiting row is waiting on, in plain words: `--waiting "a migration renumber"` (cleared when its state changes). Dak adds "Waiting on #2413" and "Waiting on its pair" itself.
 - Pairs tested together: `dak queue pair 2420 2433`; they show as one row and merge together.
+- When the person approves an order you proposed (they pick your "Use this order" button), apply it with `--confirmed-by <that thread>`; it then counts as theirs and moves rows they had placed. Dak checks their pick.
 - The person can drag rows and change tiers; their order wins, and your reordering leaves their rows in place (the command says which it kept). So read the order rather than assume it: your merge loop asks `dak queue next --json` for the next ready PR or pair (approved, not held, what it waits for already merged), and gets exit code 3 when nothing is ready.
 
 ## 4. Wait for the answer

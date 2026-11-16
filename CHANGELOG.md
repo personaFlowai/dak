@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.5
+- `--confirmed-by <thread>` on `dak queue order` and `review-order`: an order the person approved with a button on that thread is applied as theirs, over rows they placed by hand. Dak checks the pick itself.
+
 ## 0.3.4
 - Fixed: 0.3.3 broke every send and reply (a new column the session record did not name).
 - One outside key can speak for several bots (Grok's Orbit and the rest): each sends with "from": "<name>", keeps that name, and replies to any of them come back on the key.

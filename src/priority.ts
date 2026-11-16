@@ -43,6 +43,21 @@ export function byPriority<T extends { tier?: string | null; rank?: number | nul
 }
 
 const me = () => person(loadConfig());
+
+/* An order the person approved on a thread: the agent asked with buttons, the person picked
+   one. Applied with --confirmed-by <thread>, the order counts as the person's own, so it moves
+   rows they placed by hand. Dak checks the pick itself, so an agent cannot claim one. */
+export function confirmedBy(threadId: string, agent: string): { choice: string; at: string } {
+  const p = me();
+  const t = store().query("SELECT from_name, to_reader FROM threads WHERE id = ?").get(threadId) as { from_name: string; to_reader: string } | null;
+  if (!t) throw new DakError("no_thread", `No thread ${threadId}.`, 404);
+  if (![t.from_name, t.to_reader].includes(agent) || ![t.from_name, t.to_reader].includes(p)) throw new DakError("not_confirmed", `${threadId} is not between you and ${p}.`, 403);
+  const pick = store().query(`SELECT m.choice, m.created_at FROM messages m WHERE m.thread_id = ? AND m.author = ? AND m.choice IS NOT NULL
+    AND m.id > (SELECT max(id) FROM messages WHERE thread_id = ? AND author = ? AND options IS NOT NULL) ORDER BY m.id DESC LIMIT 1`)
+    .get(threadId, p, threadId, agent) as { choice: string; created_at: string } | null;
+  if (!pick) throw new DakError("not_confirmed", `${p} has not picked a button on ${threadId} since you last asked there.`, 403);
+  return { choice: pick.choice, at: pick.created_at };
+}
 const isPerson = (by: string) => by === me();
 
 /* ---------- the merge queue ---------- */

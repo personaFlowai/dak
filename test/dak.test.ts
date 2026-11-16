@@ -447,6 +447,15 @@ describe("priorities", () => {
     const rows = dak("queue", "--json").json().filter((x: any) => [4001, 4003].includes(x.pr));
     expect(rows.map((x: any) => [x.pr, x.rank, x.rank_by])).toEqual([[4001, 1, "sam"], [4003, 2, "sam"]]);
     expect(dak("queue", "priority", "4001", "--tier", "later", "--from", "atlas", "--json").json().error.code).toBe("person_ordered");
+    // The person approves an order on a thread: the agent applies it as theirs, over their own placing.
+    const ask = dak("send", "--to", "sam", "--from", "atlas", "--subject", "New order?", "4003 first", "--option", "Use this order", "--option", "Keep mine", "--json").json().thread.id;
+    expect(dak("queue", "order", "4003", "4001", "--from", "atlas", "--confirmed-by", ask, "--json").json().error.code).toBe("not_confirmed");
+    await http(`/v1/threads/${ask}/messages`, { method: "POST", body: JSON.stringify({ author: "sam", body: "", choice: "Use this order" }) });
+    expect(dak("queue", "order", "4003", "4001", "--from", "mitra", "--confirmed-by", ask, "--json").json().error.code).toBe("not_confirmed"); // not mitra's thread
+    const done = dak("queue", "order", "4003", "4001", "--from", "atlas", "--confirmed-by", ask, "--json").json();
+    expect(done).toMatchObject({ ordered: [4003, 4001], kept: [] });
+    const after = dak("queue", "--json").json().filter((x: any) => [4001, 4003].includes(x.pr));
+    expect(after.map((x: any) => [x.pr, x.rank, x.rank_by])).toEqual([[4003, 1, "sam"], [4001, 2, "sam"]]);
   });
 
   test("review order: urgent first with its reason; a hotfix goes urgent on its own", async () => {

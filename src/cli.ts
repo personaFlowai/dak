@@ -17,7 +17,7 @@ import { DakError, type Message, type Verdict } from "./types";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners } from "./reviewer";
 import { next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
-import { describeReview, orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
+import { confirmedBy, describeReview, orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
 import type { AwaitingReview } from "./store";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
@@ -219,7 +219,7 @@ const OPTIONS = {
   proof: { type: "string", multiple: true }, skipped: { type: "string", multiple: true }, cost: { type: "string" }, cap: { type: "string" },
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
   eta: { type: "string" }, after: { type: "string" }, tier: { type: "string" }, why: { type: "string" }, waiting: { type: "string" },
-  review: { type: "boolean" }, hotfix: { type: "boolean" }, type: { type: "string" }, blocks: { type: "string" },
+  review: { type: "boolean" }, hotfix: { type: "boolean" }, "confirmed-by": { type: "string" }, type: { type: "string" }, blocks: { type: "string" },
   state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
 } as const;
 
@@ -455,8 +455,10 @@ export async function main(argv: string[]): Promise<number> {
       if (sub === "remove" && n) { removeQueue(num(n)); out(json, { removed: n }, () => `Removed #${n}.`); return 0; }
       if (sub === "order" || sub === "review-order") {
         const refs = positionals.slice(1);
-        if (!refs.length) throw new DakError("usage", `dak queue ${sub} <pr> <pr>... [--tier urgent|normal|later]`);
-        const r = sub === "order" ? orderQueue(refs.map(num), by, { tier: tierOf(values.tier) }) : orderReviews(refs, by, { tier: tierOf(values.tier) });
+        if (!refs.length) throw new DakError("usage", `dak queue ${sub} <pr> <pr>... [--tier urgent|normal|later] [--confirmed-by <thread>]`);
+        // --confirmed-by: the person picked a button approving this order on that thread; it is applied as theirs.
+        const as = values["confirmed-by"] ? (confirmedBy(values["confirmed-by"], by), person(loadConfig())) : by;
+        const r = sub === "order" ? orderQueue(refs.map(num), as, { tier: tierOf(values.tier) }) : orderReviews(refs, as, { tier: tierOf(values.tier) });
         out(json, r, () => `Ordered ${r.ordered.length}.${r.kept.length ? ` Kept ${person(loadConfig())}'s order for ${r.kept.join(", ")}.` : ""}`);
         return 0;
       }
