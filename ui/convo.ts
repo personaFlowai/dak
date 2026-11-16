@@ -7,13 +7,16 @@ import { I } from "./icons";
 
 // Where typed text is kept: per topic, or per agent while starting a new one.
 export const draftKey = () => (S.newTopic ? `new:${S.peer}` : S.cur ?? "");
-import type { Message, Thread } from "../src/types";
+import type { Message, Participant, Thread } from "../src/types";
+import type { ReadMark } from "../src/store";
 
-export type Topic = { thread: Thread; messages: Message[] };
+export type Topic = { thread: Thread; messages: Message[]; participants?: Participant[]; reads?: ReadMark[] };
 
 // Who a thread is with, from your side. A thread between two agents belongs to the pair, "atlas+mitra".
-export const peerOf = (t: Pick<Thread, "to" | "from">) =>
-  t.to === me ? t.from : t.from === me ? t.to : [t.from, t.to].sort().join("+");
+// A thread you were added to (as reviewer, approver, watcher) belongs with whoever started it.
+export const peerOf = (t: Pick<Thread, "to" | "from"> & { participants?: string[] }) =>
+  t.to === me ? t.from : t.from === me ? t.to : t.participants?.includes(me) ? t.from : [t.from, t.to].sort().join("+");
+export const onThread = (t: Pick<Thread, "to" | "from"> & { participants?: string[] }) => t.to === me || t.from === me || !!t.participants?.includes(me);
 export const isPair = (peer: string | null) => !!peer?.includes("+");
 export const peerName = (peer: string) => peer.split("+").map(name).join(" and ");
 const everyThread = () => [...S.threads, ...S.others];
@@ -33,7 +36,7 @@ export interface Peer { name: string; latest: Summary; waiting: number; unread: 
 export function peers(): Peer[] {
   const by = new Map<string, Peer>();
   for (const t of S.threads) {
-    if (t.to !== me && t.from !== me) continue;
+    if (!onThread(t)) continue;
     const n = peerOf(t);
     const p = by.get(n) ?? { name: n, latest: t, waiting: 0, unread: 0, topics: 0 };
     if (t.updated_at > p.latest.updated_at) p.latest = t;
@@ -48,7 +51,7 @@ export function peers(): Peer[] {
 // Agents writing to each other: one row per pair, read-only.
 export function pairList(): string {
   const by = new Map<string, Summary>();
-  for (const t of S.others) { if (t.to === me || t.from === me) continue; const k = peerOf(t); const cur = by.get(k); if (!cur || t.updated_at > cur.updated_at) by.set(k, t); }
+  for (const t of S.others) { if (onThread(t)) continue; const k = peerOf(t); const cur = by.get(k); if (!cur || t.updated_at > cur.updated_at) by.set(k, t); }
   const rows = [...by].filter(([k]) => !isArchived(k)).sort((a, b) => b[1].updated_at.localeCompare(a[1].updated_at));
   if (!rows.length) return "";
   return `<div class="side-head sub">Between agents</div>${rows.map(([k, t]) => {
@@ -112,7 +115,7 @@ export async function loadConvo() {
     const hit = cache.get(t.id);
     if (hit && hit.thread.updated_at === t.updated_at) return hit;
     // Reading agents' mail does not mark it read for them.
-    const mine = t.to === me || t.from === me;
+    const mine = onThread(t);
     const got = await api<Topic>(`/threads/${t.id}${mine && looking() ? `?read_as=${encodeURIComponent(me)}` : ""}`);
     cache.set(t.id, got);
     return got;

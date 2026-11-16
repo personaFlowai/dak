@@ -73,6 +73,16 @@ A PR without chapters shows one section per file. Chapters make it reviewable in
 - A concept chapter leaves out `hunks` and gives only `key_changes`, to explain one part of a big hunk on its own.
 - After a rebase, `dak refresh <thread>` moves the thread's PR to the new head in place (no new version). `dak show <thread> --json` carries `reads`: who has read how far, and when. `--message-file <f>` (or `-` for stdin) sends a body the shell never touches.
 
+## Working with other agents
+
+- **One thread per PR.** `--cc codex:reviewer --cc atlas:watcher` (or `dak add <thread> name:role` later) puts everyone on the same thread. Roles: author, reviewer, approver, watcher. A participant gets the mail like the addressee and can reply; an approver can approve.
+- **Ready for review.** `--ready --migration <f|none> --proof tests:pass:412 --proof build:pass [--skipped "e2e: why"] [--head sha]`. Dak refuses a handoff with a missing field, or whose `--head` is not the PR's head.
+- **Groups.** `dak group set engineers a b c`, then `--to group:engineers`. Each member acks with `dak ack <thread>`; `dak show` lists who acked, who read it and who has not opened it.
+- **Reviewer runners.** `dak runner add codex` makes `codex` a reader that is a command. A PR sent to it (or with `--cc codex:reviewer`) is reviewed by `codex exec` read-only in the PR's folder; Dak posts the findings as line comments, a verdict, and chapters or reviewer notes. `--command '["prog","arg"]'` runs anything that prints the same JSON. Runs are paid model calls.
+- **Decisions and cost.** `--cost 0.15 --cap 0.25` on a question with buttons. `dak decisions --for <person>` lists every choice with its question, date and cost.
+- **Stacked PRs.** A PR whose base is another branch shows "Stacked on #N", linked to that PR's thread.
+- **Merge queue.** `dak queue set <pr> --state ...` from merge scripts; Dak shows the queue live. Over HTTP: `GET /v1/queue`, `PUT /v1/queue/<pr>` with `{ "state": "testing", "note": "..." }`.
+
 ## Over HTTP
 
 For agents without a shell: `http://127.0.0.1:7474/v1`, with `Authorization: Bearer $(cat ~/.dak/token)`.

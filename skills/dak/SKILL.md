@@ -57,6 +57,21 @@ Then:
 2. Send: `dak send --to <reader> --from <you> --pr <number> --chapters chapters.json "What you need from them" --json`. Use `--base main` instead of `--pr` for a branch with no PR yet. Keep the thread id it prints.
 3. Wait (section 4).
 
+### Ready for review
+
+When the PR is ready, say so with the proof, as fields Dak checks:
+
+`dak send --to <reader> --from <you> --pr <n> --chapters chapters.json --ready --migration none --proof tests:pass:412 --proof build:pass --skipped "e2e: no device today" --head <sha> --cc codex:reviewer --cc atlas:watcher --json`
+
+- `--migration` is the migration file name, or `none`. `--proof` is `name:pass|fail[:count]`, at least one. `--skipped` says what you did not run, and why.
+- `--head` is the commit your proofs ran on. If the PR's head has moved, Dak refuses: re-run on the head.
+- `--cc name:role` puts the reviewer, the approver and anyone watching on the same thread. Each gets the mail and can reply there; nobody copies findings between messages.
+- After a rebase with nothing new to review: `dak reply <thread> --head-only "Renumbered, same SQL" --json`.
+
+### A reviewer that runs on its own
+
+If Dak has a runner named `codex` (`dak runner add codex`), sending a PR to it, or `--cc codex:reviewer`, makes Dak run `codex exec` read-only on the PR. It posts its findings on the thread as line comments with a verdict, and writes the chapters or a `reviewer_note` per chapter. Every run is a paid model call, so only send to a runner when a review is wanted.
+
 ## 2. Send a doc or a note
 
 - A doc to review: `dak send --to <reader> --from <you> --doc docs/brief.md "What you need decided" --json`. Comments come back anchored to paragraphs, with the words quoted.
@@ -72,6 +87,15 @@ Then:
 - `dak show <thread> --json` returns the whole thread, and `reads`: who has read how far, and when (`seen_at`). Use it to tell "not opened yet" from "read, no answer" before chasing.
 - A message with `$`, backticks or quotes in it: write it to a file and pass `--message-file msg.md` (or `--message-file -` for stdin), so the shell does not touch it.
 - If the Claude Code hook is connected, new mail arrives at the start and end of your turns with the thread id in it. Act on it in that turn.
+
+### To several agents at once
+
+- A group: `dak send --to group:engineers --from <you> --fyi "Load 67: stop your stacks" --json`. Each member answers with `dak ack <thread> --from <them> "Stopped"`; `dak show <thread>` lists who acked and who has not opened it.
+- A question that spends money: add `--cost 0.15 --cap 0.25` beside its `--option` buttons. `dak decisions --for <person>` later lists every button they picked, with the question, the date and the cost.
+
+### The merge queue
+
+Merge scripts keep it current: `dak queue set <pr> --state approved|testing|building|merging|merged|migrated|deployed|failed|held [--head sha] [--migration f] [--note "full suite, 4 min"]`. The person sees it live in Dak; `dak queue` prints it.
 
 ## 4. Wait for the answer
 

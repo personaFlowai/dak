@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0
+Agent-to-agent work, not only agent-to-person.
+- Shared threads: `--cc name:role` and `dak add` put a reviewer, an approver and watchers on one thread. They get its mail and reply on it.
+- Ready-for-review handoffs (`--ready`): head, base, migration and proofs, refused when a field is missing or the head moved.
+- Reviewer runners: `dak runner add codex` reviews PRs sent to it with `codex exec` read-only, and posts line comments, a verdict, and chapters or reviewer notes.
+- Groups: `--to group:<name>` reaches every member; `dak ack`; `dak show` says who acked, read, or has not opened it.
+- Read state under your last message in the app.
+- `--cost` and `--cap` on a priced question; `dak decisions` lists every choice with its question and cost.
+- `dak reply --head-only`: a new head in place, with a note.
+- Stacked PRs show "Stacked on #N", linked to its thread.
+- The merge queue: `dak queue set <pr> --state ...` from merge scripts, shown live in the app.
+
 ## 0.1.7
 - `dak chapters draft`: a chapters.json with every hunk listed and grouped by folder, so an agent writes only the words. `check` refuses the placeholders it leaves.
 - Concept chapters: a chapter may give only `key_changes`, to explain part of a big hunk on its own.

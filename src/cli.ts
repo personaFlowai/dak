@@ -5,6 +5,7 @@ import { basename, resolve } from "node:path";
 import { loadConfig, writeConfig, configPath, dakHome, person, HELPERS } from "./config";
 import {
   addMessage, createThread, getThread, listThreads, putBlob, refreshPr, requireReader, setStatus, takeUnread,
+  addParticipant, decisions, groups, setGroup,
   type NewAttachment,
 } from "./store";
 import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presence";
@@ -13,6 +14,9 @@ import pkg from "../package.json";
 import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
 import { snapshotPr, loadChapters, checkChapters, diffForChapters, draftChapters } from "./pr";
 import { DakError, type Message, type Verdict } from "./types";
+import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
+import { addRunner, removeRunner, runners } from "./reviewer";
+import { queue, removeQueue, setQueue } from "./queue";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
 
@@ -38,6 +42,23 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak refresh <thread> [--pr n | --base ref | --diff f] [--chapters f]
                                                  the same PR at its new head (after a rebase), in place: no new version
   dak close <thread>
+  send/reply extras:
+      --cc <name:role>          also on the thread: reviewer, approver, watcher (repeatable)
+      --ready --migration <f|none> --proof tests:pass:412 [--proof ...] [--skipped "e2e: why"] [--head sha]
+                                a ready-for-review handoff; refused if a field is missing or the head moved
+      --cost 0.15 [--cap 0.25]  what a yes would spend, shown with the buttons
+      --head-only (reply)       move the PR to its new head in place, with a note that asks nothing
+      --message-file <f|->      the message from a file or stdin, untouched by the shell
+  dak add <thread> <name:role>...                bring someone onto a thread; they get it all as new mail
+  dak group set <name> <member>... | dak group   send to all of them with --to group:<name>
+  dak ack <thread> --from <name> [text]          a member's "done" on a broadcast
+  dak decisions [--for <name>]                   every button picked, with the question and its cost
+  dak runner add codex | cursor | claude | <name> --command '["prog","arg"]'
+                                                 a reader that is a command: PRs sent to it get reviewed headless
+  dak runner list | dak runner remove <name>
+  dak queue [--all] | dak queue set <pr> --state <s> [--head sha] [--migration f] [--note text] [--title t]
+                                                 the merge queue; states: approved testing building merging merged migrated deployed failed held
+  dak queue remove <pr>
   dak chapters draft [--pr n | --base ref | --diff f]   a chapters.json with every hunk listed, grouped by folder
   dak chapters check <file> [--pr n | --base ref | --diff f] [--repo .]
   dak agents                                     readers and every session Dak has seen or can see running
@@ -82,21 +103,38 @@ function parseDuration(s: string): number {
   return +m[1] * ({ ms: 1, s: 1000, m: 60000, h: 3600000 } as any)[m[2] ?? "s"];
 }
 
-// --message-file (or --body-file) takes the text from a file, or from stdin with "-", so a
-// "$" or a quote never has to survive a shell. Agents should prefer it for anything long.
-// "Read by pratik at 14:02 (all)" or "pratik has not opened it": whether the other side has
-// seen the latest message, judged against what they had not written themselves.
+// Where each person on the thread stands with it: replied, read it all, read part, or not opened.
+// "Delivered" and "read" are the same moment for an agent: its hook hands it the mail.
 function readLine(t: ReturnType<typeof getThread>): string {
-  const others = [t.thread.to, t.thread.from];
-  return [...new Set(others)].map((who) => {
-    const theirs = t.messages.filter((m) => m.author !== who);
+  const who = [...new Set([t.thread.to, t.thread.from, ...t.participants.map((p) => p.name)])].filter((w) => !w.startsWith("group:"));
+  const role = (w: string) => t.participants.find((p) => p.name === w)?.role;
+  return who.map((w) => {
+    const theirs = t.messages.filter((m) => m.author !== w);
     if (!theirs.length) return "";
-    const r = t.reads.find((x) => x.reader === who);
-    const last = theirs[theirs.length - 1].id;
-    if (!r || r.up_to < theirs[0].id) return `${who} has not opened it`;
+    const label = role(w) ? `${w} (${role(w)})` : w;
+    const lastTheirs = theirs[theirs.length - 1].id;
+    const lastOwn = [...t.messages].reverse().find((m) => m.author === w);
+    if (lastOwn && lastOwn.id > theirs[0].id && w !== t.thread.from) return `${label} replied`;
+    const r = t.reads.find((x) => x.reader === w);
+    if (!r || r.up_to < theirs[0].id) return `${label} has not opened it`;
     const at = r.seen_at ? ` at ${new Date(r.seen_at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
-    return r.up_to >= last ? `${who} read it all${at}` : `${who} read up to message ${r.up_to}${at}, not the latest`;
+    return r.up_to >= lastTheirs ? `${label} read it all${at}` : `${label} read up to message ${r.up_to}${at}, not the latest`;
   }).filter(Boolean).join(" · ");
+}
+
+// The thread's newest PR, re-read at its current head. Chapters stay unless new ones are given,
+// and must still match the new diff.
+function refreshThread(id: string, values: any) {
+  return refreshPr(id, (old) => {
+    const pr = values.pr ?? (values.base || values.diff ? undefined : old.number ? String(old.number) : undefined);
+    const baseRef = values.base ?? (pr || values.diff ? undefined : old.base_ref);
+    if (!pr && !baseRef && !values.diff) throw new DakError("usage", "That diff came from a file: pass --diff <file> (or --base <ref>).");
+    const { meta: fresh, files } = snapshotPr({ repo: values.repo ?? old.repo ?? ".", pr, base: baseRef, diffFile: values.diff, chaptersFile: values.chapters });
+    if (values.chapters) return fresh;
+    const problems = old.chapters.length ? checkChapters(old.chapters, files) : [];
+    if (problems.length) throw new DakError("bad_chapters", "The old chapters no longer match the new head; pass --chapters:\n  " + problems.join("\n  "));
+    return { ...fresh, chapters: old.chapters, ...(old.prologue ? { prologue: old.prologue } : {}) };
+  }).meta;
 }
 
 function readBody(positionals: string[], values: any): string {
@@ -127,6 +165,8 @@ function describe(m: Message): string {
   if (m.body.trim()) lines.push("  " + m.body.trim().replace(/\n/g, "\n  "));
   if (m.options?.length) lines.push(`  options: ${m.options.map((o) => `[${o}]`).join(" ")}`);
   if (m.choice) lines.push(`  picked: ${m.choice}`);
+  if (m.handoff) lines.push(`  ${describeHandoff(m.handoff)}`);
+  if (m.cost) lines.push(`  ${describeCost(m.cost)}`);
   for (const a of m.attachments) lines.push(`  attached ${a.type}: ${a.name}`);
   for (const c of m.comments) {
     const where = !c.anchor ? "" : c.anchor.kind === "code"
@@ -146,6 +186,10 @@ const OPTIONS = {
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
   force: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
+  cc: { type: "string", multiple: true }, ready: { type: "boolean" }, head: { type: "string" }, migration: { type: "string" },
+  proof: { type: "string", multiple: true }, skipped: { type: "string", multiple: true }, cost: { type: "string" }, cap: { type: "string" },
+  "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
+  state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
 } as const;
 
 export async function main(argv: string[]): Promise<number> {
@@ -194,9 +238,11 @@ export async function main(argv: string[]): Promise<number> {
       const atts = attachmentsFrom(values);
       let kind: "pr" | "doc" | "note" = atts.some((a) => a.type === "doc") ? "doc" : "note";
       let subject = values.subject as string | undefined;
+      let prMeta: any = null;
       if (values.pr || values.base || values.diff) {
         const { meta } = snapshotPr({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff, chaptersFile: values.chapters });
         atts.unshift({ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta });
+        prMeta = meta;
         kind = "pr";
         subject ??= meta.title ?? undefined;
       }
@@ -205,7 +251,9 @@ export async function main(argv: string[]): Promise<number> {
         const heading = doc ? readFileSync(doc, "utf8").match(/^#\s+(.+)$/m)?.[1] : undefined;
         subject = heading ?? (values.file ?? [])[0] ?? readBody(positionals, values).split("\n")[0].slice(0, 80);
       }
-      const { thread, message } = createThread({ to: values.to, from: values.from, subject: subject ?? "", kind, body: readBody(positionals, values), attachments: atts, options: values.option, ...(values.fyi ? { needs_reply: false } : {}) });
+      const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
+      const { thread, message } = createThread({ to: values.to, from: values.from, subject: subject ?? "", kind, body: readBody(positionals, values), attachments: atts, options: values.option,
+        participants: (values.cc ?? []).map(parseParticipant), extra, ...(values.fyi ? { needs_reply: false } : {}) });
       out(json, { thread, message }, () => `Sent ${thread.id} to ${thread.to}: ${thread.subject}\nWait for the reply with: dak wait ${thread.id} --for ${thread.from}`);
       return 0;
     }
@@ -259,15 +307,25 @@ export async function main(argv: string[]): Promise<number> {
         const prior = messages.flatMap((m) => m.attachments).filter((x) => x.type === "doc" && x.name === a.name).length;
         (a.meta as any).version = prior + 1;
       }
-      if (values.pr || values.base || values.diff) {
+      let prMeta: any = null;
+      if (values["head-only"]) {
+        // Same review, new head (a rebase, a renumbered migration): swap it in place, and say why.
+        prMeta = refreshThread(id, values);
+      } else if (values.pr || values.base || values.diff) {
         const { meta } = snapshotPr({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff, chaptersFile: values.chapters });
         atts.unshift({ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta });
+        prMeta = meta;
       }
+      if (values.ready && !prMeta) prMeta = messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop()?.meta ?? null;
+      const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
+      for (const c of values.cc ?? []) addParticipant(id, parseParticipant(c));
       const body = readBody(positionals, values);
+      if (values["head-only"] && !body.trim() && !values.ready) { out(json, { thread: id, head_sha: prMeta.head_sha }, () => `Moved ${id} to ${prMeta.head_sha?.slice(0, 7)}.`); return 0; }
       // --done: the work is finished (merged, shipped). The note is an update, and the topic
       // leaves the reader's conversation; anything later that asks something brings it back.
       const m = body.trim() || !values.done
-        ? addMessage(id, { author: values.from, body, verdict: verdict ?? null, attachments: atts, options: values.option, choice: values.choice, ...(values.fyi || values.done ? { needs_reply: false } : {}) })
+        ? addMessage(id, { author: values.from, body, verdict: verdict ?? null, attachments: atts, options: values.option, choice: values.choice, extra,
+            ...(values.fyi || values.done || (values["head-only"] && !values.ready) ? { needs_reply: false } : {}) })
         : null;
       if (values.done) setStatus(id, "closed");
       out(json, m ?? { done: id }, () => values.done ? `Marked ${id} done.` : `Replied on ${id}.`);
@@ -315,17 +373,70 @@ export async function main(argv: string[]): Promise<number> {
       // Same PR, new head (a rebase, a fixup): the thread's newest PR is re-read in place.
       // Its chapters stay unless --chapters gives new ones; they must still match the diff.
       const id = positionals[0] ?? "";
-      const { meta } = refreshPr(id, (old) => {
-        const pr = values.pr ?? (values.base || values.diff ? undefined : old.number ? String(old.number) : undefined);
-        const baseRef = values.base ?? (pr || values.diff ? undefined : old.base_ref);
-        if (!pr && !baseRef && !values.diff) throw new DakError("usage", "That diff came from a file: pass --diff <file> (or --base <ref>).");
-        const { meta: fresh, files } = snapshotPr({ repo: values.repo ?? old.repo ?? ".", pr, base: baseRef, diffFile: values.diff, chaptersFile: values.chapters });
-        if (values.chapters) return fresh;
-        const problems = old.chapters.length ? checkChapters(old.chapters, files) : [];
-        if (problems.length) throw new DakError("bad_chapters", "The old chapters no longer match the new head; pass --chapters:\n  " + problems.join("\n  "));
-        return { ...fresh, chapters: old.chapters, ...(old.prologue ? { prologue: old.prologue } : {}) };
-      });
+      const meta = refreshThread(id, values);
       out(json, { thread: id, head_sha: meta.head_sha }, () => `Refreshed ${id} to ${meta.head_sha?.slice(0, 7) ?? "the new diff"}.`);
+      return 0;
+    }
+    case "add": {
+      // dak add <thread> codex:reviewer pratik:approver
+      const id = positionals.shift() ?? "";
+      if (!positionals.length) throw new DakError("usage", "dak add <thread> <name:role>... (roles: author, reviewer, approver, watcher)");
+      let list = getThread(id).participants;
+      for (const p of positionals) list = addParticipant(id, parseParticipant(p));
+      out(json, list, () => list.map((p) => `${p.name} (${p.role})`).join(", "));
+      return 0;
+    }
+    case "group": {
+      // dak group set engineers alpha beta gamma | dak group list
+      if (positionals[0] === "set" && positionals[1]) {
+        const members = setGroup(positionals[1], positionals.slice(2));
+        out(json, { group: positionals[1], members }, () => `group:${positionals[1]} is ${members.join(", ") || "empty"}.`);
+        return 0;
+      }
+      const all = groups();
+      out(json, all, () => Object.entries(all).map(([g, m]) => `group:${g}  ${m.join(", ")}`).join("\n") || "No groups. Make one with: dak group set <name> <member>...");
+      return 0;
+    }
+    case "ack": {
+      // A member saying "seen, done" on a broadcast: an answer that asks nothing back.
+      const id = positionals.shift() ?? "";
+      if (!values.from) throw new DakError("no_sender", "Say who is acking with --from <name>.");
+      addMessage(id, { author: values.from, body: readBody(positionals, values) || "Done.", needs_reply: false });
+      out(json, { acked: id }, () => `Acked ${id}.`);
+      return 0;
+    }
+    case "queue": {
+      // dak queue | dak queue set <pr> --state testing [--head sha] [--migration f] [--note text] | dak queue remove <pr>
+      const [sub, n] = positionals;
+      if (sub === "set" && n) {
+        const row = setQueue(Number(String(n).replace(/^#/, "")), { state: values.state, title: values.title ?? values.subject, head: values.head, migration: values.migration, note: values.note, thread: values.thread });
+        out(json, row, () => `#${row.pr} ${row.state}${row.note ? ` (${row.note})` : ""}`);
+        return 0;
+      }
+      if (sub === "remove" && n) { removeQueue(Number(String(n).replace(/^#/, ""))); out(json, { removed: n }, () => `Removed #${n}.`); return 0; }
+      const rows = queue({ all: values.all });
+      out(json, rows, () => rows.length ? rows.map((r) => `#${String(r.pr).padEnd(6)} ${r.state.padEnd(9)} ${(r.head ?? "").slice(0, 8).padEnd(9)} ${(r.migration ?? "").padEnd(16)} ${r.title}${r.note ? `  (${r.note})` : ""}`).join("\n") : "The queue is empty.");
+      return 0;
+    }
+    case "runner": {
+      // dak runner add codex | add review-bot --command '["prog","--flag"]' | list | remove <name>
+      const [sub, name] = positionals;
+      if (sub === "add" && name) {
+        let command: string[] | undefined;
+        if (values.command) { try { command = JSON.parse(values.command); } catch { throw new DakError("bad_runner", `--command is a JSON array: '["codex","exec","--sandbox","read-only"]'.`); } }
+        const r = addRunner(name, { preset: values.preset, command, timeout_seconds: values.timeout ? parseDuration(values.timeout) / 1000 : undefined });
+        out(json, r, () => `${r.name} reviews what is sent to it, with: ${r.command.join(" ")}\nSend a PR: dak send --to ${r.name} --pr <n>, or add it to a thread: dak add <thread> ${r.name}:reviewer`);
+        return 0;
+      }
+      if (sub === "remove" && name) { removeRunner(name); out(json, { removed: name }, () => `Removed ${name}.`); return 0; }
+      const list = runners();
+      out(json, list, () => list.map((r) => `${r.name.padEnd(14)} ${r.command.join(" ")}`).join("\n") || "No runners. Add one with: dak runner add codex");
+      return 0;
+    }
+    case "decisions": {
+      const reader = String(values.for ?? person(loadConfig())).toLowerCase();
+      const list = decisions(reader);
+      out(json, list, () => list.length ? list.map((d) => `${d.decided_at.slice(0, 10)}  ${d.choice}  (${d.subject}, ${d.thread_id})${d.cost ? `  ${describeCost(d.cost)}` : ""}\n    asked by ${d.asked_by}: ${d.question.split("\n")[0].slice(0, 120)}`).join("\n") : "No decisions yet.");
       return 0;
     }
     case "close": {

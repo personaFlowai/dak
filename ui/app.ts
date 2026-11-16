@@ -8,13 +8,13 @@ import {
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending } from "./doc";
-import { chatPane, currentVerdict, composer, askPane } from "./chat";
+import { chatPane, currentVerdict, composer, askPane, canReply } from "./chat";
 import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
 import { draftKey, forgetConvo } from "./convo";
 import { archivedList, isArchived, peers } from "./convo";
-import { peerList, pairList, peerOf, peerName, isPair, topicFor, loadConvo, topicMenu } from "./convo";
-import type { Message, Thread, Verdict } from "../src/types";
+import { peerList, pairList, peerOf, peerName, isPair, topicFor, loadConvo, topicMenu, onThread } from "./convo";
+import type { Message, Participant, Thread, Verdict } from "../src/types";
 
 const native = document.documentElement.classList.contains("native");
 
@@ -26,16 +26,18 @@ async function loadList() {
     api<Summary[]>(`/threads?for=${encodeURIComponent(me)}&box=others`),
     api<Record<string, string>>("/archives").catch(() => ({})),
   ]);
+  S.queue = await api<typeof S.queue>("/queue").catch(() => []);
+  if (S.view === "queue") renderMain();
   S.counts = { to: S.threads.filter((t) => t.unread && !isArchived(peerOf(t))).length };
   renderSide();
 }
 
 async function openThread(id: string, keep = false) {
   const t = S.threads.find((x) => x.id === id);
-  const mine = !t || t.to === me || t.from === me;
-  const data = await api<{ thread: Thread; messages: Message[] }>(`/threads/${id}${mine && looking() ? `?read_as=${encodeURIComponent(me)}` : ""}`);
+  const mine = !t || onThread(t);
+  const data = await api<{ thread: Thread; messages: Message[]; participants?: Participant[] }>(`/threads/${id}${mine && looking() ? `?read_as=${encodeURIComponent(me)}` : ""}`);
   const changed = S.cur !== id;
-  const peer = peerOf(data.thread);
+  const peer = peerOf({ ...data.thread, participants: data.participants?.map((p) => p.name) });
   S.scrollTo = peer !== S.peer || S.view !== "thread" ? "end" : changed ? id : S.scrollTo;
   if (peer !== S.peer || changed) { S.newTopic = false; S.newSubject = ""; }
   S.cur = id; S.data = data; S.view = "thread"; S.peer = peer;
@@ -156,7 +158,7 @@ function renderSide() {
     <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
     <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
     <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>
-    <div class="side-foot"><button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
+    <div class="side-foot">${S.queue.length ? `<button class="row-btn" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span><span class="count">${S.queue.filter((r) => r.state !== "deployed").length}</span></button>` : ""}<button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
     <div class="splitter" data-split="side" title="Drag to resize"></div>`;
   postControls();
 }
@@ -176,6 +178,7 @@ function renderMain() {
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
   else if (S.view === "settings") main.innerHTML = toolbar("Settings") + settingsView();
   else if (S.view === "welcome") main.innerHTML = toolbar("Welcome to Dak") + welcomeView();
+  else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", `${S.queue.filter((r) => r.state !== "deployed").length} on the way`) + queueView();
   else if (!S.data) main.innerHTML = toolbar("Dak") + `<div class="blank"><p>Choose a thread to read it.</p></div>`;
   else main.innerHTML = threadView();
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
@@ -202,29 +205,55 @@ function threadView(): string {
   const a = findAtt(S.att);
   const media = a?.type === "file" && /^(image|video)\//.test(a.meta.mime);
   const review = a?.type === "pr" || a?.type === "doc" || media;
-  const other = t.to === me ? t.from : t.to;
+  const other = t.to === me ? t.from : t.from === me ? t.to : t.from;
   const st = status(t);
   const gh = prLink();
   // Approve belongs to the thread, so it stays when the PR or doc beside the chat is closed.
-  const canApprove = (t.kind === "pr" || t.kind === "doc") && t.to === me && t.status !== "closed";
+  // The addressee approves, and so does anyone added as the approver.
+  const approver = t.to === me || !!(S.data as any).participants?.some((p: Participant) => p.name === me && p.role === "approver");
+  const canApprove = (t.kind === "pr" || t.kind === "doc") && approver && t.status !== "closed";
   const approved = canApprove && approvedNow(S.data!.messages, me);
   // Approved already: the status beside it says so, so the button goes.
   const approveBtn = approved ? "" : canApprove ? `<button class="btn primary" id="approve" ${S.sending ? "disabled" : ""} title="Approve now; anything you have typed or commented goes with it">${I.check} Approve</button>` : "";
   const archived = S.peer ? isArchived(S.peer) : false;
   const archBtn = S.peer ? `<button class="icon-btn" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}" title="${archived ? "Move back to the Inbox" : "Archive this conversation (E)"}" aria-label="${archived ? "Unarchive" : "Archive"}">${archived ? I.lineUp : I.archive}</button>` : "";
-  const doneBtn = S.peer && !isPair(S.peer) && (t.to === me || t.from === me)
+  const doneBtn = S.peer && !isPair(S.peer) && canReply(t)
     ? `<button class="btn" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}" title="${t.status === "closed" ? "Bring this topic back" : "This topic is finished: take it out of the conversation"}">${t.status === "closed" ? "Reopen" : `${I.check} Done`}</button>` : "";
   const right = `${archBtn}${doneBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
-    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${topicMenu(t.subject)}`, right);
+    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${topicMenu(t.subject)}${roles()}`, right);
   if (!review) return head + `<div class="solo-wrap">${chatPane(t, false)}</div>`;
   // Focus: chapters and code only; the reply floats at the bottom until you open it.
   if (S.focus) return head + `<div class="focus-wrap"><div class="pane-body review">${reviewBody(a!)}</div>
     ${S.pane === "ask" && S.dockOpen ? `<div class="dock open ask-dock"><div class="dock-top"><span>Ask ${esc(helperLabel())}</span><button type="button" class="link" data-pane="chat">Hide</button></div>${askPane(t)}</div>`
-      : t.to === me || t.from === me ? `<div class="dock ${S.dockOpen ? "open" : ""}">${composer(t, true)}</div>` : ""}</div>`;
+      : canReply(t) ? `<div class="dock ${S.dockOpen ? "open" : ""}">${composer(t, true)}</div>` : ""}</div>`;
   return head + `<div class="split">${chatPane(t, true)}<div class="pane-body review">${reviewBody(a!)}</div></div>`;
+}
+
+// Who else is on the thread: " · Codex reviewing · Atlas watching".
+function roles(): string {
+  const ps = ((S.data as any)?.participants ?? []) as Participant[];
+  const verb: Record<string, string> = { reviewer: "reviewing", approver: "approves", watcher: "watching", author: "author", member: "member" };
+  const shown = ps.filter((p) => p.name !== me && p.role !== "member");
+  return shown.length ? ` · ${shown.map((p) => `${esc(name(p.name))} ${verb[p.role]}`).join(", ")}` : "";
+}
+
+// Approved PRs on the road to production, in the order they joined. Each row shows how far
+// it has got; the step it is on is the only coloured one.
+const STEPS = ["approved", "testing", "building", "merging", "merged", "migrated", "deployed"];
+function queueView(): string {
+  if (!S.queue.length) return `<div class="blank"><p>Nothing in the queue. Merge scripts add PRs with <code>dak queue set &lt;pr&gt; --state approved</code>.</p></div>`;
+  return `<div class="pane-body"><table class="queue"><thead><tr><th>PR</th><th>Head</th><th>Migration</th><th>Where it is</th><th>Updated</th></tr></thead><tbody>${S.queue.map((r) => {
+    const at = STEPS.indexOf(r.state);
+    const steps = at < 0 ? `<span class="qstate ${r.state}">${r.state === "failed" ? "Failed" : "Held"}</span>`
+      : `<ol class="steps">${STEPS.map((s, i) => `<li class="${i < at ? "past" : i === at ? "now" : ""}" title="${s}">${i === at ? esc(s) : ""}</li>`).join("")}</ol>`;
+    const title = r.thread_id ? `<button class="link" data-topic="${esc(r.thread_id)}">${esc(r.title)}</button>` : esc(r.title);
+    return `<tr class="${r.state === "deployed" ? "done" : ""}"><td><b>#${r.pr}</b> ${title}</td><td><code>${esc((r.head ?? "").slice(0, 8))}</code></td>
+      <td>${r.migration ? `<code>${esc(r.migration)}</code>` : `<span class="muted">none</span>`}</td>
+      <td>${steps}${r.note ? `<div class="qnote">${esc(r.note)}</div>` : ""}</td><td class="muted">${when(r.updated_at)}</td></tr>`;
+  }).join("")}</tbody></table></div>`;
 }
 
 function reviewBody(a: any): string {
@@ -244,7 +273,11 @@ function paneHead(a: any): string {
   const findBtn = a.type === "pr" && !S.find.open ? `<button class="icon-btn" data-find-open title="Find in this PR (⌘F)" aria-label="Find in this PR">${I.search}</button>` : "";
   // Expand and close sit together: both act on this pane, not on the conversation.
   const focusBtn = `<button class="icon-btn" data-focus title="${S.focus ? "Show the conversation (F)" : "Focus on the review (F)"}" aria-label="${S.focus ? "Leave focus" : "Focus"}">${S.focus ? I.collapse : I.expand}</button>`;
-  return `${a.type === "pr" && S.find.open ? findBar(hits()) : ""}<div class="pane-head"><span class="ptitle" title="${esc(title)}">${esc(title)}</span>${versions}${splitBtn}${findBtn}${focusBtn}
+  // Stacked: the PR below this one, which should be approved first.
+  const st = a.type === "pr" ? a.meta.stacked_on : null;
+  const stack = st ? (st.thread ? `<button class="stack" data-topic="${esc(st.thread)}" title="Open the PR this one is stacked on">Stacked on ${st.number ? `#${st.number}` : esc(st.branch)}</button>`
+    : st.url ? `<a class="stack" href="${esc(st.url)}" target="_blank" rel="noopener">Stacked on #${st.number}</a>` : `<span class="stack">Stacked on ${esc(st.branch)}</span>`) : "";
+  return `${a.type === "pr" && S.find.open ? findBar(hits()) : ""}<div class="pane-head"><span class="ptitle" title="${esc(title)}">${esc(title)}</span>${stack}${versions}${splitBtn}${findBtn}${focusBtn}
     <button class="icon-btn" data-close-pane title="Close (Esc)" aria-label="Close">${I.close}</button></div>`;
 }
 
@@ -256,7 +289,7 @@ function mediaView(a: any): string {
 }
 
 function status(t: Thread): { label: string; cls: string } | null {
-  return t.to === me || t.from === me ? standing(t, S.data!.messages) : null;
+  return canReply(t) ? standing(t, S.data!.messages) : null;
 }
 
 /* ================= compose ================= */
@@ -630,6 +663,7 @@ document.addEventListener("click", async (e) => {
   if (d.closeCompose !== undefined) { S.compose = null; S.view = "thread"; return render(); }
   if (d.to && S.compose) { S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
+  if (d.queue !== undefined) { S.view = "queue"; return render(); }
   if (d.settings !== undefined) { S.view = "settings"; askLogin(); render(); await Promise.all([loadSettings(), loadAgents(true)]); return render(); }
   if (d.door) {
     if (d.door === "close") { await api("/door?revoke=", { method: "DELETE" }); S.door = { open: false }; return renderMain(); }
@@ -986,7 +1020,7 @@ async function refresh() {
   }
   const typing = document.activeElement?.matches("textarea, input");
   // Anything new with the agent on screen redraws its conversation, whichever topic it is on.
-  const changed = mine.some((t) => peerOf(t) === S.peer && (t.to === me || t.from === me)
+  const changed = mine.some((t) => peerOf(t) === S.peer && onThread(t)
     && S.convo.find((c) => c.thread.id === t.id)?.thread.updated_at !== t.updated_at);
   if (S.view === "thread" && S.cur && !typing && changed) openThread(S.cur, true);
 }

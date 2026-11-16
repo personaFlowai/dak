@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseDiff, hunkStart, lineInDiff, type DiffFile } from "./diff";
-import { putBlob } from "./store";
+import { putBlob, threadForPr } from "./store";
 import type { Chapter, PrMeta, Prologue } from "./types";
 import { DakError } from "./types";
 
@@ -20,19 +20,32 @@ function tryRun(cmd: string[], cwd: string): string | null {
 
 // Everything the review screen needs, copied now: the diff, and each changed
 // file at head. Later pushes, rebases or a deleted branch cannot break the review.
+// A PR whose base is another branch (not main) is stacked on that branch's PR. Name it, and
+// the Dak thread it is on, so the reader approves the bottom one first.
+const TRUNKS = new Set(["main", "master", "trunk", "develop", "origin/main", "origin/master"]);
+function stackedOn(repo: string, branch: string | null): { stacked_on?: NonNullable<PrMeta["stacked_on"]> } {
+  if (!branch || TRUNKS.has(branch)) return {};
+  const name = branch.replace(/^origin\//, "");
+  let pr: { number: number; url: string; title: string } | undefined;
+  try { pr = JSON.parse(tryRun(["gh", "pr", "list", "--head", name, "--state", "all", "--json", "number,url,title", "--limit", "1"], repo) ?? "[]")[0]; } catch { /* no gh, no PR */ }
+  const thread = pr ? threadForPr(pr.number) : null;
+  return { stacked_on: { branch: name, ...(pr ? { number: pr.number, url: pr.url, title: pr.title } : {}), ...(thread ? { thread } : {}) } };
+}
+
 export function snapshotPr(opts: {
   repo?: string; pr?: string; base?: string; diffFile?: string; chaptersFile?: string; url?: string; title?: string;
 }): { meta: PrMeta; files: DiffFile[] } {
   const repo = resolve(opts.repo ?? ".");
   let diff = "", url = opts.url ?? null, number: number | null = null, title = opts.title ?? null;
-  let base: string | null = null, head: string | null = null;
+  let base: string | null = null, head: string | null = null, stackBranch: string | null = opts.base ?? null;
 
   if (opts.diffFile) {
     diff = readFileSync(opts.diffFile, "utf8");
     head = tryRun(["git", "rev-parse", "HEAD"], repo)?.trim() ?? null;
   } else if (opts.pr) {
-    const info = JSON.parse(run(["gh", "pr", "view", opts.pr, "--json", "number,title,url,headRefOid,baseRefOid"], repo));
+    const info = JSON.parse(run(["gh", "pr", "view", opts.pr, "--json", "number,title,url,headRefOid,baseRefOid,baseRefName"], repo));
     number = info.number; title ??= info.title; url ??= info.url; head = info.headRefOid; base = info.baseRefOid;
+    stackBranch = info.baseRefName ?? null;
     diff = run(["gh", "pr", "diff", opts.pr], repo);
   } else {
     const baseRef = opts.base ?? "main";
@@ -61,6 +74,7 @@ export function snapshotPr(opts: {
     })),
     chapters,
     ...(prologue ? { prologue } : {}),
+    ...stackedOn(repo, stackBranch),
   };
   return { meta, files };
 }
@@ -85,6 +99,11 @@ export function loadChapters(path: string): Chapter[] {
   let raw: any;
   try { raw = JSON.parse(readFileSync(path, "utf8")); }
   catch (e: any) { throw new DakError("bad_chapters", `Could not read ${path} as JSON: ${e.message}`); }
+  return parseChapters(raw);
+}
+
+// Chapters from parsed JSON: a file an agent wrote, or what a reviewer runner printed.
+export function parseChapters(raw: any): Chapter[] {
   const list = Array.isArray(raw) ? raw : raw?.chapters;
   if (!Array.isArray(list)) throw new DakError("bad_chapters", "Chapters must be a JSON array, or an object with a chapters array.");
   return list.map((c: any, i: number) => {

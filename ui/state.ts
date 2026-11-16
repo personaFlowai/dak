@@ -2,7 +2,7 @@ import { api, blobText, boot, local } from "./api";
 import { highlightLines } from "./hl";
 import { blocks, type Block } from "./md";
 import { parseDiff, hunkStart, type DiffFile } from "../src/diff";
-import type { Anchor, Attachment, Chapter, Message, Thread, Verdict } from "../src/types";
+import type { Anchor, Attachment, Chapter, Message, Participant, Thread, Verdict } from "../src/types";
 import { TOOLS } from "./icons";
 
 export type Pr = Extract<Attachment, { type: "pr" }>;
@@ -12,7 +12,7 @@ export interface Draft { id: string; attachment_id: string; anchor: Anchor; body
 export interface Sel { att: string; file: string; side: "old" | "new"; start: number; end: number }
 export interface AgentRow { name: string; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
 export interface AskTurn { q: string; a?: string; error?: string; context?: string; loading?: boolean; seconds?: number; by?: string }
-export type View = "thread" | "compose" | "settings" | "welcome";
+export type View = "thread" | "compose" | "settings" | "welcome" | "queue";
 
 export const me = boot.me;
 
@@ -29,7 +29,7 @@ export const S = {
   others: [] as Summary[], // agents writing to each other, which you can read
   counts: { to: 0 },
   peer: null as string | null, // the agent whose conversation is open
-  convo: [] as { thread: Thread; messages: Message[] }[], // its topics: one thread each
+  convo: [] as { thread: Thread; messages: Message[]; participants?: Participant[]; reads?: { reader: string; up_to: number; seen_at: string | null }[] }[], // its topics: one thread each
   topicCap: 12, // newest topics loaded; "Show earlier topics" raises it
   olderTopics: 0,
   openTopics: new Set<string>(), // closed topics unfolded by hand
@@ -46,6 +46,7 @@ export const S = {
   find: { open: false, q: "", i: 0, list: false }, // find in the open PR
   archived: {} as Record<string, string>, // conversation (agent, or "a+b") → when you archived it
   showArchived: false,
+  queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string }[],
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
   newTopic: false, // the reply box is starting a new thread with this agent, not answering one
   newSubject: "", // scroll positions to put back after the next render

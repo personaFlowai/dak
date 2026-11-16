@@ -6,7 +6,7 @@ import { dakHome, loadConfig } from "./config";
 import type {
   Anchor, Attachment, Comment, Message, Reader, Thread, ThreadKind, ThreadStatus, Verdict,
 } from "./types";
-import { DakError } from "./types";
+import { DakError, ROLES, type Participant, type Role, type MessageExtra, type Cost } from "./types";
 import { known } from "./presence";
 
 // One SQLite file shared by every CLI call and the server. WAL lets many agents
@@ -46,6 +46,14 @@ export function store(): Database {
       PRIMARY KEY (reader, thread_id));
     -- A conversation the reader put away, and when. It stays put away until someone else
     -- writes in it after that moment; nothing is deleted.
+    -- Everyone else on a thread besides its sender and addressee, with what they are there
+    -- for: a reviewer, an approver, a watcher, or a member of the group it was sent to.
+    CREATE TABLE IF NOT EXISTS participants (
+      thread_id TEXT NOT NULL REFERENCES threads(id), name TEXT NOT NULL, role TEXT NOT NULL,
+      PRIMARY KEY (thread_id, name));
+    -- A named set of readers, so one message reaches all of them: --to group:engineers.
+    CREATE TABLE IF NOT EXISTS groups (
+      name TEXT NOT NULL, member TEXT NOT NULL, PRIMARY KEY (name, member));
     CREATE TABLE IF NOT EXISTS archives (
       reader TEXT NOT NULL, peer TEXT NOT NULL, archived_at TEXT NOT NULL,
       PRIMARY KEY (reader, peer));
@@ -54,6 +62,8 @@ export function store(): Database {
   const cols = new Set((db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("options")) db.exec("ALTER TABLE messages ADD COLUMN options TEXT");
   if (!cols.has("choice")) db.exec("ALTER TABLE messages ADD COLUMN choice TEXT");
+  // Structured parts of a message: a ready-for-review handoff, the cost of what it asks for.
+  if (!cols.has("extra")) db.exec("ALTER TABLE messages ADD COLUMN extra TEXT");
   // When a reader last got further into a thread: the "read" signal a sender sees.
   const readCols = new Set((db.query("PRAGMA table_info(reads)").all() as { name: string }[]).map((c) => c.name));
   if (!readCols.has("seen_at")) db.exec("ALTER TABLE reads ADD COLUMN seen_at TEXT");
@@ -104,10 +114,16 @@ export interface NewComment { attachment_id?: string | null; anchor: Anchor | nu
 
 export function createThread(input: {
   to: string; from: string; subject: string; kind: ThreadKind; body: string; attachments: NewAttachment[]; needs_reply?: boolean; options?: string[];
+  participants?: Participant[]; extra?: MessageExtra;
 }): { thread: Thread; message: Message } {
   const to = String(input.to ?? "").trim().toLowerCase();
   if (!to) throw new DakError("no_reader", "Say who it is for with --to <name>.");
-  if (!known(to)) {
+  // A group is its members: each one is on the thread and gets the message.
+  const members = to.startsWith("group:") ? groupMembers(to.slice(6)) : null;
+  if (members && !members.length) throw new DakError("unknown_group", `No group "${to.slice(6)}". Make one with: dak group set ${to.slice(6)} <name> <name>...`);
+  const others = [...(members ?? []).map((m) => ({ name: m, role: "member" as Role })), ...(input.participants ?? [])];
+  for (const p of others) if (!known(p.name)) throw new DakError("unknown_reader", `"${p.name}" is not a reader and has never used Dak.`);
+  if (!members && !known(to)) {
     const readers = loadConfig().readers.map((r) => r.name).join(", ");
     throw new DakError("unknown_reader", `"${to}" is not a reader and has never used Dak. Readers: ${readers}. Run dak agents for every session Dak knows.`);
   }
@@ -119,7 +135,8 @@ export function createThread(input: {
   const s = store();
   const tx = s.transaction(() => {
     s.query("INSERT INTO threads VALUES (?,?,?,?,?,?,?,?)").run(id, to, from, input.subject.trim(), input.kind, input.needs_reply === false && !cleanOptions(input.options) ? "informed" : "waiting", t, t);
-    return insertMessage(id, from, input.body, null, input.attachments, [], cleanOptions(input.options));
+    for (const p of others) if (p.name !== to && p.name !== from) addParticipantRow(id, p);
+    return insertMessage(id, from, input.body, null, input.attachments, [], cleanOptions(input.options), undefined, input.extra);
   });
   const messageId = tx();
   return { thread: getThreadRow(id), message: getMessage(messageId) };
@@ -128,7 +145,7 @@ export function createThread(input: {
 export function addMessage(threadId: string, input: {
   author: string; body: string; verdict?: Verdict | null; attachments?: NewAttachment[]; comments?: NewComment[];
   needs_reply?: boolean; // the sender's say; left out, needsReply() decides
-  options?: string[]; choice?: string;
+  options?: string[]; choice?: string; extra?: MessageExtra;
 }): Message {
   const thread = getThreadRow(threadId);
   const author = input.author.trim().toLowerCase();
@@ -138,11 +155,17 @@ export function addMessage(threadId: string, input: {
   }
   // The reader answering moves the thread to "answered". The sender writing puts it back on the
   // reader only when it needs an answer; an update leaves the thread where it was.
+  // The addressee answers. A group member's ack answers a group thread. Anyone else on the
+  // thread (a reviewer's findings, a watcher's note) leaves it where it stands: still on the
+  // addressee if it was waiting on them.
+  const other = author !== thread.from && author !== thread.to && isParticipant(threadId, author);
+  const settled = thread.status === "informed" || thread.status === "closed";
   const status: ThreadStatus = author === thread.to ? "answered"
+    : other ? (thread.to.startsWith("group:") && !settled ? "answered" : thread.status)
     : needsReply(thread, input) ? "waiting" : thread.status;
   const s = store();
   const id = s.transaction(() => {
-    const mid = insertMessage(threadId, author, input.body, input.verdict ?? null, input.attachments ?? [], input.comments ?? [], cleanOptions(input.options), input.choice);
+    const mid = insertMessage(threadId, author, input.body, input.verdict ?? null, input.attachments ?? [], input.comments ?? [], cleanOptions(input.options), input.choice, input.extra);
     s.query("UPDATE threads SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), threadId);
     return mid;
   })();
@@ -190,10 +213,11 @@ function cleanOptions(o?: string[]): string[] | undefined {
 }
 
 function insertMessage(threadId: string, author: string, body: string, verdict: Verdict | null,
-  attachments: NewAttachment[], comments: NewComment[], options?: string[], choice?: string): number {
+  attachments: NewAttachment[], comments: NewComment[], options?: string[], choice?: string, extra?: MessageExtra): number {
   const s = store();
-  const res = s.query("INSERT INTO messages (thread_id, author, body, verdict, created_at, options, choice) VALUES (?,?,?,?,?,?,?)")
-    .run(threadId, author, body, verdict, now(), options ? JSON.stringify(options) : null, choice ?? null);
+  const hasExtra = extra && Object.values(extra).some((v) => v !== undefined);
+  const res = s.query("INSERT INTO messages (thread_id, author, body, verdict, created_at, options, choice, extra) VALUES (?,?,?,?,?,?,?,?)")
+    .run(threadId, author, body, verdict, now(), options ? JSON.stringify(options) : null, choice ?? null, hasExtra ? JSON.stringify(extra) : null);
   const mid = Number(res.lastInsertRowid);
   for (const a of attachments) {
     s.query("INSERT INTO attachments VALUES (?,?,?,?,?)").run(newId("a"), mid, a.type, a.name, JSON.stringify(a.meta));
@@ -270,6 +294,7 @@ function hydrate(rows: any[]): Message[] {
   return rows.map((r) => ({
     id: r.id, thread_id: r.thread_id, author: r.author, body: r.body, verdict: r.verdict, created_at: r.created_at,
     ...(r.options ? { options: JSON.parse(r.options) } : {}), ...(r.choice ? { choice: r.choice } : {}),
+    ...(r.extra ? JSON.parse(r.extra) : {}),
     attachments: atts.filter((a) => a.message_id === r.id)
       .map((a) => ({ id: a.id, type: a.type, name: a.name, meta: JSON.parse(a.meta) }) as Attachment),
     comments: coms.filter((c) => c.message_id === r.id).map((c) => ({
@@ -289,31 +314,97 @@ export interface ReadMark { reader: string; up_to: number; seen_at: string | nul
 
 // Who has read how far, so a sender can tell "not opened yet" from "read, no answer".
 // A reader's own messages count as read, so only readers other than the author show.
-export function getThread(id: string): { thread: Thread; messages: Message[]; reads: ReadMark[] } {
+export function getThread(id: string): { thread: Thread; messages: Message[]; reads: ReadMark[]; participants: Participant[] } {
   const thread = getThreadRow(id);
   const rows = store().query("SELECT * FROM messages WHERE thread_id = ? ORDER BY id").all(id) as any[];
   const reads = store().query("SELECT reader, last_seen AS up_to, seen_at FROM reads WHERE thread_id = ? ORDER BY reader").all(id) as ReadMark[];
-  return { thread, messages: hydrate(rows), reads };
+  return { thread, messages: hydrate(rows), reads, participants: participantsOf(id) };
 }
 
-export interface ThreadSummary extends Thread { unread: number; last_body: string; last_author: string; message_count: number }
+// The newest thread carrying PR #n, for a stacked PR's link to the one below it.
+export function threadForPr(n: number): string | null {
+  const r = store().query(`SELECT m.thread_id FROM attachments a JOIN messages m ON m.id = a.message_id
+    WHERE a.type = 'pr' AND json_extract(a.meta, '$.number') = ? ORDER BY a.message_id DESC LIMIT 1`).get(n) as { thread_id: string } | null;
+  return r?.thread_id ?? null;
+}
+
+/* ---------- participants and groups ---------- */
+
+export function participantsOf(threadId: string): Participant[] {
+  return store().query("SELECT name, role FROM participants WHERE thread_id = ? ORDER BY rowid").all(threadId) as Participant[];
+}
+const isParticipant = (threadId: string, name: string) =>
+  !!store().query("SELECT 1 FROM participants WHERE thread_id = ? AND name = ?").get(threadId, name);
+function addParticipantRow(threadId: string, p: Participant) {
+  store().query("INSERT INTO participants VALUES (?,?,?) ON CONFLICT(thread_id, name) DO UPDATE SET role = excluded.role")
+    .run(threadId, p.name.toLowerCase(), p.role);
+}
+
+// Bring someone onto a thread that already exists: the reviewer once the PR is up, say.
+// They get the whole thread as unread mail, so they start from the beginning.
+export function addParticipant(threadId: string, p: Participant): Participant[] {
+  const t = getThreadRow(threadId);
+  if (!ROLES.includes(p.role)) throw new DakError("bad_role", `Role must be one of: ${ROLES.join(", ")}.`);
+  if (!known(p.name)) throw new DakError("unknown_reader", `"${p.name}" is not a reader and has never used Dak.`);
+  if (p.name !== t.to && p.name !== t.from) addParticipantRow(threadId, p);
+  return participantsOf(threadId);
+}
+
+export function groupMembers(name: string): string[] {
+  return (store().query("SELECT member FROM groups WHERE name = ? ORDER BY member").all(name.toLowerCase()) as { member: string }[]).map((r) => r.member);
+}
+export function groups(): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const r of store().query("SELECT name, member FROM groups ORDER BY name, member").all() as { name: string; member: string }[]) (out[r.name] ??= []).push(r.member);
+  return out;
+}
+export function setGroup(name: string, members: string[]): string[] {
+  const n = name.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(n)) throw new DakError("bad_group", "A group name is letters, digits, - and _.");
+  const list = [...new Set(members.map((m) => m.trim().toLowerCase()).filter(Boolean))];
+  for (const m of list) if (!known(m)) throw new DakError("unknown_reader", `"${m}" is not a reader and has never used Dak.`);
+  const s = store();
+  s.transaction(() => {
+    s.query("DELETE FROM groups WHERE name = ?").run(n);
+    for (const m of list) s.query("INSERT INTO groups VALUES (?,?)").run(n, m);
+  })();
+  return list;
+}
+
+// Every button a reader has picked: a decision, with the question it answered, to cite later.
+export interface Decision { thread_id: string; subject: string; asked_by: string; question: string; choice: string; decided_at: string; cost?: Cost }
+export function decisions(reader: string): Decision[] {
+  const rows = store().query(`SELECT m.thread_id, t.subject, m.choice, m.created_at,
+      q.author AS asked_by, q.body AS question, q.extra AS q_extra
+    FROM messages m JOIN threads t ON t.id = m.thread_id
+    LEFT JOIN messages q ON q.id = (SELECT max(id) FROM messages WHERE thread_id = m.thread_id AND id < m.id AND options IS NOT NULL)
+    WHERE m.author = ? AND m.choice IS NOT NULL ORDER BY m.id DESC`).all(reader) as any[];
+  return rows.map((r) => ({ thread_id: r.thread_id, subject: r.subject, asked_by: r.asked_by ?? "", question: r.question ?? "", choice: r.choice, decided_at: r.created_at,
+    ...(r.q_extra && JSON.parse(r.q_extra).cost ? { cost: JSON.parse(r.q_extra).cost } : {}) }));
+}
+
+export interface ThreadSummary extends Thread { unread: number; last_body: string; last_author: string; message_count: number; participants: string[] }
+
+// On the thread: its sender, its addressee, or anyone else added to it.
+const ON = `(t.to_reader = $r OR t.from_name = $r OR EXISTS (SELECT 1 FROM participants p WHERE p.thread_id = t.id AND p.name = $r))`;
 
 // A reader's threads: the ones addressed to them, and the ones they started.
 // "others" is every thread the reader is not part of: agents writing to each other, which the person may read.
 export function listThreads(reader: string, opts: { box?: "to" | "from" | "all" | "others"; limit?: number } = {}): ThreadSummary[] {
   const box = opts.box ?? "all";
   const where = box === "to" ? "t.to_reader = $r" : box === "from" ? "t.from_name = $r"
-    : box === "others" ? "(t.to_reader != $r AND t.from_name != $r)" : "(t.to_reader = $r OR t.from_name = $r)";
+    : box === "others" ? `NOT ${ON}` : ON;
   return (store().query(`
     SELECT t.*,
       (SELECT count(*) FROM messages m WHERE m.thread_id = t.id AND m.author != $r
          AND m.id > coalesce((SELECT last_seen FROM reads WHERE reader = $r AND thread_id = t.id), 0)) AS unread,
       (SELECT count(*) FROM messages m WHERE m.thread_id = t.id) AS message_count,
       (SELECT body FROM messages m WHERE m.thread_id = t.id ORDER BY id DESC LIMIT 1) AS last_body,
-      (SELECT author FROM messages m WHERE m.thread_id = t.id ORDER BY id DESC LIMIT 1) AS last_author
+      (SELECT author FROM messages m WHERE m.thread_id = t.id ORDER BY id DESC LIMIT 1) AS last_author,
+      (SELECT json_group_array(name) FROM participants p WHERE p.thread_id = t.id) AS participants
     FROM threads t WHERE ${where} ORDER BY t.updated_at DESC LIMIT $limit`)
     .all({ $r: reader, $limit: opts.limit ?? 200 }) as any[])
-    .map((r) => ({ ...rowToThread(r), unread: r.unread, message_count: r.message_count, last_body: r.last_body ?? "", last_author: r.last_author ?? "" }));
+    .map((r) => ({ ...rowToThread(r), unread: r.unread, message_count: r.message_count, last_body: r.last_body ?? "", last_author: r.last_author ?? "", participants: JSON.parse(r.participants ?? "[]") }));
 }
 
 // Messages a reader has not seen yet, oldest first. Reading them can mark them read,
@@ -321,7 +412,7 @@ export function listThreads(reader: string, opts: { box?: "to" | "from" | "all" 
 export function takeUnread(reader: string, opts: { threadId?: string; peek?: boolean } = {}): Message[] {
   const rows = store().query(`
     SELECT m.* FROM messages m JOIN threads t ON t.id = m.thread_id
-    WHERE (t.to_reader = $r OR t.from_name = $r) AND m.author != $r
+    WHERE ${ON} AND m.author != $r
       AND ($t IS NULL OR t.id = $t)
       AND m.id > coalesce((SELECT last_seen FROM reads WHERE reader = $r AND thread_id = t.id), 0)
     ORDER BY m.id`).all({ $r: reader, $t: opts.threadId ?? null }) as any[];

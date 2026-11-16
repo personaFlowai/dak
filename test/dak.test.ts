@@ -323,6 +323,64 @@ describe("buttons", () => {
   });
 });
 
+describe("agent-to-agent work", () => {
+  test("a shared thread: a reviewer added with --cc gets the mail, answers it, and show names where each person stands", () => {
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--cc", "mitra:reviewer", "--subject", "Shared", "Look at this", "--json").json();
+    const got = dak("inbox", "--for", "mitra", "--unread", "--json").json();
+    expect(got.map((m: any) => m.thread_id)).toContain(thread.id);
+    dak("reply", thread.id, "--from", "mitra", "Two findings.");
+    const t = dak("show", thread.id, "--json").json();
+    expect(t.participants).toEqual([{ name: "mitra", role: "reviewer" }]);
+    expect(t.thread.status).toBe("waiting"); // the reviewer's findings do not answer for sam
+    const line = dak("show", thread.id).out;
+    expect(line).toContain("mitra (reviewer) replied");
+    expect(line).toContain("sam has not opened it");
+    // Added later, an approver gets the whole thread as new mail.
+    expect(dak("add", thread.id, "zari:approver").code).toBe(0);
+    expect(dak("inbox", "--for", "zari", "--unread", "--json").json().filter((m: any) => m.thread_id === thread.id).length).toBe(2);
+    expect(dak("add", thread.id, "zari:boss", "--json").json().error.code).toBe("bad_role");
+  });
+
+  test("a group: one message reaches every member, and each ack shows", () => {
+    expect(dak("group", "set", "eng", "mitra", "zari").code).toBe(0);
+    expect(dak("send", "--to", "group:nobody", "--from", "atlas", "--subject", "x", "y", "--json").json().error.code).toBe("unknown_group");
+    const { thread } = dak("send", "--to", "group:eng", "--from", "atlas", "--fyi", "--subject", "Load 67", "Stop your stacks", "--json").json();
+    for (const who of ["mitra", "zari"]) expect(dak("inbox", "--for", who, "--unread", "--peek", "--json").json().some((m: any) => m.thread_id === thread.id)).toBe(true);
+    dak("ack", thread.id, "--from", "zari", "Stopped.");
+    const line = dak("show", thread.id).out;
+    expect(line).toContain("zari (member) replied");
+    expect(line).toContain("mitra (member) has not opened it");
+    expect(dak("wait", thread.id, "--for", "atlas", "--timeout", "2s", "--json").json().messages[0].body).toBe("Stopped.");
+  });
+
+  test("a priced question records the decision with its cost", async () => {
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--subject", "Run the evals?", "Three arms.",
+      "--option", "Run it", "--option", "Not now", "--cost", "0.15", "--cap", "0.25", "--json").json();
+    expect(dak("show", thread.id).out).toContain("Costs about $0.15, capped at $0.25");
+    expect(dak("send", "--to", "sam", "--from", "atlas", "--subject", "x", "y", "--cost", "0.3", "--cap", "0.2", "--json").json().error.code).toBe("bad_cost");
+    await fetch(`${base}/v1/threads/${thread.id}/messages`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ author: "sam", body: "", choice: "Run it" }) });
+    const d = dak("decisions", "--for", "sam", "--json").json().find((x: any) => x.thread_id === thread.id);
+    expect(d).toMatchObject({ choice: "Run it", asked_by: "atlas", question: "Three arms.", cost: { estimate: 0.15, cap: 0.25, currency: "USD" } });
+  });
+});
+
+describe("merge queue", () => {
+  test("merge scripts push state; the queue keeps join order, finished ones last, and refuses an unknown state", async () => {
+    expect(dak("queue", "set", "2427", "--state", "approved", "--head", "abc1234", "--migration", "20261116_x.sql", "--title", "Needs-you").code).toBe(0);
+    dak("queue", "set", "#2425", "--state", "approved", "--title", "Register reads");
+    dak("queue", "set", "2427", "--state", "testing", "--note", "full suite, 4 min");
+    expect(dak("queue", "set", "2427", "--state", "shipped", "--json").json().error.code).toBe("bad_state");
+    let rows = dak("queue", "--json").json();
+    expect(rows.map((r: any) => [r.pr, r.state])).toEqual([[2427, "testing"], [2425, "approved"]]);
+    expect(rows[0]).toMatchObject({ head: "abc1234", migration: "20261116_x.sql", note: "full suite, 4 min" });
+    dak("queue", "set", "2427", "--state", "deployed");
+    rows = (await (await http("/v1/queue")).json()) as any[];
+    expect(rows.map((r: any) => r.pr)).toEqual([2425, 2427]);
+    expect(rows[1].note).toBeNull(); // a new state clears the old note
+  });
+});
+
 describe("PRs", () => {
   test("chapters check names the hunk that is in no chapter", () => {
     writeFileSync(join(repo, "ch.json"), JSON.stringify([{ title: "Return ten", summary: "", risk: "low", hunks: [{ file: "taps.ts", start: 1 }] }]));
@@ -393,6 +451,51 @@ describe("PRs", () => {
     expect(meta.head_sha).not.toBe(before);
     expect(meta.files.map((f: any) => f.path)).toContain("extra.ts");
     git("reset", "-q", "--hard", "HEAD~1");
+  });
+
+  test("a ready-for-review handoff needs its proofs and the current head", () => {
+    const send = (...extra: string[]) => dak("send", "--to", "sam", "--from", "atlas", "--base", "main", "--subject", "Ready", "--ready", ...extra, "--json").json();
+    const missing = send();
+    expect(missing.error.code).toBe("handoff_incomplete");
+    expect(missing.error.message).toContain("--migration");
+    expect(send("--migration", "none", "--proof", "tests:maybe").error.code).toBe("bad_proof");
+    expect(send("--migration", "none", "--proof", "tests:pass:12", "--head", "0000000").error.code).toBe("stale_head");
+    const head = git("rev-parse", "HEAD").trim();
+    const ok = send("--migration", "none", "--proof", "tests:pass:12", "--proof", "build:pass", "--skipped", "e2e: no device", "--head", head.slice(0, 8));
+    expect(ok.message.handoff).toMatchObject({ head, base: "main", migration: "none",
+      proofs: [{ name: "tests", result: "pass", count: 12 }, { name: "build", result: "pass" }], skipped: [{ name: "e2e", reason: "no device" }] });
+    expect(dak("show", ok.thread.id).out).toContain("Ready for review at");
+  });
+
+  test("reply --head-only moves the head in place and leaves a note that asks nothing", () => {
+    const sent = dak("send", "--to", "sam", "--from", "atlas", "--base", "main", "--subject", "Renumber", "--json").json();
+    writeFileSync(join(repo, "extra2.ts"), "export const y = 2;\n");
+    git("add", "extra2.ts"); git("commit", "-qm", "renumber");
+    expect(dak("reply", sent.thread.id, "--from", "atlas", "--head-only", "Renumbered, same SQL").code).toBe(0);
+    const t = dak("show", sent.thread.id, "--json").json();
+    expect(t.messages.length).toBe(2);
+    expect(t.messages[1].attachments.length).toBe(0);
+    expect(t.messages[0].attachments[0].meta.head_sha).toBe(git("rev-parse", "HEAD").trim());
+    git("reset", "-q", "--hard", "HEAD~1");
+  });
+
+  test("a reviewer runner reviews a PR sent to it and posts anchored findings and chapter notes", async () => {
+    const review = JSON.stringify({ summary: "One real risk.", verdict: "changes",
+      findings: [{ file: "taps.ts", line: 2, side: "new", severity: "high", body: "Callers still expect 1." }, { file: "nowhere.ts", line: 9, severity: "medium", body: "Off the diff." }],
+      reviewer_notes: [{ chapter: 1, text: "Read every caller." }] });
+    const fake = JSON.stringify(["sh", "-c", `echo 'thinking...'; echo '${review}'`]);
+    expect(dak("runner", "add", "rev", "--command", fake).code).toBe(0);
+    writeFileSync(join(repo, "two.json"), JSON.stringify([{ title: "All", summary: "", risk: "low", hunks: [{ file: "taps.ts", start: 1 }, { file: "service.ts", start: 1 }] }]));
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--cc", "rev:reviewer", "--base", "main", "--chapters", "two.json", "--subject", "Review me", "--json").json();
+    const got = dak("wait", thread.id, "--for", "atlas", "--timeout", "15s", "--json").json();
+    const m = got.messages[0];
+    expect(m.author).toBe("rev");
+    expect(m.verdict).toBe("changes");
+    expect(m.comments).toEqual([expect.objectContaining({ anchor: { kind: "code", file: "taps.ts", side: "new", start_line: 2, end_line: 2 }, body: "**High.** Callers still expect 1." })]);
+    expect(m.body).toContain("nowhere.ts:9");
+    const meta = dak("show", thread.id, "--json").json().messages[0].attachments[0].meta;
+    expect(meta.chapters[0].reviewer_note).toEqual({ by: "rev", text: "Read every caller." });
+    dak("runner", "remove", "rev");
   });
 
   test("a PR is snapshotted, so the whole file still opens after the branch is gone", async () => {

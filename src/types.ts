@@ -33,7 +33,26 @@ export interface Message {
   comments: Comment[];
   options?: string[]; // buttons the reader can answer with, in the sender's order
   choice?: string; // on a reply: the option the reader picked
+  handoff?: Handoff; // "ready for review": the head and the proofs, checked at send time
+  cost?: Cost; // what the ask spends if the reader says yes
 }
+
+// Who else is on a thread, and why. The sender is the author and the addressee is asked
+// first; these are everyone else.
+export type Role = "author" | "reviewer" | "approver" | "watcher" | "member";
+export const ROLES: Role[] = ["author", "reviewer", "approver", "watcher", "member"];
+export interface Participant { name: string; role: Role }
+
+export interface Proof { name: string; result: "pass" | "fail"; count?: number }
+export interface Handoff {
+  head: string; // the commit the proofs ran on
+  base: string | null;
+  migration: string; // its file name, or "none"
+  proofs: Proof[];
+  skipped: { name: string; reason: string }[];
+}
+export interface Cost { estimate: number; cap?: number; currency: string }
+export interface MessageExtra { handoff?: Handoff; cost?: Cost }
 
 export type Attachment =
   | { id: string; type: "pr"; name: string; meta: PrMeta }
@@ -49,6 +68,8 @@ export interface PrMeta {
   base_sha: string | null;
   head_sha: string | null;
   base_ref?: string;
+  // The PR this one is stacked on, so a reader approves them in order.
+  stacked_on?: { branch: string; number?: number; url?: string; title?: string; thread?: string };
   diff_blob: string;
   files: PrFile[];
   chapters: Chapter[];

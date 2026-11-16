@@ -1,9 +1,14 @@
+import { buildCost, parseParticipant } from "./handoff";
+import { tickRunners } from "./reviewer";
+import { queue, queueStamp, removeQueue, setQueue } from "./queue";
+import type { Participant } from "./types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, person, token } from "./config";
 import {
   addMessage, blobPath, createThread, getThread, latestMessageId, listThreads, markRead, putBlob,
   requireReader, takeUnread, archives, setArchived, setStatus, search, type NewAttachment, type NewComment,
+  addParticipant, decisions, groups, setGroup,
 } from "./store";
 import { explain, ask } from "./explain";
 import { HELPERS, setHelper, setModel, setCodexListen, writeConfig, type HelperName } from "./config";
@@ -41,6 +46,9 @@ export function serve(port?: number) {
   for (const t of ["claude", "codex"] as const) { try { if (connected(t)) installSkill(t); } catch { /* never block the server */ } }
   const p = port ?? cfg.port;
   const secret = token();
+  // Reviewer runners pick up what was sent to them. A tick is one indexed query per runner.
+  const ticker = setInterval(() => { try { tickRunners(); } catch { /* never stop the server */ } }, 2000);
+  ticker.unref?.();
   const allowedHosts = new Set([`127.0.0.1:${p}`, `localhost:${p}`]);
 
   return Bun.serve({
@@ -146,7 +154,8 @@ async function api(req: Request, url: URL): Promise<Response> {
       const atts = httpAttachments(b.attachments);
       const kind = atts.some((a) => a.type === "doc") ? "doc" : "note";
       if (b.from) touch(String(b.from), { tool: b.from === person(loadConfig()) ? null as any : "http" });
-      return json(createThread({ to: b.to, from: b.from ?? "", subject: b.subject ?? "", kind, body: b.body ?? "", attachments: atts, options: optionsOf(b), ...(b.needs_reply === false ? { needs_reply: false } : {}) }), 201);
+      return json(createThread({ to: b.to, from: b.from ?? "", subject: b.subject ?? "", kind, body: b.body ?? "", attachments: atts, options: optionsOf(b),
+        participants: participantsOf(b), extra: { cost: costOf(b) }, ...(b.needs_reply === false ? { needs_reply: false } : {}) }), 201);
     }
   }
 
@@ -157,6 +166,12 @@ async function api(req: Request, url: URL): Promise<Response> {
       const readAs = q.get("read_as");
       if (readAs && t.messages.length) markRead(readAs, id, t.messages[t.messages.length - 1].id);
       return json(t);
+    }
+    if (parts[2] === "participants" && method === "POST") {
+      const b = await body();
+      let list = getThread(id).participants;
+      for (const p of participantsOf(b)) list = addParticipant(id, p);
+      return json(list);
     }
     // Done: the topic leaves the conversation until the agent sends something that needs you.
     if (parts[2] === "done" && method === "POST") {
@@ -170,7 +185,7 @@ async function api(req: Request, url: URL): Promise<Response> {
       if (verdict && !["approve", "changes", "question"].includes(verdict)) throw new DakError("bad_verdict", "A verdict is approve, changes or question.");
       const comments: NewComment[] = Array.isArray(b.comments) ? b.comments : [];
       const message = addMessage(id, { author: b.author ?? b.from ?? "", body: b.body ?? "", verdict: verdict ?? null, comments, attachments: httpAttachments(b.attachments), options: optionsOf(b),
-        ...(b.choice ? { choice: choiceOn(id, String(b.choice)) } : {}), ...(typeof b.needs_reply === "boolean" ? { needs_reply: b.needs_reply } : {}) });
+        ...(b.choice ? { choice: choiceOn(id, String(b.choice)) } : {}), ...(typeof b.needs_reply === "boolean" ? { needs_reply: b.needs_reply } : {}), extra: { cost: costOf(b) } });
       if (b.done === true) setStatus(id, "closed"); // the sender says the work is finished
       // Posting to GitHub happens after the reply is saved: a GitHub failure never loses the review.
       let github: { url?: string; event?: string; note?: string; error?: string } | undefined;
@@ -205,6 +220,16 @@ async function api(req: Request, url: URL): Promise<Response> {
     touch(reader, { tool: "http" });
     if (q.get("unread")) return json(takeUnread(reader, { peek: q.get("peek") === "1" }));
     return json(listThreads(reader));
+  }
+
+  if (parts[0] === "queue" && parts.length === 1 && method === "GET") return json(queue({ all: q.get("all") === "1" }));
+  if (parts[0] === "queue" && parts[1] && method === "PUT") return json(setQueue(Number(parts[1]), await body()));
+  if (parts[0] === "queue" && parts[1] && method === "DELETE") { removeQueue(Number(parts[1])); return json({ removed: Number(parts[1]) }); }
+  if (parts[0] === "decisions" && method === "GET") return json(decisions(q.get("for") ?? person(loadConfig())));
+  if (parts[0] === "groups" && parts.length === 1 && method === "GET") return json(groups());
+  if (parts[0] === "groups" && parts[1] && method === "PUT") {
+    const b = await body();
+    return json({ group: parts[1], members: setGroup(parts[1], Array.isArray(b.members) ? b.members.map(String) : []) });
   }
 
   if (parts[0] === "wake" && method === "POST") {
@@ -328,7 +353,9 @@ async function api(req: Request, url: URL): Promise<Response> {
   if (parts[0] === "events" && method === "GET") {
     // Other processes (the CLI) write the same file, so the server watches the
     // newest message id rather than relying on its own writes.
-    let last = latestMessageId();
+    // The merge queue changes without a message, so its stamp counts too.
+    const stamp = () => `${latestMessageId()}|${queueStamp()}`;
+    let last = stamp();
     let timer: ReturnType<typeof setInterval>;
     const stream = new ReadableStream({
       start(ctrl) {
@@ -336,7 +363,7 @@ async function api(req: Request, url: URL): Promise<Response> {
         ctrl.enqueue(enc.encode(`event: hello\ndata: ${last}\n\n`));
         timer = setInterval(() => {
           try {
-            const id = latestMessageId();
+            const id = stamp();
             if (id !== last) { last = id; ctrl.enqueue(enc.encode(`event: message\ndata: ${id}\n\n`)); }
             else ctrl.enqueue(enc.encode(`: keep-alive\n\n`));
           } catch { clearInterval(timer); }
@@ -413,4 +440,14 @@ function choiceOn(threadId: string, choice: string): string {
   const offered = getThread(threadId).messages.flatMap((m) => m.options ?? []);
   if (!offered.includes(choice)) throw new DakError("bad_choice", `"${choice}" is not one of the options on this thread.`);
   return choice;
+}
+
+// participants: ["codex:reviewer", "pratik:approver"] or [{ name, role }]
+function participantsOf(b: any): Participant[] {
+  if (!Array.isArray(b?.participants)) return [];
+  return b.participants.map((p: any) => typeof p === "string" ? parseParticipant(p) : parseParticipant(`${p?.name ?? ""}:${p?.role ?? "watcher"}`));
+}
+// cost: { estimate: 0.15, cap: 0.25 }
+function costOf(b: any) {
+  return b?.cost ? buildCost({ cost: String(b.cost.estimate), ...(b.cost.cap !== undefined ? { cap: String(b.cost.cap) } : {}) }) : undefined;
 }

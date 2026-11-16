@@ -2,7 +2,8 @@ import { esc, S, me, name, drafts, findAtt, when, fullWhen, mark, helperLabel, h
 import { render as renderMd } from "./md";
 import { anchorLabel, prLink } from "./pr";
 import { blobUrl } from "./api";
-import type { Attachment, Message, Thread, Verdict } from "../src/types";
+import type { Attachment, Handoff, Message, Proof, Thread, Verdict } from "../src/types";
+import { describeCost } from "../src/handoff";
 import { I, linkInfo } from "./icons";
 import { timeline, topicPicker, draftKey, type Topic } from "./convo";
 
@@ -21,7 +22,9 @@ export function chatPane(t: Thread, review: boolean): string {
     ${split}</div>`;
 }
 
-export const canReply = (t: Thread) => t.to === me || t.from === me;
+// You can write on a thread you sent, were sent, or were added to.
+export const canReply = (t: Thread) => t.to === me || t.from === me
+  || !!S.convo.find((x) => x.thread.id === t.id)?.participants?.some((p) => p.name === me);
 
 function message(m: Message, topic: Topic): string {
   const v = m.verdict ? `<span class="verdict ${m.verdict}">${{ approve: "Approved", changes: "Changes requested", question: "Question" }[m.verdict]}</span>` : "";
@@ -35,10 +38,36 @@ function message(m: Message, topic: Topic): string {
     <div class="w">${mark(m.author, "sm")}<b>${esc(name(m.author))}</b>${v}<time title="${esc(fullWhen(m.created_at))}">${when(m.created_at)}</time></div>
     ${m.choice ? `<div class="picked">${I.check}<span>${esc(m.choice)}</span></div>` : ""}
     ${m.body.trim() ? `<div class="prose">${renderMd(m.body)}</div>` : ""}
+    ${m.handoff ? handoffCard(m.handoff) : ""}
+    ${m.cost ? `<p class="cost">${esc(describeCost(m.cost))}</p>` : ""}
     ${m.options?.length ? options(m, topic) : ""}
     ${refs ? `<ul class="refs">${refs}</ul>` : ""}
     ${chips ? `<div class="chips">${chips}</div>` : ""}
+    ${seenLine(m, topic)}
   </article>`;
+}
+
+// "Ready for review": the head the proofs ran on, the migration, and each proof's result.
+function handoffCard(h: Handoff): string {
+  const proof = (p: Proof) => `<li class="${p.result}">${p.result === "pass" ? I.check : I.close}<b>${esc(p.name)}</b>${p.count !== undefined ? `<span>${p.count}</span>` : ""}</li>`;
+  return `<div class="handoff"><div class="hh"><b>Ready for review</b><code title="${esc(h.head)}">${esc(h.head.slice(0, 10))}</code>${h.base ? `<span>on <code>${esc(h.base.slice(0, 10))}</code></span>` : ""}</div>
+    <div class="hm">Migration: ${h.migration === "none" ? "none" : `<code>${esc(h.migration)}</code>`}</div>
+    <ul class="proofs">${h.proofs.map(proof).join("")}</ul>
+    ${h.skipped.length ? `<ul class="skipped">${h.skipped.map((s) => `<li>Skipped <b>${esc(s.name)}</b>: ${esc(s.reason)}</li>`).join("")}</ul>` : ""}</div>`;
+}
+
+// Under your newest message: whether each other person on the topic has seen it yet.
+function seenLine(m: Message, topic: Topic): string {
+  if (m.author !== me || topic.messages[topic.messages.length - 1]?.id !== m.id || !topic.reads) return "";
+  const t = topic.thread;
+  const others = [...new Set([t.to, t.from, ...(topic.participants ?? []).map((p) => p.name)])].filter((w) => w !== me && !w.startsWith("group:"));
+  if (!others.length) return "";
+  const each = others.map((w) => {
+    const r = topic.reads!.find((x) => x.reader === w);
+    const who = others.length > 1 ? `${esc(name(w))} ` : "";
+    return r && r.up_to >= m.id ? `${who}read${r.seen_at ? ` ${when(r.seen_at)}` : ""}` : `${who}not opened yet`;
+  });
+  return `<p class="seen">${each.join(" · ")}</p>`;
 }
 
 // Buttons an agent offered. Once you pick one (or answer in words), the choice shows and the rest step back.
@@ -84,7 +113,7 @@ function prVersion(id: string, topic: Topic): number | null {
 
 export function composer(t: Thread, docked = false): string {
   const review = t.kind !== "note";
-  const other = t.to === me ? t.from : t.to;
+  const other = t.to === me ? t.from : t.from === me ? t.to : t.from;
   const v = currentVerdict(t);
   const n = drafts(t.id).length;
   // A new topic is a plain message: no verdict, nothing to post to GitHub.
