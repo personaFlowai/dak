@@ -7,46 +7,19 @@ Claude Code, Codex, Cursor and your own scripts send you PRs, docs and questions
 
 <p align="center">
   <a href="https://github.com/personaflowai/dak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/personaflowai/dak?color=1f6f8b"></a>
-  <a href="https://github.com/personaflowai/dak/actions/workflows/ci.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/personaflowai/dak/ci.yml?branch=main&label=tests"></a>
   <img alt="macOS 13+" src="https://img.shields.io/badge/macOS-13%2B-1f6f8b?logo=apple">
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/github/license/personaflowai/dak?color=1f6f8b"></a>
-  <a href="https://github.com/personaflowai/dak/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/personaflowai/dak/total?color=1f6f8b"></a>
-  <a href="https://github.com/personaflowai/dak/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/personaflowai/dak?style=flat&color=1f6f8b"></a>
 </p>
 
 <p align="center"><img src="docs/screenshots/story.gif" width="900" alt="From install to daily use: install, connect your agents, an agent sends a PR, it arrives explained in chapters, you approve, the answer reaches the agent's session as JSON, everything waiting on you in one order, the merge queue, and the same PR on a phone"></p>
 
-<p align="center"><sub>Install → connect agents → an agent sends a PR → read it in chapters → approve → the agent gets your answer → the queues → your phone.</sub></p>
-
-<p align="center"><a href="https://github.com/personaflowai/dak/releases/download/v0.4.0/dak-demo.mp4"><img src="docs/screenshots/video-poster.jpg" width="640" alt="A still from the Dak video: approving a PR with a one-line note"></a><br>
-<a href="https://github.com/personaflowai/dak/releases/download/v0.4.0/dak-demo.mp4"><b>▶ Watch the 56-second video</b></a> <sub>(MP4, 6 MB, with sound)</sub></p>
+<p align="center"><a href="https://github.com/personaflowai/dak/releases/download/v0.4.0/dak-demo.mp4">▶ Watch the 56-second video</a> (with sound)</p>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/personaflowai/dak/main/install.sh | sh
 ```
 
 Dak (डाक, "the post") gives every agent on your machine (Claude Code, Cursor, Codex, Grok, your own scripts) one place to send you work and get your answer back. A PR arrives as chapters you can read in order, with the diff, the whole file and a helper that explains any line. A brief arrives as a rendered document you can comment on paragraph by paragraph. You pick a verdict, press Send, and the agent that asked gets your comments as JSON on the same thread.
-
-Everything stays on your machine: one SQLite file, a localhost server, no accounts. The phone link and the door for outside agents are off until you open them.
-
-## Screens
-
-| | |
-|---|---|
-| ![One conversation per agent, with buttons to answer](docs/screenshots/1-conversation.png) | ![A PR explained before the code](docs/screenshots/2-pr-overview.png) |
-| **One conversation per agent.** PRs, docs and questions are topics; answer with a click. | **The agent explains the PR first:** why, what, where to look, the risk. |
-| ![Chapter notes beside the code](docs/screenshots/3-chapter.png) | ![Side-by-side diff](docs/screenshots/4-split.png) |
-| **Notes beside the code**, chapter by chapter: why, risk and proof, questions to check. | **Unified or split**, with comments on any line. |
-| ![A doc to comment on](docs/screenshots/5-doc.png) | ![Search everything](docs/screenshots/6-search.png) |
-| **Docs to comment on**, word by word. | **⌘K** across every conversation. |
-
-| ![Everything waiting on you, in one order](docs/screenshots/8-waiting.png) | ![The merge queue](docs/screenshots/9-queue.png) |
-| **Waiting on you.** PRs, briefs and decisions in one order. Agents propose it; your order wins. | **The merge queue, live:** what is testing, what is next, how long it should take. |
-
-<p align="center"><img src="docs/screenshots/10-phone.png" width="760" alt="A PR on a phone: the overview, the chapters with their files, and one file open with Mark reviewed"></p>
-<p align="center"><b>On your phone:</b> the overview, the chapters, and one file at a time with Mark reviewed.</p>
-
-<p align="center"><img src="docs/screenshots/7-dark.png" width="800" alt="Dak in dark mode"></p>
 
 ## What it does
 
