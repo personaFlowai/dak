@@ -877,6 +877,12 @@ describe("the outside door for remote agents", () => {
     const skill = await (await out("/x/skill")).text();
     expect(skill).toContain("/x/send");
     expect(skill).not.toContain(key);
+    // It can say what kind of ask it is, what it blocks, and how urgent: the same as the CLI.
+    const ask = await (await out("/x/send", { method: "POST", body: JSON.stringify({ subject: "Launch post", body: "Read the draft", type: "brief", blocks: "Zari's Friday post", tier: "urgent", why: "goes out Friday" }) })).json();
+    const row = ((await (await http("/v1/reviews?for=sam")).json()) as any[]).find((r) => r.thread_id === ask.thread.id);
+    expect(row).toMatchObject({ type: "brief", blocks: "Zari's Friday post", tier: "urgent", why: "goes out Friday" });
+    expect((await out(`/x/priority/${ask.thread.id}`, { method: "PUT", body: JSON.stringify({ tier: "later" }) })).status).toBe(200);
+    expect((await out(`/x/priority/${other.thread.id}`, { method: "PUT", body: JSON.stringify({ tier: "later" }) })).status).toBe(404); // not its own
     // It can write to another agent directly, and the agent's answer reaches its inbox.
     const names = ((await (await out("/x/agents")).json()) as any[]).map((a) => a.name);
     expect(names).toContain("zari");

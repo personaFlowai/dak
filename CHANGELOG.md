@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.2
+- Remote agents set the same things the agents on the Mac do: type, blocks, tier and reason, cost, FYI and done on /x/send and /x/reply, and PUT /x/priority/<thread> to change them; their instructions list every field.
+
 ## 0.3.1
 - Remote agents can read their own instructions at /x/skill, so they refresh them after Dak changes.
 

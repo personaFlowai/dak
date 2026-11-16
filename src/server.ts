@@ -171,12 +171,23 @@ async function outside(req: Request, url: URL): Promise<Response> {
     // work with the team directly. It still reads only its own threads.
     const to = b.to ? String(b.to).toLowerCase() : me;
     if (to !== me && loadConfig().readers.some((r) => r.name === to && r.kind === "person")) throw new DakError("not_allowed", "An outside agent writes to the person or to agents.", 403);
-    return json(createThread({ to, from: agent, subject: String(b.subject ?? "").slice(0, 200) || String(b.body ?? "").split("\n")[0].slice(0, 80), kind: "note", body: String(b.body ?? ""), attachments: atts, options: optionsOf(b), ...(b.needs_reply === false ? { needs_reply: false } : {}) }), 201);
+    const made = createThread({ to, from: agent, subject: String(b.subject ?? "").slice(0, 200) || String(b.body ?? "").split("\n")[0].slice(0, 80), kind: "note", body: String(b.body ?? ""), attachments: atts,
+      options: optionsOf(b), extra: { cost: costOf(b) }, ...(b.needs_reply === false || b.fyi === true ? { needs_reply: false } : {}) });
+    askedAs(made.thread.id, agent, b);
+    return json(made, 201);
+  }
+  // Re-rank or re-describe one of its own asks after sending it.
+  if (parts[0] === "priority" && parts[1] && req.method === "PUT") {
+    ownThread(parts[1]);
+    askedAs(parts[1], agent, await body());
+    return json({ ok: true });
   }
   if (parts[0] === "reply" && parts[1] && req.method === "POST") {
     ownThread(parts[1]);
     const b = await body();
-    const m = addMessage(parts[1], { author: agent, body: String(b.body ?? ""), options: optionsOf(b), ...(b.needs_reply === false || b.done === true ? { needs_reply: false } : {}) });
+    const m = addMessage(parts[1], { author: agent, body: String(b.body ?? ""), options: optionsOf(b), extra: { cost: costOf(b) },
+      ...(b.needs_reply === false || b.fyi === true || b.done === true ? { needs_reply: false } : {}) });
+    askedAs(parts[1], agent, b);
     if (b.done === true) setStatus(parts[1], "closed");
     return json(m, 201);
   }
@@ -573,4 +584,11 @@ function participantsOf(b: any): Participant[] {
 // cost: { estimate: 0.15, cap: 0.25 }
 function costOf(b: any) {
   return b?.cost ? buildCost({ cost: String(b.cost.estimate), ...(b.cost.cap !== undefined ? { cap: String(b.cost.cap) } : {}) }) : undefined;
+}
+
+// What a remote agent says about its ask, the same fields the CLI takes: its type (pr, brief,
+// decision), what the answer blocks, and its priority (tier and reason).
+function askedAs(threadId: string, agent: string, b: any) {
+  if (b.type !== undefined || b.blocks !== undefined) describeReview(threadId, { type: b.type === undefined ? undefined : String(b.type), blocks: b.blocks === undefined ? undefined : String(b.blocks) });
+  if (b.tier !== undefined || b.why !== undefined) prioritizeReview(threadId, agent, { tier: tierOf(b.tier === undefined ? undefined : String(b.tier)), why: b.why === undefined ? undefined : String(b.why) });
 }
