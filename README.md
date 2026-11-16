@@ -18,6 +18,9 @@ Claude Code, Codex, Cursor and your own scripts send you PRs, docs and questions
 
 <p align="center"><sub>Install → connect agents → an agent sends a PR → read it in chapters → approve → the agent gets your answer → the queues → your phone.</sub></p>
 
+<p align="center"><a href="https://github.com/personaflowai/dak/releases/download/v0.4.0/dak-demo.mp4"><img src="docs/screenshots/video-poster.jpg" width="640" alt="A still from the Dak video: approving a PR with a one-line note"></a><br>
+<a href="https://github.com/personaflowai/dak/releases/download/v0.4.0/dak-demo.mp4"><b>▶ Watch the 56-second video</b></a> <sub>(MP4, 6 MB, with sound)</sub></p>
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/personaflowai/dak/main/install.sh | sh
 ```
