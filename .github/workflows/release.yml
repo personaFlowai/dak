@@ -10,12 +10,12 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.1.42
       - run: bun install --frozen-lockfile
-      - run: bun test
+      - run: bun run test   # builds the screens first, which the server embeds
       - name: Build the CLI for both chips
         run: bun run build:release
       - name: Build the Mac app for both chips
