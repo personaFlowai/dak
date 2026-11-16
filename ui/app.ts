@@ -5,6 +5,7 @@ import { api, local } from "./api";
 import {
   S, me, esc, $, name, mark, when, standing, approvedNow, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
   setViewed, viewed, chapterFiles, keepUnsent, helperLabel, agentOf, type Summary, type AgentRow,
+  fullWhen,
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending } from "./doc";
@@ -26,7 +27,7 @@ async function loadList() {
     api<Summary[]>(`/threads?for=${encodeURIComponent(me)}&box=others`),
     api<Record<string, string>>("/archives").catch(() => ({})),
   ]);
-  S.queue = await api<typeof S.queue>("/queue").catch(() => []);
+  [S.queue, S.reviews] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => [])]);
   if (S.view === "queue") renderMain();
   S.counts = { to: S.threads.filter((t) => t.unread && !isArchived(peerOf(t))).length };
   renderSide();
@@ -158,7 +159,7 @@ function renderSide() {
     <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
     <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
     <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>
-    <div class="side-foot">${S.queue.length ? `<button class="row-btn" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span><span class="count">${S.queue.filter((r) => r.state !== "deployed").length}</span></button>` : ""}<button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
+    <div class="side-foot">${S.queue.length || S.reviews.length ? `<button class="row-btn" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span><span class="count">${S.queue.filter((r) => r.state !== "deployed").length + S.reviews.length}</span></button>` : ""}<button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
     <div class="splitter" data-split="side" title="Drag to resize"></div>`;
   postControls();
 }
@@ -178,7 +179,7 @@ function renderMain() {
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
   else if (S.view === "settings") main.innerHTML = toolbar("Settings") + settingsView();
   else if (S.view === "welcome") main.innerHTML = toolbar("Welcome to Dak") + welcomeView();
-  else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", `${S.queue.filter((r) => r.state !== "deployed").length} on the way`) + queueView();
+  else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", queueSummary()) + queueView();
   else if (!S.data) main.innerHTML = toolbar("Dak") + `<div class="blank"><p>Choose a thread to read it.</p></div>`;
   else main.innerHTML = threadView();
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
@@ -219,7 +220,12 @@ function threadView(): string {
   const archBtn = S.peer ? `<button class="icon-btn" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}" title="${archived ? "Move back to the Inbox" : "Archive this conversation (E)"}" aria-label="${archived ? "Unarchive" : "Archive"}">${archived ? I.lineUp : I.archive}</button>` : "";
   const doneBtn = S.peer && !isPair(S.peer) && canReply(t)
     ? `<button class="btn" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}" title="${t.status === "closed" ? "Bring this topic back" : "This topic is finished: take it out of the conversation"}">${t.status === "closed" ? "Reopen" : `${I.check} Done`}</button>` : "";
-  const right = `${archBtn}${doneBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
+  // "I'm reviewing": tells the sender you are on it; the PR stays waiting on you until your verdict.
+  const onIt = S.threads.find((x) => x.id === t.id)?.reviewing_since;
+  const reviewingBtn = t.kind === "pr" && t.to === me && t.status === "waiting"
+    ? onIt ? `<span class="status reviewing" title="Since ${esc(fullWhen(onIt))}">You're reviewing</span>`
+      : `<button class="btn" data-reviewing="${t.id}" title="Tell ${esc(name(t.from))} you are reviewing this">I'm reviewing</button>` : "";
+  const right = `${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
@@ -240,20 +246,60 @@ function roles(): string {
   return shown.length ? ` · ${shown.map((p) => `${esc(name(p.name))} ${verb[p.role]}`).join(", ")}` : "";
 }
 
-// Approved PRs on the road to production, in the order they joined. Each row shows how far
-// it has got; the step it is on is the only coloured one.
-const STEPS = ["approved", "testing", "building", "merging", "merged", "migrated", "deployed"];
+/* The merge queue, in three groups: what waits on your review (from your inbox, nobody has
+   to push it), what is moving now, and what is approved and waiting its turn. Every row says
+   who approved it, read from the thread, and how long it has been where it is. */
+const MOVING = ["testing", "building", "merging", "merged", "migrated"];
+const TRAIL: [string, string][] = [["approved", "Approved"], ["testing", "Tests"], ["building", "Build"], ["merging", "Merge"], ["merged", "Merged"], ["migrated", "Migrate"], ["deployed", "Deploy"]];
+const STATE_WORD: Record<string, string> = { approved: "Waiting its turn", testing: "Running tests", building: "Building", merging: "Merging", merged: "Merged, migrations next",
+  migrated: "Migrated, deploy next", deployed: "Deployed", failed: "Failed", held: "Held" };
+
+function span(iso: string): string {
+  const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  return m < 1 ? "just now" : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`;
+}
+function left(eta: string | null): string {
+  if (!eta) return "";
+  const m = Math.round((Date.parse(eta) - Date.now()) / 60000);
+  return m >= 1 ? `<span class="eta">about ${m} min left</span>` : m > -1 ? `<span class="eta">finishing now</span>` : `<span class="eta over">${-m} min over</span>`;
+}
+const prTitle = (pr: number | null, title: string, thread: string | null) =>
+  `${pr ? `<span class="qnum">#${pr}</span>` : ""}${thread ? `<button class="link qtitle" data-topic="${esc(thread)}">${esc(title)}</button>` : `<span class="qtitle">${esc(title)}</span>`}`;
+
+function queueRow(r: (typeof S.queue)[number]): string {
+  const approved = r.approval ? `Approved by you ${when(r.approval.at)}` : `<span class="warn">No approval from you on Dak</span>`;
+  const meta = [approved, r.head ? `<code>${esc(r.head.slice(0, 8))}</code>` : "", r.migration ? `migration <code>${esc(r.migration)}</code>` : ""].filter(Boolean).join(" · ");
+  const blocker = r.after_pr ? S.queue.find((x) => x.pr === r.after_pr) : null;
+  const waitFor = r.after_pr ? ` · after #${r.after_pr}${blocker ? ` (${STATE_WORD[blocker.state].toLowerCase()})` : ""}` : "";
+  const at = TRAIL.findIndex(([k]) => k === r.state);
+  const trail = MOVING.includes(r.state) ? `<ol class="trail">${TRAIL.map(([, w], i) => `<li class="${i < at ? "past" : i === at ? "now" : ""}">${w}</li>`).join("")}</ol>` : "";
+  return `<li class="qrow ${r.state}"><div class="qmain"><div class="qhead">${prTitle(r.pr, r.title, r.thread_id)}</div><div class="qmeta">${meta}</div>${trail}</div>
+    <div class="qside"><b class="st ${r.state}">${STATE_WORD[r.state] ?? esc(r.state)}</b><span>${r.state === "deployed" ? when(r.state_since) : `for ${span(r.state_since)}`}${waitFor}</span>${left(r.eta_at)}${r.note ? `<span class="qnote">${esc(r.note)}</span>` : ""}</div></li>`;
+}
+
+function queueSummary(): string {
+  const n = (k: number, w: string) => `${k} ${w}`;
+  return [n(S.reviews.length, "for your review"), n(S.queue.filter((r) => MOVING.includes(r.state)).length, "in progress"), n(S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state)).length, "waiting")].join(" · ");
+}
+
 function queueView(): string {
-  if (!S.queue.length) return `<div class="blank"><p>Nothing in the queue. Merge scripts add PRs with <code>dak queue set &lt;pr&gt; --state approved</code>.</p></div>`;
-  return `<div class="pane-body"><table class="queue"><thead><tr><th>PR</th><th>Head</th><th>Migration</th><th>Where it is</th><th>Updated</th></tr></thead><tbody>${S.queue.map((r) => {
-    const at = STEPS.indexOf(r.state);
-    const steps = at < 0 ? `<span class="qstate ${r.state}">${r.state === "failed" ? "Failed" : "Held"}</span>`
-      : `<ol class="steps">${STEPS.map((s, i) => `<li class="${i < at ? "past" : i === at ? "now" : ""}" title="${s}">${i === at ? esc(s) : ""}</li>`).join("")}</ol>`;
-    const title = r.thread_id ? `<button class="link" data-topic="${esc(r.thread_id)}">${esc(r.title)}</button>` : esc(r.title);
-    return `<tr class="${r.state === "deployed" ? "done" : ""}"><td><b>#${r.pr}</b> ${title}</td><td><code>${esc((r.head ?? "").slice(0, 8))}</code></td>
-      <td>${r.migration ? `<code>${esc(r.migration)}</code>` : `<span class="muted">none</span>`}</td>
-      <td>${steps}${r.note ? `<div class="qnote">${esc(r.note)}</div>` : ""}</td><td class="muted">${when(r.updated_at)}</td></tr>`;
-  }).join("")}</tbody></table></div>`;
+  const reviews = S.reviews;
+  const moving = S.queue.filter((r) => MOVING.includes(r.state));
+  const waiting = S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state));
+  const done = S.queue.filter((r) => r.state === "deployed");
+  const group = (title: string, hint: string, rows: string[]) => `<section class="qgroup"><h3>${title} <span class="count">${rows.length}</span></h3>
+    ${rows.length ? `<ol class="qlist">${rows.join("")}</ol>` : `<p class="qempty">${hint}</p>`}</section>`;
+  const reviewRows = reviews.map((r) => `<li class="qrow review"><div class="qmain"><div class="qhead">${prTitle(r.pr, r.subject, r.thread_id)}</div>
+      <div class="qmeta">From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div></div>
+    <div class="qside">${r.reviewing_since ? `<b class="st reviewing">You're reviewing</b><span>since ${when(r.reviewing_since)}</span>`
+      : `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`}</div></li>`);
+  return `<div class="pane-body"><div class="queue-page">
+    ${group("Waiting for your review", "Nothing is waiting for you.", reviewRows)}
+    ${group("In progress", "Nothing is merging right now.", moving.map(queueRow))}
+    ${group("Approved, waiting their turn", "Nothing approved is waiting.", waiting.map(queueRow))}
+    ${done.length ? group("Deployed today", "", done.map(queueRow)) : ""}
+    <p class="qfoot">Atlas's merge scripts update this with <code>dak queue set &lt;pr&gt; --state … --eta 4m --after &lt;pr&gt;</code>. "Approved by you" is read from your verdict on the PR's thread.</p>
+  </div></div>`;
 }
 
 function reviewBody(a: any): string {
@@ -664,6 +710,11 @@ document.addEventListener("click", async (e) => {
   if (d.to && S.compose) { S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
   if (d.queue !== undefined) { S.view = "queue"; return render(); }
+  if (d.reviewing) {
+    // "I'm on it": the sender hears through Dak, and the PR stays waiting on you.
+    await api(`/threads/${d.reviewing}/reviewing`, { method: "POST", body: { author: me } });
+    await loadList(); return render();
+  }
   if (d.settings !== undefined) { S.view = "settings"; askLogin(); render(); await Promise.all([loadSettings(), loadAgents(true)]); return render(); }
   if (d.door) {
     if (d.door === "close") { await api("/door?revoke=", { method: "DELETE" }); S.door = { open: false }; return renderMain(); }
@@ -1027,6 +1078,9 @@ async function refresh() {
 
 // Back in front: what is on screen is now read, so the badge and the notifier agree.
 addEventListener("focus", () => { if (S.view === "thread" && S.cur) { forgetConvo(); openThread(S.cur, true); } });
+
+// The queue's "for 6 min" and "about 4 min left" move with the clock.
+setInterval(() => { if (S.view === "queue" && !document.hidden) renderMain(); }, 30_000);
 
 function listen() {
   const es = new EventSource(`/v1/events?token=${(window as any).DAK.token}`);

@@ -35,6 +35,7 @@ export interface Message {
   choice?: string; // on a reply: the option the reader picked
   handoff?: Handoff; // "ready for review": the head and the proofs, checked at send time
   cost?: Cost; // what the ask spends if the reader says yes
+  reviewing?: boolean; // the reader saying "I'm on it": the thread stays on them until their verdict
 }
 
 // Who else is on a thread, and why. The sender is the author and the addressee is asked
@@ -52,7 +53,7 @@ export interface Handoff {
   skipped: { name: string; reason: string }[];
 }
 export interface Cost { estimate: number; cap?: number; currency: string }
-export interface MessageExtra { handoff?: Handoff; cost?: Cost }
+export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: boolean }
 
 export type Attachment =
   | { id: string; type: "pr"; name: string; meta: PrMeta }

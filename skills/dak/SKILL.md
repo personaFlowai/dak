@@ -95,7 +95,7 @@ If Dak has a runner named `codex` (`dak runner add codex`), sending a PR to it, 
 
 ### The merge queue
 
-Merge scripts keep it current: `dak queue set <pr> --state approved|testing|building|merging|merged|migrated|deployed|failed|held [--head sha] [--migration f] [--note "full suite, 4 min"]`. The person sees it live in Dak; `dak queue` prints it.
+Merge scripts keep it current: `dak queue set <pr> --state approved|testing|building|merging|merged|migrated|deployed|failed|held [--eta 4m] [--after <pr>] [--head sha] [--migration f] [--note "full suite"]`. Set `--eta` at each step so the person sees time left; use `--after` for a PR that waits on another, not the title. Approval is read from the person's verdict on the thread, so never mark a PR approved they have not approved. `dak queue` prints what waits for their review, what is moving and what waits its turn. When the person presses "I'm reviewing", you get a Dak message and `dak show` says so.
 
 ## 4. Wait for the answer
 

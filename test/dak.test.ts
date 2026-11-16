@@ -366,7 +366,8 @@ describe("agent-to-agent work", () => {
 });
 
 describe("merge queue", () => {
-  test("merge scripts push state; the queue keeps join order, finished ones last, and refuses an unknown state", async () => {
+  beforeAll(() => writeFileSync(join(repo, "d2.diff"), "diff --git a/q.ts b/q.ts\n--- a/q.ts\n+++ b/q.ts\n@@ -1 +1 @@\n-a\n+b\n"));
+  test("merge scripts push state; the queue keeps join order and refuses an unknown state", async () => {
     expect(dak("queue", "set", "2427", "--state", "approved", "--head", "abc1234", "--migration", "20261116_x.sql", "--title", "Needs-you").code).toBe(0);
     dak("queue", "set", "#2425", "--state", "approved", "--title", "Register reads");
     dak("queue", "set", "2427", "--state", "testing", "--note", "full suite, 4 min");
@@ -376,8 +377,39 @@ describe("merge queue", () => {
     expect(rows[0]).toMatchObject({ head: "abc1234", migration: "20261116_x.sql", note: "full suite, 4 min" });
     dak("queue", "set", "2427", "--state", "deployed");
     rows = (await (await http("/v1/queue")).json()) as any[];
-    expect(rows.map((r: any) => r.pr)).toEqual([2425, 2427]);
+    expect(rows.map((r: any) => [r.pr, r.state])).toEqual([[2427, "deployed"], [2425, "approved"]]); // join order; the page groups them
     expect(rows[1].note).toBeNull(); // a new state clears the old note
+  });
+
+  test("each row knows how long it has been at its step, its estimate, what it waits for, and whether the person really approved it", async () => {
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--diff", "d2.diff", "--subject", "Timed", "--json").json();
+    const r0 = dak("queue", "set", "3001", "--state", "testing", "--eta", "4m", "--after", "#2425", "--thread", thread.id, "--json").json();
+    expect(Math.round((Date.parse(r0.eta_at) - Date.parse(r0.state_since)) / 60000)).toBe(4);
+    expect(r0.after_pr).toBe(2425);
+    expect(r0.approval).toBeNull(); // the queue says approved; the thread has no approval from sam
+    await fetch(`${base}/v1/threads/${thread.id}/messages`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ author: "sam", body: "", verdict: "approve" }) });
+    const r1 = dak("queue", "set", "3001", "--note", "4 of 9 files", "--json").json();
+    expect(r1.approval.by).toBe("sam");
+    expect(r1.state_since).toBe(r0.state_since); // same step, same clock
+    expect(r1.eta_at).toBe(r0.eta_at);
+    const r2 = dak("queue", "set", "3001", "--state", "building", "--after", "none", "--json").json();
+    expect([r2.eta_at, r2.after_pr, r2.note]).toEqual([null, null, null]);
+  });
+
+  test("I'm reviewing: the sender hears, the PR stays waiting on the reader, and the queue lists it until the verdict", async () => {
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--diff", "d2.diff", "--subject", "Look at me", "--json").json();
+    let mine = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    expect(mine.find((r) => r.thread_id === thread.id)?.reviewing_since).toBeNull();
+    expect((await http(`/v1/threads/${thread.id}/reviewing`, { method: "POST", body: JSON.stringify({ author: "sam" }) })).status).toBe(201);
+    expect(dak("wait", thread.id, "--for", "atlas", "--timeout", "2s", "--json").json().messages[0].body).toBe("Reviewing this now.");
+    expect(dak("show", thread.id, "--json").json().thread.status).toBe("waiting");
+    expect(dak("show", thread.id).out).toContain("sam is reviewing it, since");
+    mine = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    expect(mine.find((r) => r.thread_id === thread.id)?.reviewing_since).toBeTruthy();
+    dak("reply", thread.id, "--from", "sam", "--verdict", "approve", "Fine.");
+    mine = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    expect(mine.find((r) => r.thread_id === thread.id)).toBeUndefined();
   });
 });
 

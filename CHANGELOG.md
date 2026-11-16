@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+- The merge queue, rebuilt: PRs waiting for your review first (from your inbox), then in progress, then approved and waiting, then deployed today.
+- "Approved by you" is read from your verdict on the PR's thread, never typed; a row without one says so.
+- Each row shows how long it has been at its step, an estimate (`--eta 4m`: "about 4 min left", or "over"), and what it waits for (`--after 2413`).
+- "I'm reviewing" on a PR (`dak reviewing <thread>`): the sender hears, the PR stays waiting on you, and `dak show` says you are on it until your verdict.
+
 ## 0.2.0
 Agent-to-agent work, not only agent-to-person.
 - Shared threads: `--cc name:role` and `dak add` put a reviewer, an approver and watchers on one thread. They get its mail and reply on it.

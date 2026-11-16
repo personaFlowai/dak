@@ -5,7 +5,7 @@ import { basename, resolve } from "node:path";
 import { loadConfig, writeConfig, configPath, dakHome, person, HELPERS } from "./config";
 import {
   addMessage, createThread, getThread, listThreads, putBlob, refreshPr, requireReader, setStatus, takeUnread,
-  addParticipant, decisions, groups, setGroup,
+  addParticipant, decisions, groups, setGroup, awaitingReview,
   type NewAttachment,
 } from "./store";
 import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presence";
@@ -16,7 +16,8 @@ import { snapshotPr, loadChapters, checkChapters, diffForChapters, draftChapters
 import { DakError, type Message, type Verdict } from "./types";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners } from "./reviewer";
-import { queue, removeQueue, setQueue } from "./queue";
+import { queue, removeQueue, setQueue, type QueueRow } from "./queue";
+import type { AwaitingReview } from "./store";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
 
@@ -58,6 +59,8 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak runner list | dak runner remove <name>
   dak queue [--all] | dak queue set <pr> --state <s> [--head sha] [--migration f] [--note text] [--title t]
                                                  the merge queue; states: approved testing building merging merged migrated deployed failed held
+                                                 --eta 4m: how long this step should take; --after 2413: waits for that PR first
+  dak reviewing <thread> [text]                  tell the sender you are reviewing it (the person's "I'm on it")
   dak queue remove <pr>
   dak chapters draft [--pr n | --base ref | --diff f]   a chapters.json with every hunk listed, grouped by folder
   dak chapters check <file> [--pr n | --base ref | --diff f] [--repo .]
@@ -113,8 +116,10 @@ function readLine(t: ReturnType<typeof getThread>): string {
     if (!theirs.length) return "";
     const label = role(w) ? `${w} (${role(w)})` : w;
     const lastTheirs = theirs[theirs.length - 1].id;
-    const lastOwn = [...t.messages].reverse().find((m) => m.author === w);
+    const lastOwn = [...t.messages].reverse().find((m) => m.author === w && !m.reviewing);
     if (lastOwn && lastOwn.id > theirs[0].id && w !== t.thread.from) return `${label} replied`;
+    const on = [...t.messages].reverse().find((m) => m.author === w && (m.reviewing || m.verdict));
+    if (on?.reviewing) return `${label} is reviewing it, since ${new Date(on.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     const r = t.reads.find((x) => x.reader === w);
     if (!r || r.up_to < theirs[0].id) return `${label} has not opened it`;
     const at = r.seen_at ? ` at ${new Date(r.seen_at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
@@ -135,6 +140,22 @@ function refreshThread(id: string, values: any) {
     if (problems.length) throw new DakError("bad_chapters", "The old chapters no longer match the new head; pass --chapters:\n  " + problems.join("\n  "));
     return { ...fresh, chapters: old.chapters, ...(old.prologue ? { prologue: old.prologue } : {}) };
   }).meta;
+}
+
+// The queue as Atlas reads it in a terminal: what waits on the person, what is moving, what waits.
+function queueText(rows: QueueRow[], reviews: AwaitingReview[], who: string): string {
+  const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  const left = (r: QueueRow) => { if (!r.eta_at) return ""; const m = Math.round((Date.parse(r.eta_at) - Date.now()) / 60000); return m >= 0 ? `, about ${m} min left` : `, ${-m} min over`; };
+  const line = (r: QueueRow) => `  #${String(r.pr).padEnd(6)} ${r.title}  [${r.state} for ${ago(r.state_since)}${left(r)}]${r.after_pr ? ` after #${r.after_pr}` : ""}${r.approval ? "" : ` (no approval from ${who} on the thread)`}${r.note ? `  ${r.note}` : ""}`;
+  const moving = rows.filter((r) => ["testing", "building", "merging", "merged", "migrated"].includes(r.state));
+  const waiting = rows.filter((r) => ["approved", "held", "failed"].includes(r.state));
+  const done = rows.filter((r) => r.state === "deployed");
+  return [
+    `Waiting for ${who}'s review (${reviews.length})`, ...reviews.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}  [from ${r.from}, ${r.reviewing_since ? `reviewing for ${ago(r.reviewing_since)}` : `waiting ${ago(r.waiting_since)}`}]`),
+    "", `In progress (${moving.length})`, ...moving.map(line),
+    "", `Approved, waiting (${waiting.length})`, ...waiting.map(line),
+    ...(done.length ? ["", `Deployed today (${done.length})`, ...done.map(line)] : []),
+  ].join("\n");
 }
 
 function readBody(positionals: string[], values: any): string {
@@ -189,6 +210,7 @@ const OPTIONS = {
   cc: { type: "string", multiple: true }, ready: { type: "boolean" }, head: { type: "string" }, migration: { type: "string" },
   proof: { type: "string", multiple: true }, skipped: { type: "string", multiple: true }, cost: { type: "string" }, cap: { type: "string" },
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
+  eta: { type: "string" }, after: { type: "string" },
   state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
 } as const;
 
@@ -409,13 +431,15 @@ export async function main(argv: string[]): Promise<number> {
       // dak queue | dak queue set <pr> --state testing [--head sha] [--migration f] [--note text] | dak queue remove <pr>
       const [sub, n] = positionals;
       if (sub === "set" && n) {
-        const row = setQueue(Number(String(n).replace(/^#/, "")), { state: values.state, title: values.title ?? values.subject, head: values.head, migration: values.migration, note: values.note, thread: values.thread });
+        const row = setQueue(Number(String(n).replace(/^#/, "")), { state: values.state, title: values.title ?? values.subject, head: values.head, migration: values.migration, note: values.note, thread: values.thread, eta: values.eta, after: values.after });
         out(json, row, () => `#${row.pr} ${row.state}${row.note ? ` (${row.note})` : ""}`);
         return 0;
       }
       if (sub === "remove" && n) { removeQueue(Number(String(n).replace(/^#/, ""))); out(json, { removed: n }, () => `Removed #${n}.`); return 0; }
       const rows = queue({ all: values.all });
-      out(json, rows, () => rows.length ? rows.map((r) => `#${String(r.pr).padEnd(6)} ${r.state.padEnd(9)} ${(r.head ?? "").slice(0, 8).padEnd(9)} ${(r.migration ?? "").padEnd(16)} ${r.title}${r.note ? `  (${r.note})` : ""}`).join("\n") : "The queue is empty.");
+      const who = person(loadConfig());
+      const reviews = awaitingReview(who);
+      out(json, rows, () => queueText(rows, reviews, who));
       return 0;
     }
     case "runner": {
@@ -431,6 +455,14 @@ export async function main(argv: string[]): Promise<number> {
       if (sub === "remove" && name) { removeRunner(name); out(json, { removed: name }, () => `Removed ${name}.`); return 0; }
       const list = runners();
       out(json, list, () => list.map((r) => `${r.name.padEnd(14)} ${r.command.join(" ")}`).join("\n") || "No runners. Add one with: dak runner add codex");
+      return 0;
+    }
+    case "reviewing": {
+      // The reader saying "I'm on it": the sender hears, and the PR stays waiting on them.
+      const id = positionals.shift() ?? "";
+      const from = String(values.from ?? person(loadConfig()));
+      addMessage(id, { author: from, body: readBody(positionals, values) || "Reviewing this now.", needs_reply: false, extra: { reviewing: true } });
+      out(json, { reviewing: id }, () => `Told ${getThread(id).thread.from} you are reviewing ${id}.`);
       return 0;
     }
     case "decisions": {

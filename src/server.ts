@@ -8,7 +8,7 @@ import { loadConfig, person, token } from "./config";
 import {
   addMessage, blobPath, createThread, getThread, latestMessageId, listThreads, markRead, putBlob,
   requireReader, takeUnread, archives, setArchived, setStatus, search, type NewAttachment, type NewComment,
-  addParticipant, decisions, groups, setGroup,
+  addParticipant, decisions, groups, setGroup, awaitingReview,
 } from "./store";
 import { explain, ask } from "./explain";
 import { HELPERS, setHelper, setModel, setCodexListen, writeConfig, type HelperName } from "./config";
@@ -167,6 +167,10 @@ async function api(req: Request, url: URL): Promise<Response> {
       if (readAs && t.messages.length) markRead(readAs, id, t.messages[t.messages.length - 1].id);
       return json(t);
     }
+    if (parts[2] === "reviewing" && method === "POST") {
+      const b = await body();
+      return json(addMessage(id, { author: b.author ?? person(loadConfig()), body: String(b.body ?? "") || "Reviewing this now.", needs_reply: false, extra: { reviewing: true } }), 201);
+    }
     if (parts[2] === "participants" && method === "POST") {
       const b = await body();
       let list = getThread(id).participants;
@@ -222,6 +226,7 @@ async function api(req: Request, url: URL): Promise<Response> {
     return json(listThreads(reader));
   }
 
+  if (parts[0] === "reviews" && method === "GET") return json(awaitingReview(q.get("for") ?? person(loadConfig())));
   if (parts[0] === "queue" && parts.length === 1 && method === "GET") return json(queue({ all: q.get("all") === "1" }));
   if (parts[0] === "queue" && parts[1] && method === "PUT") return json(setQueue(Number(parts[1]), await body()));
   if (parts[0] === "queue" && parts[1] && method === "DELETE") { removeQueue(Number(parts[1])); return json({ removed: Number(parts[1]) }); }

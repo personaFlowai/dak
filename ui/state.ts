@@ -7,7 +7,7 @@ import { TOOLS } from "./icons";
 
 export type Pr = Extract<Attachment, { type: "pr" }>;
 export type Doc = Extract<Attachment, { type: "doc" }>;
-export interface Summary extends Thread { unread: number; last_body: string; last_author: string }
+export interface Summary extends Thread { unread: number; last_body: string; last_author: string; participants?: string[]; reviewing_since?: string | null }
 export interface Draft { id: string; attachment_id: string; anchor: Anchor; body: string; label: string }
 export interface Sel { att: string; file: string; side: "old" | "new"; start: number; end: number }
 export interface AgentRow { name: string; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
@@ -46,7 +46,9 @@ export const S = {
   find: { open: false, q: "", i: 0, list: false }, // find in the open PR
   archived: {} as Record<string, string>, // conversation (agent, or "a+b") → when you archived it
   showArchived: false,
-  queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string }[],
+  queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string;
+    state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null }[],
+  reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null }[], // PRs waiting on your review
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
   newTopic: false, // the reply box is starting a new thread with this agent, not answering one
   newSubject: "", // scroll positions to put back after the next render

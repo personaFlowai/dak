@@ -160,7 +160,8 @@ export function addMessage(threadId: string, input: {
   // addressee if it was waiting on them.
   const other = author !== thread.from && author !== thread.to && isParticipant(threadId, author);
   const settled = thread.status === "informed" || thread.status === "closed";
-  const status: ThreadStatus = author === thread.to ? "answered"
+  const status: ThreadStatus = input.extra?.reviewing ? thread.status // "on it" is not an answer
+    : author === thread.to ? "answered"
     : other ? (thread.to.startsWith("group:") && !settled ? "answered" : thread.status)
     : needsReply(thread, input) ? "waiting" : thread.status;
   const s = store();
@@ -383,7 +384,12 @@ export function decisions(reader: string): Decision[] {
     ...(r.q_extra && JSON.parse(r.q_extra).cost ? { cost: JSON.parse(r.q_extra).cost } : {}) }));
 }
 
-export interface ThreadSummary extends Thread { unread: number; last_body: string; last_author: string; message_count: number; participants: string[] }
+export interface ThreadSummary extends Thread { unread: number; last_body: string; last_author: string; message_count: number; participants: string[]; reviewing_since: string | null }
+
+// When the addressee said "I'm reviewing" and has not given a verdict since.
+const REVIEWING = `(SELECT created_at FROM messages r WHERE r.thread_id = t.id AND r.author = t.to_reader AND r.extra LIKE '%"reviewing":true%'
+  AND r.id > coalesce((SELECT max(id) FROM messages v WHERE v.thread_id = t.id AND v.author = t.to_reader AND v.verdict IS NOT NULL), 0)
+  ORDER BY r.id DESC LIMIT 1)`;
 
 // On the thread: its sender, its addressee, or anyone else added to it.
 const ON = `(t.to_reader = $r OR t.from_name = $r OR EXISTS (SELECT 1 FROM participants p WHERE p.thread_id = t.id AND p.name = $r))`;
@@ -401,10 +407,19 @@ export function listThreads(reader: string, opts: { box?: "to" | "from" | "all" 
       (SELECT count(*) FROM messages m WHERE m.thread_id = t.id) AS message_count,
       (SELECT body FROM messages m WHERE m.thread_id = t.id ORDER BY id DESC LIMIT 1) AS last_body,
       (SELECT author FROM messages m WHERE m.thread_id = t.id ORDER BY id DESC LIMIT 1) AS last_author,
-      (SELECT json_group_array(name) FROM participants p WHERE p.thread_id = t.id) AS participants
+      (SELECT json_group_array(name) FROM participants p WHERE p.thread_id = t.id) AS participants,
+      ${REVIEWING} AS reviewing_since
     FROM threads t WHERE ${where} ORDER BY t.updated_at DESC LIMIT $limit`)
     .all({ $r: reader, $limit: opts.limit ?? 200 }) as any[])
-    .map((r) => ({ ...rowToThread(r), unread: r.unread, message_count: r.message_count, last_body: r.last_body ?? "", last_author: r.last_author ?? "", participants: JSON.parse(r.participants ?? "[]") }));
+    .map((r) => ({ ...rowToThread(r), unread: r.unread, message_count: r.message_count, last_body: r.last_body ?? "", last_author: r.last_author ?? "", participants: JSON.parse(r.participants ?? "[]"), reviewing_since: r.reviewing_since ?? null }));
+}
+
+// PRs waiting on a person's review, oldest first, and whether they have said they are on it.
+export interface AwaitingReview { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null }
+export function awaitingReview(reader: string): AwaitingReview[] {
+  return (store().query(`SELECT t.id AS thread_id, t.subject, t.from_name AS "from", t.updated_at AS waiting_since, ${REVIEWING} AS reviewing_since,
+      (SELECT json_extract(a.meta, '$.number') FROM attachments a JOIN messages m ON m.id = a.message_id WHERE m.thread_id = t.id AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1) AS pr
+    FROM threads t WHERE t.to_reader = ? AND t.kind = 'pr' AND t.status = 'waiting' ORDER BY t.updated_at`).all(reader) as AwaitingReview[]);
 }
 
 // Messages a reader has not seen yet, oldest first. Reading them can mark them read,
