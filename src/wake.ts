@@ -53,6 +53,10 @@ input=$(cat)
 # The Claude process: our parent, or its parent when the hook ran through a shell.
 pid=$PPID
 case "$(ps -o comm= -p "$pid" 2>/dev/null)" in *sh) pid=$(ps -o ppid= -p "$pid" | tr -d ' ');; esac
+# A one-off run (claude -p, or a turn Dak itself started) ends when its work ends: waiting here
+# would hold it open. Only an interactive session waits to be woken.
+[ -n "$DAK_WAKE_RUN" ] && exit 0
+case " $(ps -o args= -p "$pid" 2>/dev/null) " in *" -p "*|*" --print "*) exit 0 ;; esac
 while kill -0 "$pid" 2>/dev/null; do
   out=$(printf '%s' "$input" | curl -s --max-time 43200 -X POST \\
     -H "Authorization: Bearer $(cat '${tokenPath}')" -H "X-Dak-Pid: $pid" -H "content-type: application/json" \\

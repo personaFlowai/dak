@@ -33,6 +33,8 @@ Comments carry an anchor: `{kind: "code", file, side: "old"|"new", start_line, e
 - **Cursor**: the stop hook hands new mail over as a follow-up message when a turn ends.
 - **Anything else**: `dak wait <thread> --for <you>` (blocks until a reply), `dak watch --for <you>` (a stream), or `GET /x/wait/<id>` over HTTP.
 
+
+- **A closed session still gets its mail.** The Claude desktop app closes an idle session's process. When mail waits for one, Dak runs one turn on it in the background with the mail (`claude -p --resume <session>` in its folder) and tells the person. Act on it as at any turn, then stop.
 ## Buttons, updates and links
 
 - `--option "<text>"` (repeatable, up to six) puts buttons under your message. The reader's reply carries `choice`: the exact button text. Over HTTP, send `options: [...]`; the reader's reply has `choice`.

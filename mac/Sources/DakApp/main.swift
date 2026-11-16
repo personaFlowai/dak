@@ -48,9 +48,12 @@ final class DakWebView: WKWebView {
 
 struct Summary: Decodable {
     struct Item: Decodable { let id: String; let subject: String; let from: String; let kind: String; let preview: String }
+    // A background turn Dak started on a closed Claude Code session.
+    struct Wake: Decodable { let id: Int; let agent: String; let thread_id: String?; let from_name: String?; let subject: String?; let status: String }
     let latest_id: Int
     let unread: Int
     let threads: [Item]
+    let wakes: [Wake]?
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSWindowDelegate {
@@ -172,6 +175,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             notify(first, more: s.unread - 1)
         }
         lastSeen = s.latest_id
+        // Say when Dak woke a closed session, so a session working on its own is never a surprise.
+        let wakes = s.wakes ?? []
+        if lastWake >= 0 { for w in wakes where w.id > lastWake { notifyWake(w) } }
+        lastWake = max(lastWake, wakes.map(\.id).max() ?? 0)
+    }
+
+    var lastWake = -1
+
+    func notifyWake(_ w: Summary.Wake) {
+        let content = UNMutableNotificationContent()
+        content.title = "Dak woke \(w.agent.capitalized)"
+        content.body = "Its session was closed, so Dak is running a turn on it for \(w.from_name?.capitalized ?? "a message")\(w.subject.map { ": \($0)" } ?? ""). Don't type into it until it finishes."
+        content.sound = .default
+        if let t = w.thread_id { content.userInfo = ["thread": t] }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "dak-wake-\(w.id)", content: content, trigger: nil)) { error in
+            log("wake notice \(w.id): \(error?.localizedDescription ?? "posted")")
+        }
     }
 
     func notify(_ item: Summary.Item, more: Int) {

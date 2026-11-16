@@ -17,6 +17,10 @@ process.env.DAK_CODEX_AGENTS = join(home, "codex-AGENTS.md");
 process.env.DAK_CLAUDE_SETTINGS = join(home, "claude-settings.json");
 process.env.DAK_CODEX_HOOKS = join(home, "codex-hooks.json");
 process.env.DAK_CURSOR_HOOKS = join(home, "cursor-hooks.json");
+// The server's wake ticker would take other tests' mail; the wake test drives it by hand.
+process.env.DAK_NO_WAKE = "1";
+process.env.DAK_CLAUDE_SESSIONS = join(home, "claude-sessions");
+process.env.DAK_WAKE_GRACE_MS = "0";
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 
 function dak(...args: string[]) {
@@ -456,6 +460,42 @@ describe("priorities", () => {
     expect(ids).toEqual([b, h, a]);
     expect(list.find((r) => r.thread_id === b)).toMatchObject({ tier: "urgent", why: "unblocks 8 PRs" });
     expect(list.find((r) => r.thread_id === h)).toMatchObject({ tier: "urgent", why: "Hotfix" });
+  });
+});
+
+describe("waking a closed session", () => {
+  test("mail for a Claude Code session with no live process starts one background turn on it; a live one is left to its hooks", async () => {
+    const { mkdirSync, writeFileSync: wf, chmodSync, existsSync } = await import("node:fs");
+    const { tickSleepers, startRun, recentWakes } = await import("../src/sleeper");
+    const { touch } = await import("../src/presence");
+    const fake = join(home, "fake-claude.sh");
+    wf(fake, `#!/bin/sh\nprintf '%s\\n' "$@" > "${join(home, "woke.txt")}"\n`);
+    chmodSync(fake, 0o755);
+    process.env.DAK_CLAUDE_BIN = fake;
+    mkdirSync(process.env.DAK_CLAUDE_SESSIONS!, { recursive: true });
+    touch("sleepy", { tool: "claude-code", where: repo, session: "sess-sleepy" });
+    // A live session: its process file names it and the process is alive (this one).
+    touch("awake", { tool: "claude-code", where: repo, session: "sess-awake" });
+    wf(join(process.env.DAK_CLAUDE_SESSIONS!, "1.json"), JSON.stringify({ pid: process.pid, sessionId: "sess-awake" }));
+    dak("send", "--to", "sleepy", "--from", "atlas", "--subject", "Wake up", "Merged #2438.");
+    dak("send", "--to", "awake", "--from", "atlas", "--subject", "Hello", "Hi.");
+    const woken: string[] = [];
+    // Other tests' closed sessions with mail are woken too; only "sleepy" runs here.
+    tickSleepers((agent, sid, where) => { woken.push(agent); if (agent === "sleepy") startRun(agent, sid, where); }, { force: true });
+    expect(woken).toContain("sleepy");
+    expect(woken).not.toContain("awake");
+    for (let i = 0; i < 40 && !existsSync(join(home, "woke.txt")); i++) await Bun.sleep(100);
+    const args = readFileSync(join(home, "woke.txt"), "utf8");
+    expect(args).toContain("--resume\nsess-sleepy");
+    expect(args).toContain("Merged #2438.");
+    expect(dak("inbox", "--for", "sleepy", "--unread", "--peek", "--json").json()).toEqual([]); // taken: no hook hands it over again
+    expect(dak("inbox", "--for", "awake", "--unread", "--peek", "--json").json().length).toBe(1);
+    for (let i = 0; i < 40 && recentWakes(1)[0]?.status === "running"; i++) await Bun.sleep(100);
+    expect(recentWakes(1)[0]).toMatchObject({ agent: "sleepy", from_name: "atlas", subject: "Wake up", status: "done" });
+    // Nothing new: the next tick starts nothing.
+    woken.length = 0;
+    tickSleepers((agent) => woken.push(agent), { force: true });
+    expect(woken).not.toContain("sleepy");
   });
 });
 

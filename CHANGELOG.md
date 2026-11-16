@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+- Waking closed sessions: the Claude desktop app closes an idle session's process, and then no hook can wake it. When mail waits for a closed Claude Code session, Dak now runs one turn on it in the background (`claude -p --resume`) with the mail, and posts a Mac notification saying so. Settings → Claude Code → "Wake closed sessions" (on by default).
+- Dak's wake hook no longer holds a one-off `claude -p` run open waiting for mail.
+
 ## 0.2.3
 - Priorities in the merge queue: urgent, normal and later, with an order inside each, and a reason per row. Agents set them (`dak queue order`, `review-order`, `priority`, `--hotfix`); you drag rows or change a row's tier, and your order wins.
 - `dak queue next`: the next ready PR or pair, for a merge loop.

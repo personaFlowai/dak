@@ -532,6 +532,8 @@ function settingsView(): string {
     <section><h2>Connect agents</h2><p class="lead">A connected session gets your reply at its next turn, without polling.</p>
       <div class="conn"><span class="mark md">${TOOLS["claude-code"].mark}</span><span class="nm"><b>Claude Code</b><span>${s.claude_connected ? "Connected. Sessions get Dak mail at each turn, an idle session wakes when mail arrives, and the Dak skill teaches them to send, reply and wait." : "Adds Dak's hooks to ~/.claude/settings.json (a copy of the old file is kept) and the Dak skill to ~/.claude/skills, for every Claude Code session on this Mac."}</span></span>
         <button class="btn ${s.claude_connected ? "" : "primary"}" data-connect="${s.claude_connected ? "off" : "on"}" data-tool="claude">${s.claude_connected ? "Disconnect" : "Connect"}</button></div>
+      ${s.claude_connected ? `<div class="conn sub"><span class="nm"><b>Wake closed sessions</b><span>The desktop app closes an idle session's process, and then nothing can wake it. With this on, when mail waits for a closed session, Dak runs one turn on it in the background with the mail, and tells you. Don't type into that session until the turn ends.</span></span>
+        <label class="check"><input type="checkbox" data-wake-closed ${s.wake_closed ? "checked" : ""}> ${s.wake_closed ? "On" : "Off"}</label></div>` : ""}
       <div class="conn"><span class="mark md">${TOOLS.codex.mark}</span><span class="nm"><b>Codex</b><span>${s.codex_connected ? "Connected. Sessions read their Dak mail each turn, and a Dak section in ~/.codex/AGENTS.md tells them how to use it. Codex asks once to trust the hook." : "Adds Dak's hook to ~/.codex/hooks.json (a copy is kept) and a Dak section to ~/.codex/AGENTS.md. Codex asks you to trust the hook the first time a session runs it."}</span></span>
         <button class="btn ${s.codex_connected ? "" : "primary"}" data-connect="${s.codex_connected ? "off" : "on"}" data-tool="codex">${s.codex_connected ? "Disconnect" : "Connect"}</button></div>
       ${s.codex_connected ? `<div class="conn sub"><span class="nm"><b>Keep Codex listening between turns</b><span>Codex cannot be woken once idle. With this on, a Codex session waits up to an hour after each turn and picks up Dak mail the moment it arrives. It looks busy while it waits; type to it or press Esc to stop waiting. Turning it on the first time, Codex asks you to approve Dak's hook again.</span></span>
@@ -720,6 +722,7 @@ document.addEventListener("change", async (e) => {
   }
   if (el.id === "chapter-pick") { S.chapter = Number(el.value); S.sel = null; S.editing = null; await prepare(); return renderMain(); }
   if (el.id === "version") { useAtt(el.value); await prepare(); return renderMain(); }
+  if (el.dataset.wakeClosed !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { wake_closed: el.checked } }); return renderMain(); }
   if (el.dataset.codexListen !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { codex_listen: el.checked } }); return renderMain(); }
   if (el.dataset.login !== undefined) { (window as any).webkit?.messageHandlers?.dak?.postMessage({ login: el.checked }); return; }
   if (el.dataset.chapterReviewed !== undefined) return toggleRead();

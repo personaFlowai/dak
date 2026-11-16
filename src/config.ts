@@ -26,6 +26,7 @@ export interface Config {
   explain: { command: string[]; timeout_seconds: number };
   models: Partial<Record<HelperName, string>>; // empty means the tool's own default
   codex_listen?: boolean; // at the end of a Codex turn, wait for Dak mail (up to an hour) instead of stopping
+  wake_closed?: boolean; // run a turn on a Claude Code session whose process has ended when mail waits for it (default on)
 }
 
 // The read-only helper behind Explain and Ask. Each preset is told to read only;
@@ -65,6 +66,7 @@ export function loadConfig(): Config {
     explain: { command, timeout_seconds: raw.explain?.timeout_seconds ?? 180 },
     models: Object.fromEntries(Object.entries(raw.explain?.models ?? {}).map(([k, v]) => [k, String(v)]).filter(([, v]) => v)),
     codex_listen: raw.codex?.listen === true,
+    wake_closed: raw.claude?.wake_closed !== false,
   };
 }
 
@@ -93,6 +95,11 @@ export function writeConfig(c: Config) {
     "# listen: at the end of a Codex turn, wait up to an hour for Dak mail instead of stopping.",
     `listen = ${c.codex_listen ? "true" : "false"}`,
     "",
+    "[claude]",
+    "# wake_closed: when mail waits for a Claude Code session whose process has ended (the desktop app",
+    "# closes idle ones), run one turn on it in the background with the mail, and tell the person.",
+    `wake_closed = ${c.wake_closed === false ? "false" : "true"}`,
+    "",
   ];
   writeFileSync(configPath(), lines.join("\n"));
 }
@@ -103,6 +110,12 @@ export function setModel(helper: HelperName, model: string) {
   if (m && !/^[A-Za-z0-9._:\-\/]+$/.test(m)) throw new Error("bad model");
   c.models = { ...c.models, [helper]: m };
   if (!m) delete c.models[helper];
+  writeConfig(c);
+}
+
+export function setWakeClosed(on: boolean) {
+  const c = loadConfig();
+  c.wake_closed = on;
   writeConfig(c);
 }
 

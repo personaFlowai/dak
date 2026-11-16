@@ -1,5 +1,6 @@
 import { buildCost, parseParticipant } from "./handoff";
 import { tickRunners } from "./reviewer";
+import { recentWakes, settleWakes, tickSleepers } from "./sleeper";
 import { next, queue, queueStamp, removeQueue, setQueue } from "./queue";
 import { orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
 import type { Participant } from "./types";
@@ -12,7 +13,7 @@ import {
   addParticipant, decisions, groups, setGroup, awaitingReview,
 } from "./store";
 import { explain, ask } from "./explain";
-import { HELPERS, setHelper, setModel, setCodexListen, writeConfig, type HelperName } from "./config";
+import { HELPERS, setHelper, setModel, setCodexListen, setWakeClosed, writeConfig, type HelperName } from "./config";
 import { connected, connect, disconnect, ensureCodexListenTimeout, type HookTool } from "./claude-hooks";
 import { codexDefaultModel } from "./presence";
 import { postReview } from "./github";
@@ -48,7 +49,12 @@ export function serve(port?: number) {
   const p = port ?? cfg.port;
   const secret = token();
   // Reviewer runners pick up what was sent to them. A tick is one indexed query per runner.
-  const ticker = setInterval(() => { try { tickRunners(); } catch { /* never stop the server */ } }, 2000);
+  settleWakes();
+  let ticks = 0;
+  const ticker = setInterval(() => {
+    try { tickRunners(); } catch { /* never stop the server */ }
+    if (++ticks % 3 === 0) try { tickSleepers(); } catch { /* same */ } // closed sessions: every 6 s is soon enough
+  }, 2000);
   ticker.unref?.();
   const allowedHosts = new Set([`127.0.0.1:${p}`, `localhost:${p}`]);
 
@@ -298,6 +304,7 @@ async function api(req: Request, url: URL): Promise<Response> {
     }
     // Keep Codex listening: the setting, and the longer Stop limit it needs in Codex's hooks.
     if (typeof b.codex_listen === "boolean") { setCodexListen(b.codex_listen); if (b.codex_listen) ensureCodexListenTimeout(); }
+    if (typeof b.wake_closed === "boolean") setWakeClosed(b.wake_closed);
     if (b.model && typeof b.model === "object") {
       if (!["claude", "codex", "cursor"].includes(b.model.helper)) throw new DakError("bad_helper", "A model belongs to claude, codex or cursor.");
       try { setModel(b.model.helper, String(b.model.value ?? "")); }
@@ -360,7 +367,8 @@ async function api(req: Request, url: URL): Promise<Response> {
     const reader = q.get("for") ?? person(loadConfig());
     const list = listThreads(reader, { box: "all" });
     const waiting = list.filter((t) => t.unread > 0);
-    return json({ latest_id: latestMessageId(), unread: waiting.length,
+    // wakes: background turns Dak started on closed sessions, so the Mac app can say so.
+    return json({ latest_id: latestMessageId(), unread: waiting.length, wakes: recentWakes(10),
       threads: waiting.slice(0, 10).map((t) => ({ id: t.id, subject: t.subject, from: t.last_author || t.from, kind: t.kind, preview: t.last_body.slice(0, 140) })) });
   }
 
@@ -439,6 +447,7 @@ function settings() {
     codex_connected: connected("codex"),
     cursor_connected: connected("cursor"),
     codex_listen: !!c.codex_listen,
+    wake_closed: c.wake_closed !== false,
     default_models: { codex: codexDefaultModel() },
     github_login: ghLogin(),
     instructions: INSTRUCTIONS, // what Settings offers to copy into Cursor's rules, or any other agent
