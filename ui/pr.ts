@@ -142,7 +142,9 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
   const hunks = df ? df.hunks.filter((h) => starts.includes(hunkStart(df, h))) : [];
   const seen = viewed(a.id).has(path);
   // A reviewed file folds to its header; Show opens it again, to read or comment, without unticking it.
-  const folded = seen && !S.unfold.has(`${a.id}:${path}`);
+  // On a phone every file starts folded: the chapter's notes come first, the code when asked for.
+  const foldable = seen || onPhone();
+  const folded = foldable && !S.unfold.has(`${a.id}:${path}`);
   const slash = path.lastIndexOf("/");
   const file = path.slice(slash + 1), dir = slash >= 0 ? path.slice(0, slash + 1) : "";
   const talk = S.data!.messages.reduce((n, m) => n + m.comments.filter((c) => c.attachment_id === a.id && c.anchor?.kind === "code" && c.anchor.file === path).length, 0)
@@ -158,7 +160,7 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
     <header class="fhead">${fileIcon(path)}<span class="fname" title="${esc(path)}"><b>${esc(file)}</b><span class="dir">${esc(dir)}</span></span>
       ${talk ? `<span class="talk" title="${talk} comment${talk === 1 ? "" : "s"}">${I.chat}${talk}</span>` : ""}
       ${pf ? `<span class="n"><span class="a">+${pf.additions}</span> <span class="d">−${pf.deletions}</span></span>` : ""}
-      ${seen ? `<button class="link" data-unfold="${esc(path)}">${folded ? "Show" : "Hide"}</button>` : ""}
+      ${foldable ? `<button class="link" data-unfold="${esc(path)}">${folded ? (onPhone() ? "Show changes" : "Show") : "Hide"}</button>` : ""}
       ${isMd && !folded ? `<button class="link" data-mode="${esc(path)}|${preview ? "diff" : "preview"}">${preview ? "Show diff" : "Preview"}</button>` : ""}
       <label class="viewed-box"><input type="checkbox" data-viewed="${esc(path)}" ${seen ? "checked" : ""}> Reviewed</label></header>
     ${folded ? "" : preview ? mdPreview(df, pf!.new_blob!) : `<div class="diffwrap"><table class="diff ${split ? "sbs" : ""}"><colgroup>${split ? `<col class="c-ln"><col class="c-sg"><col class="c-tx"><col class="c-ln"><col class="c-sg"><col class="c-tx">` : `<col class="c-ln"><col class="c-sg"><col>`}</colgroup><tbody>${rows || `<tr class="gap"><td colspan="${cols}">${df?.binary ? "Binary file" : "No changes to show"}</td></tr>`}</tbody></table></div>`}

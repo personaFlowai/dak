@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var web: DakWebView!
     var status: NSStatusItem!
     var server: Process?
+    var quitting = false
     var lastSeen = -1
     var timer: Timer?
 
@@ -91,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        quitting = true
         server?.terminate()
     }
 
@@ -109,7 +111,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             p.executableURL = bin
             p.arguments = ["serve", "--port", String(self.settings.port)]
             p.standardOutput = FileHandle.nullDevice
-            p.standardError = FileHandle.nullDevice
+            // Its errors go to ~/.dak/server.log, so a crash says why.
+            let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".dak/server.log")
+            if !FileManager.default.fileExists(atPath: logURL.path) { FileManager.default.createFile(atPath: logURL.path, contents: nil) }
+            if let fh = try? FileHandle(forWritingTo: logURL) { fh.seekToEndOfFile(); p.standardError = fh } else { p.standardError = FileHandle.nullDevice }
+            // If the server dies (Bun has crashed under us), start it again and reload the window:
+            // a crash costs a second, not an inbox that stops updating.
+            p.terminationHandler = { [weak self] proc in
+                guard let self, !self.quitting else { return }
+                log("server exited (\(proc.terminationStatus)); restarting")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    self.server = nil
+                    self.ensureServer { self.web.load(URLRequest(url: self.settings.base)) }
+                }
+            }
             do { try p.run() } catch {
                 DispatchQueue.main.async { self.showProblem("Could not start dak: \(error.localizedDescription)") }
                 return

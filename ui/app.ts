@@ -29,7 +29,7 @@ async function loadList() {
     api<Record<string, string>>("/archives").catch(() => ({})),
   ]);
   [S.queue, S.reviews] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => [])]);
-  if (S.view === "queue") renderMain();
+  if (S.view === "queue" || S.view === "waiting") renderMain();
   S.counts = { to: S.threads.filter((t) => t.unread && !isArchived(peerOf(t))).length };
   renderSide();
 }
@@ -160,7 +160,8 @@ function renderSide() {
   $("#app")!.classList.toggle("side-closed", onPhone() ? !S.phoneList : S.focus && review ? !S.focusSide : !S.sideOpen);
   $("#side")!.innerHTML = `
     <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
-    <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.reviews.length ? `<span class="count you" title="Waiting for your review">${S.reviews.length}</span>` : ""}</button>
+    <button class="row-btn queue-entry" data-waiting aria-current="${S.view === "waiting"}">${I.check}<span class="lbl">Waiting on you</span>${S.reviews.length ? `<span class="count you">${S.reviews.length}</span>` : ""}</button>
+    <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.queue.some((r) => r.state !== "deployed") ? `<span class="count">${S.queue.filter((r) => r.state !== "deployed").length}</span>` : ""}</button>
     <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
     <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>
     <div class="side-foot" ${(window as any).DAK?.phone ? "hidden" : ""}><button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
@@ -185,6 +186,8 @@ function renderMain() {
   else if (S.view === "settings") main.innerHTML = toolbar("Settings") + settingsView();
   else if (S.view === "welcome") main.innerHTML = toolbar("Welcome to Dak") + welcomeView();
   else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", queueSummary()) + queueView();
+  else if (S.view === "waiting") main.innerHTML = toolbar("Waiting on you", waitingSummary()) + `<div class="pane-body"><div class="queue-page">${reviewGroup()}
+    <p class="qfoot">PRs, briefs and decisions waiting on you, in one order. Atlas sets the order and says what each answer releases; drag a row or change its priority, and your order wins.</p></div></div>`;
   else if (!S.data) main.innerHTML = toolbar("Dak") + `<div class="blank"><p>Choose a thread to read it.</p></div>`;
   else main.innerHTML = threadView();
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
@@ -311,7 +314,7 @@ function reviewRow(r: (typeof S.reviews)[number], pos: number): string {
     : reviewable ? `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`
     : `<button class="btn" data-topic="${esc(r.thread_id)}">Answer</button>`;
   return `<li class="qrow review" draggable="true" data-drag-review="${esc(r.thread_id)}" data-tier="${r.tier}"><span class="qpos">${pos}</span>
-    <div class="qmain"><div class="qhead"><span class="rtype ${r.type}">${TYPE_WORD[r.type] ?? esc(r.type)}</span>${prTitle(r.pr, r.subject, r.thread_id)}</div>
+    <div class="qmain"><div class="qhead"><span class="rtype t-${r.type}">${TYPE_WORD[r.type] ?? esc(r.type)}</span>${prTitle(r.pr, r.subject, r.thread_id)}</div>
       <div class="qmeta">${sizeLabel(r.size)}${r.size ? " · " : ""}From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div>
       ${r.blocks ? `<div class="qblocks">Blocks: ${esc(r.blocks)}</div>` : ""}${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}</div>
     <div class="qside"><div class="qtop">${action}${tierMenu("review", r.thread_id, r.tier)}</div>
@@ -327,13 +330,18 @@ function reviewGroup(): string {
     `<button class="chip-f ${f === t ? "on" : ""}" data-review-filter="${t}">${TYPE_WORD[t]}s <span>${count(t)}</span></button>`).join("");
   const shown = f ? S.reviews.filter((r) => r.type === f) : S.reviews;
   const list = shown.length ? `<ol class="qlist" data-drop="review">${tiered(shown, reviewRow).join("")}</ol>` : `<p class="qempty">Nothing is waiting on you.</p>`;
-  return `<section class="qgroup"><h3>Waiting on you <span class="count">${S.reviews.length}</span></h3>
+  return `<section class="qgroup">
     ${chips ? `<div class="chips-f"><button class="chip-f ${f ? "" : "on"}" data-review-filter="">All</button>${chips}</div>` : ""}${list}</section>`;
+}
+
+function waitingSummary(): string {
+  const n = (t: string) => S.reviews.filter((r) => r.type === t).length;
+  return [`${n("pr")} PRs`, `${n("brief")} briefs`, `${n("decision")} decisions`].join(" · ");
 }
 
 function queueSummary(): string {
   const n = (k: number, w: string) => `${k} ${w}`;
-  return [n(S.reviews.length, "for your review"), n(S.queue.filter((r) => MOVING.includes(r.state)).length, "in progress"), n(S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state)).length, "waiting")].join(" · ");
+  return [n(S.queue.filter((r) => MOVING.includes(r.state)).length, "in progress"), n(S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state)).length, "waiting")].join(" · ");
 }
 
 // Rows already come in priority order. A tier label opens each run of urgent, normal or later
@@ -358,7 +366,6 @@ function queueView(): string {
   const group = (title: string, hint: string, rows: string[], count: number, kind = "") => `<section class="qgroup"><h3>${title} <span class="count">${count}</span></h3>
     ${rows.length ? `<ol class="qlist" ${kind ? `data-drop="${kind}"` : ""}>${rows.join("")}</ol>` : `<p class="qempty">${hint}</p>`}</section>`;
   return `<div class="pane-body"><div class="queue-page">
-    ${reviewGroup()}
     ${group("In progress", "Nothing is merging right now.", moving.filter((r) => firstOfPair(r, moving)).map((r) => queueRow(r)), moving.length)}
     ${group("Approved, waiting their turn", "Nothing approved is waiting.", tiered(waiting, queueRow), waiting.length, "pr")}
     ${done.length ? group("Deployed today", "", done.map((r) => queueRow(r)), done.length) : ""}
@@ -809,6 +816,7 @@ document.addEventListener("click", async (e) => {
   if (d.to && S.compose) { S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
   if (d.queue !== undefined) { S.view = "queue"; S.phoneList = false; return render(); }
+  if (d.waiting !== undefined) { S.view = "waiting"; S.phoneList = false; return render(); }
   if (d.reviewFilter !== undefined) { S.reviewFilter = d.reviewFilter; local.set("reviewFilter", S.reviewFilter); return renderMain(); }
   if (d.allTopics !== undefined) { S.allTopics = !S.allTopics; local.set("allTopics", S.allTopics); S.scrollTo = "end"; return renderMain(); }
   if (d.reviewing) {
@@ -1237,7 +1245,7 @@ document.addEventListener("dragend", async () => {
 });
 
 // The queue's "for 6 min" and "about 4 min left" move with the clock.
-setInterval(() => { if (S.view === "queue" && !document.hidden) renderMain(); }, 30_000);
+setInterval(() => { if ((S.view === "queue" || S.view === "waiting") && !document.hidden) renderMain(); }, 30_000);
 
 function listen() {
   const es = new EventSource(`/v1/events?token=${(window as any).DAK.token}`);
@@ -1257,6 +1265,6 @@ function listen() {
   if (first) await openThread(first);
   else { if (!local.get("welcomed", false)) S.view = "welcome"; render(); }
   // A phone opens on the list, merge queue first, unless the link named a thread.
-  if (onPhone() && !mine.some((t) => t.id === fromHash)) { S.view = "queue"; S.phoneList = true; render(); }
+  if (onPhone() && !mine.some((t) => t.id === fromHash)) { S.view = "waiting"; S.phoneList = true; render(); }
   listen();
 })();

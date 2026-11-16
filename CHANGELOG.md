@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.7
+- "Waiting on you" is its own page at the top of the sidebar (PRs, briefs, decisions, filter by type); the merge queue holds only approved PRs on their way out.
+- Phone: files in a chapter start folded ("Show changes"), smaller type, and the toolbar keeps "I'm reviewing" and Approve.
+- The Mac app restarts Dak's server if it ever exits, and logs why in ~/.dak/server.log.
+
 ## 0.2.6
 - "Waiting on you" holds PRs, briefs and decisions in one order, with chips to filter by type. Updates and approved PRs that only wait to merge stay out; a question asked after an approval counts as a decision.
 - `--type pr|brief|decision` and `--blocks "Rohan, #2433"` on sends and replies; each brief or decision shows what its answer releases.

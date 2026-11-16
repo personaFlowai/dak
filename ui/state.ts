@@ -12,7 +12,7 @@ export interface Draft { id: string; attachment_id: string; anchor: Anchor; body
 export interface Sel { att: string; file: string; side: "old" | "new"; start: number; end: number }
 export interface AgentRow { name: string; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
 export interface AskTurn { q: string; a?: string; error?: string; context?: string; loading?: boolean; seconds?: number; by?: string }
-export type View = "thread" | "compose" | "settings" | "welcome" | "queue";
+export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "waiting";
 
 export const me = boot.me;
 
