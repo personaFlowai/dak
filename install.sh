@@ -10,7 +10,7 @@ case "$(uname -m)" in arm64) ARCH=arm64 ;; x86_64) ARCH=x64 ;; *) echo "Unsuppor
 BASE="https://github.com/$REPO/releases/latest/download"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading Dak for $ARCH…"
+echo "Downloading Dak for $ARCH..."
 curl -fsSL "$BASE/dak-darwin-$ARCH" -o "$TMP/dak"
 curl -fsSL "$BASE/SHA256SUMS" -o "$TMP/SHA256SUMS"
 (cd "$TMP" && grep " dak-darwin-$ARCH\$" SHA256SUMS | sed "s/dak-darwin-$ARCH/dak/" | shasum -a 256 -c - >/dev/null) || { echo "Checksum mismatch; not installing." >&2; exit 1; }
