@@ -48,7 +48,6 @@ async function openThread(id: string, keep = false) {
     clearPending();
   } else if (!findAtt(S.att) && !S.paneClosed) useAtt(defaultAtt());
   local.set("last", id);
-  try { history.replaceState(null, "", `#${id}`); } catch { /* not important */ }
   await Promise.all([prepare(), loadConvo()]);
   render();
   loadList();
@@ -171,8 +170,8 @@ function renderSide() {
 
 function toolbar(title: string, sub = "", right = ""): string {
   return `<header class="toolbar">
-    ${onPhone() ? `<button class="icon-btn back" data-phone-back aria-label="Back">${I.prev}</button>`
-      : `<button class="icon-btn" data-toggle-side title="${S.sideOpen ? "Hide" : "Show"} sidebar (⌘\\)" aria-label="Toggle sidebar">${I.sidebar}</button>`}
+    ${onPhone() ? "" : `<button class="icon-btn" data-toggle-side title="${S.sideOpen ? "Hide" : "Show"} sidebar (⌘\\)" aria-label="Toggle sidebar">${I.sidebar}</button>`}
+    <span class="navbtns"><button class="icon-btn" data-nav-back title="Back (⌘[)" aria-label="Back" ${nav.idx <= 0 && !onPhone() ? "disabled" : ""}>${I.prev}</button><button class="icon-btn" data-nav-fwd title="Forward (⌘])" aria-label="Forward" ${nav.idx >= nav.max ? "disabled" : ""}>${I.next}</button></span>
     <div class="title"><b>${title}</b>${sub ? `<span>${sub}</span>` : ""}</div>
     <div class="tools">${right}</div></header>`;
 }
@@ -207,6 +206,7 @@ function renderMain() {
   tintHits();
   const ed = $<HTMLTextAreaElement>("#edit"); if (ed && document.activeElement !== ed) ed.focus();
   postControls();
+  remember();
 }
 
 function threadView(): string {
@@ -838,6 +838,9 @@ document.addEventListener("click", async (e) => {
   if (d.dock) { S.dockOpen = d.dock === "open"; renderMain(); if (S.dockOpen) $<HTMLTextAreaElement>("#message")?.focus(); return; }
   if (d.toggleSide !== undefined) return toggleSide();
   if (d.phoneBack !== undefined) { S.phoneList = true; return render(); }
+  // Back: the last place; on a phone with nowhere to go back to, the list.
+  if (d.navBack !== undefined) { if (nav.idx > 0) history.back(); else if (onPhone()) { S.phoneList = true; render(); } return; }
+  if (d.navFwd !== undefined) { if (nav.idx < nav.max) history.forward(); return; }
   if (d.unfold) { const k = `${S.att}:${d.unfold}`; S.unfold.has(k) ? S.unfold.delete(k) : S.unfold.add(k); return renderMain(); }
   if (d.finish === "approve") return send("approve");
   if (d.finish === "changes") { S.verdict[S.cur!] = "changes"; keepUnsent(); return writeReview(); }
@@ -1101,6 +1104,7 @@ document.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).cl
 document.addEventListener("scroll", () => { if (pending) readSelection(); }, true);
 
 document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === "[" || e.key === "]")) { e.preventDefault(); return e.key === "[" ? (nav.idx > 0 && history.back()) : (nav.idx < nav.max && history.forward()); }
   if (e.key === "Enter" && (e.target as HTMLElement)?.id === "att-link") { e.preventDefault(); return addLink(); }
   const id = document.activeElement?.id ?? "";
   const typing = /^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement?.tagName ?? "");
@@ -1254,6 +1258,43 @@ async function refresh() {
 
 // Back in front: what is on screen is now read, so the badge and the notifier agree.
 addEventListener("focus", () => { if (S.view === "thread" && S.cur) { forgetConvo(); openThread(S.cur, true); } });
+
+/* Back and forward. Every place you go (a conversation, a PR's chapter or tab, a file, the
+   queues, settings) is a history entry, so the ‹ › buttons, ⌘[ ⌘] and the browser's own back
+   (or a swipe on a phone) walk the same list. Restoring a place never adds a new one. */
+type Place = { view: string; cur: string | null; att: string | null; chapter: number; phoneList: boolean; phoneTab: string; phoneFile: string | null; phoneFileChapter: number };
+const place = (): Place => ({ view: S.view, cur: S.cur, att: S.att, chapter: S.chapter, phoneList: S.phoneList, phoneTab: S.phoneTab, phoneFile: S.phoneFile, phoneFileChapter: S.phoneFileChapter });
+const navKey = (p: Place | null) => p ? [p.view, p.view === "thread" ? `${p.cur}|${p.att}|${p.chapter}|${p.phoneTab}|${p.phoneFile}` : "", p.phoneList].join("~") : "";
+let restoring = false;
+const nav = { idx: 0, max: 0 };
+function remember() {
+  if (restoring || S.view === "compose" && !S.compose) return;
+  const p = place(), cur = history.state as (Place & { idx?: number }) | null;
+  if (navKey(cur) === navKey(p)) return;
+  const url = S.view === "thread" && S.cur ? `#${S.cur}` : location.pathname + location.search;
+  try {
+    if (!cur) { history.replaceState({ ...p, idx: 0 }, "", url); return; }
+    nav.idx = (cur.idx ?? nav.idx) + 1; nav.max = nav.idx;
+    history.pushState({ ...p, idx: nav.idx }, "", url);
+  } catch { /* history is a convenience */ }
+  updateNavButtons();
+}
+addEventListener("popstate", async (e: PopStateEvent) => {
+  const p = e.state as (Place & { idx?: number }) | null;
+  if (!p) return;
+  nav.idx = p.idx ?? 0;
+  restoring = true;
+  try {
+    if (p.view === "thread" && p.cur && p.cur !== S.cur) await openThread(p.cur, true);
+    Object.assign(S, { view: p.view, att: p.att, chapter: p.chapter, phoneList: p.phoneList, phoneTab: p.phoneTab, phoneFile: p.phoneFile, phoneFileChapter: p.phoneFileChapter });
+    if (p.view !== "thread") S.compose = null;
+    await prepare(); render();
+  } finally { restoring = false; updateNavButtons(); }
+});
+function updateNavButtons() {
+  $<HTMLButtonElement>("[data-nav-back]")?.toggleAttribute("disabled", nav.idx <= 0);
+  $<HTMLButtonElement>("[data-nav-fwd]")?.toggleAttribute("disabled", nav.idx >= nav.max);
+}
 
 /* Drag to reorder the queue's waiting rows or your review list. The new order is saved as
    yours, so an agent's reordering leaves it alone. */

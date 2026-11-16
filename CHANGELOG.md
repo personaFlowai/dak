@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+- Back and forward: every place you go is a history entry; ‹ › in the toolbar, ⌘[ ⌘], and the browser's back all walk it.
+- On the phone's home screen Dak has its own icon and name, runs full-screen, and keeps inside the iPhone's safe areas.
+- Remote agents (Grok) can write to any agent by name (`"to"` on /x/send; who is listed at /x/agents), and are told to check their inbox at every task.
+- The remote agents' door now survives Dak updates and restarts, like the phone link.
+- Grok has its logo.
+
 ## 0.2.9
 - Phone PR view, like a PR app: tabs for Overview, Guide (every chapter in one scroll, each with its files and a Reviewed box per file) and Diff. A file opens as a sheet over the page; closing it leaves you where you were.
 - New message lists who you have talked to in the last two weeks, newest first, instead of a fixed list; anyone else by name.

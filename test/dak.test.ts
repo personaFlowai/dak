@@ -873,6 +873,14 @@ describe("the outside door for remote agents", () => {
     await http(`/v1/threads/${sent.thread.id}/messages`, { method: "POST", body: JSON.stringify({ author: "sam", body: "The second one." }) });
     const got = await (await out(`/x/wait/${sent.thread.id}?timeout=5`)).json();
     expect(got.messages[0].body).toBe("The second one.");
+    // It can write to another agent directly, and the agent's answer reaches its inbox.
+    const names = ((await (await out("/x/agents")).json()) as any[]).map((a) => a.name);
+    expect(names).toContain("zari");
+    expect(names).not.toContain("grok");
+    const toZari = await (await out("/x/send", { method: "POST", body: JSON.stringify({ to: "zari", subject: "Hooks", body: "Draft three?" }) })).json();
+    expect(toZari.thread).toMatchObject({ from: "grok", to: "zari" });
+    dak("reply", toZari.thread.id, "--from", "zari", "Drafting now.");
+    expect(((await (await out("/x/inbox")).json()) as any[]).some((m) => m.body === "Drafting now.")).toBe(true);
   });
 
   test("connecting Cursor adds flat entries to its own hooks file, and its stop hook carries mail", async () => {

@@ -29,6 +29,8 @@ import { DakError, type Verdict } from "./types";
 import indexHtml from "../dist/ui/index.html" with { type: "text" };
 import appJs from "../dist/ui/app.js" with { type: "text" };
 import styleCss from "../dist/ui/style.css" with { type: "text" };
+import touchIcon from "../ui/apple-touch-icon.png" with { type: "file" };
+import icon512 from "../ui/icon-512.png" with { type: "file" };
 
 // DAK_DEV=1 reads the screens from dist/ui on every request, so a rebuild shows without a restart.
 const asset = (file: string, embedded: string) =>
@@ -87,6 +89,7 @@ export function serve(port?: number) {
           return new Response(asset("index.html", indexHtml as unknown as string).replace("<!--BOOT-->", boot), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
         }
         if (url.pathname === "/app.js") return new Response(asset("app.js", appJs), { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } }); // an update must reach an open window
+        const file = appFiles(url); if (file) return file;
         if (url.pathname === "/style.css") return new Response(asset("style.css", styleCss), { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "no-cache" } });
         if (!url.pathname.startsWith("/v1/")) return new Response("Not found", { status: 404 });
 
@@ -104,12 +107,23 @@ export function serve(port?: number) {
    /m?k=<key>, which sets a cookie and drops the key from the address. After that every
    request must carry the key (the cookie, or the page's own Authorization header). The
    page is the same one the Mac shows, told it is on a phone. */
+// The icon and the manifest a phone reads to put Dak on its home screen. Nothing private,
+// so they are served without a key: iOS fetches them on its own.
+function appFiles(url: URL): Response | null {
+  if (url.pathname === "/apple-touch-icon.png" || url.pathname === "/apple-touch-icon-precomposed.png") return new Response(Bun.file(touchIcon), { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
+  if (url.pathname === "/icon-512.png") return new Response(Bun.file(icon512), { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
+  if (url.pathname === "/manifest.webmanifest") return Response.json({ name: "Dak", short_name: "Dak", start_url: "/", display: "standalone", background_color: "#ffffff", theme_color: "#1f6f8b",
+    icons: [{ src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }, { src: "/icon-512.png", sizes: "512x512", type: "image/png" }] }, { headers: { "content-type": "application/manifest+json" } });
+  return null;
+}
+
 async function phoneRequest(req: Request, url: URL): Promise<Response> {
   const host = req.headers.get("host") ?? "";
   const ph = phoneHost();
   if (!ph || host !== ph) return new Response("Wrong host", { status: 403 });
   const origin = req.headers.get("origin");
   if (origin && origin !== `https://${ph}`) return new Response("Wrong origin", { status: 403 });
+  const file = appFiles(url); if (file) return file;
   if (url.pathname === "/m") {
     const k = url.searchParams.get("k");
     if (!isPhoneKey(k)) return new Response("This link has expired. Scan the code in Dak's Settings again.", { status: 401 });
@@ -153,7 +167,11 @@ async function outside(req: Request, url: URL): Promise<Response> {
   if (parts[0] === "send" && req.method === "POST") {
     const b = await body();
     const atts = b.link ? [{ type: "link", name: String(b.link), meta: { url: String(b.link) } } as any] : [];
-    return json(createThread({ to: me, from: agent, subject: String(b.subject ?? "").slice(0, 200) || String(b.body ?? "").split("\n")[0].slice(0, 80), kind: "note", body: String(b.body ?? ""), attachments: atts, options: optionsOf(b), ...(b.needs_reply === false ? { needs_reply: false } : {}) }), 201);
+    // To the person by default; to any agent by name ("zari", "atlas"), so a remote agent can
+    // work with the team directly. It still reads only its own threads.
+    const to = b.to ? String(b.to).toLowerCase() : me;
+    if (to !== me && loadConfig().readers.some((r) => r.name === to && r.kind === "person")) throw new DakError("not_allowed", "An outside agent writes to the person or to agents.", 403);
+    return json(createThread({ to, from: agent, subject: String(b.subject ?? "").slice(0, 200) || String(b.body ?? "").split("\n")[0].slice(0, 80), kind: "note", body: String(b.body ?? ""), attachments: atts, options: optionsOf(b), ...(b.needs_reply === false ? { needs_reply: false } : {}) }), 201);
   }
   if (parts[0] === "reply" && parts[1] && req.method === "POST") {
     ownThread(parts[1]);
@@ -173,7 +191,12 @@ async function outside(req: Request, url: URL): Promise<Response> {
     return json({ messages: [], timed_out: true });
   }
   if (parts[0] === "inbox" && req.method === "GET") return json(takeUnread(agent));
-  throw new DakError("not_found", "The outside routes are /x/send, /x/reply/<id>, /x/wait/<id> and /x/inbox.", 404);
+  // Who it can write to: the person and the agents, with what each does.
+  if (parts[0] === "agents" && req.method === "GET") {
+    const c = loadConfig();
+    return json(c.readers.filter((r) => r.name !== agent && (r.kind === "agent" || r.name === me)).map((r) => ({ name: r.name, about: r.about ?? (r.name === me ? "The person" : null) })));
+  }
+  throw new DakError("not_found", "The outside routes are /x/send, /x/reply/<id>, /x/wait/<id>, /x/inbox and /x/agents.", 404);
 }
 
 async function api(req: Request, url: URL): Promise<Response> {

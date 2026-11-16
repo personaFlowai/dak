@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, chmodSync, openSync, unlinkSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { dakHome } from "./config";
@@ -38,51 +39,61 @@ export function revokeKey(name: string) {
   writeFileSync(keysPath(), JSON.stringify(keys, null, 2));
 }
 
-interface Door { agent: string; tool: "cloudflare" | "ngrok"; url: string | null; ready: boolean; proc: ReturnType<typeof Bun.spawn>; error?: string }
-let door: Door | null = null;
+/* The door's tunnel runs as its own process (detached), so a Dak update or restart does not
+   change the address the remote agent has saved. Its state lives in ~/.dak/door.json. */
+interface DoorState { agent: string; tool: "cloudflare" | "ngrok"; pid: number; url: string | null; log: string }
+const doorPath = () => join(dakHome(), "door.json");
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-export function doorStatus() {
-  return door ? { open: true, agent: door.agent, tool: door.tool, url: door.url, error: door.error ?? null } : { open: false };
+function readDoor(): DoorState | null {
+  try { const d = JSON.parse(readFileSync(doorPath(), "utf8")) as DoorState; return alive(d.pid) ? d : null; } catch { return null; }
 }
 
-// Cloudflare's quick tunnel needs no account; its address changes on every start.
+function urlIn(d: DoorState): string | null {
+  try {
+    const text = readFileSync(d.log, "utf8");
+    if (d.tool === "cloudflare") return /Registered tunnel connection/.test(text) ? text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)?.[0] ?? null : null;
+    return text.match(/"url":"(https:\/\/[^"]+)"/)?.[1] ?? null;
+  } catch { return null; }
+}
+
+export function doorStatus() {
+  const d = readDoor();
+  if (!d) return { open: false };
+  if (!d.url) { d.url = urlIn(d); if (d.url) writeFileSync(doorPath(), JSON.stringify(d)); }
+  return { open: true, agent: d.agent, tool: d.tool, url: d.url, error: null };
+}
+
+// Cloudflare's quick tunnel needs no account; its address changes when the tunnel restarts.
 // ngrok uses the account it is already signed in to.
 export async function openDoor(agent: string, port: number, tool: "cloudflare" | "ngrok" = "cloudflare") {
-  if (door) closeDoor();
+  const cur = readDoor();
+  if (cur && cur.agent === agent && cur.tool === tool) { agentKey(agent); return doorStatus(); }
+  closeDoor();
   agentKey(agent);
-  const cmd = tool === "cloudflare"
+  const log = join(dakHome(), "door-tunnel.log");
+  writeFileSync(log, "");
+  const out = openSync(log, "a");
+  const [cmd, ...args] = tool === "cloudflare"
     ? ["cloudflared", "tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${port}`]
     : ["ngrok", "http", `127.0.0.1:${port}`, "--log", "stdout", "--log-format", "json"];
-  let proc: ReturnType<typeof Bun.spawn>;
-  try { proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" }); }
-  catch { throw new DakError("no_tunnel_tool", `${cmd[0]} is not installed.`, 502); }
-  door = { agent, tool, url: null, ready: tool === "ngrok", proc };
-  const d = door;
-  const want = tool === "cloudflare" ? /https:\/\/[a-z0-9-]+\.trycloudflare\.com/ : /"url":"(https:\/\/[^"]+)"/;
-  const read = async (stream: ReadableStream<Uint8Array> | null) => {
-    if (!stream) return;
-    const dec = new TextDecoder();
-    for await (const chunk of stream as any) {
-      const text = dec.decode(chunk);
-      const m = text.match(want);
-      if (m && !d.url) d.url = m[1] ?? m[0];
-      // The address is printed before Cloudflare can route to it. Asking for it that
-      // early caches a "no such host" on the asker's side, so wait for registration.
-      if (/Registered tunnel connection/.test(text)) d.ready = true;
-    }
-  };
-  read(proc.stdout as any); read(proc.stderr as any);
-  proc.exited.then((code) => { if (door === d) { d.error = `The tunnel stopped (exit ${code}).`; } });
-  for (let i = 0; i < 120 && !(d.url && d.ready) && !d.error; i++) await Bun.sleep(250);
-  if (!d.url || !d.ready) d.error ??= "The tunnel did not come up within 30 seconds.";
-  else await Bun.sleep(4000); // give Cloudflare's DNS a moment before anyone asks for the address
+  let proc: ReturnType<typeof spawn>;
+  try { proc = spawn(cmd, args, { detached: true, stdio: ["ignore", out, out] }); }
+  catch { throw new DakError("no_tunnel_tool", `${cmd} is not installed.`, 502); }
+  if (!proc.pid) throw new DakError("no_tunnel_tool", `${cmd} is not installed.`, 502);
+  proc.unref();
+  const d: DoorState = { agent, tool, pid: proc.pid, url: null, log };
+  writeFileSync(doorPath(), JSON.stringify(d));
+  for (let i = 0; i < 120 && !urlIn(d) && alive(d.pid); i++) await Bun.sleep(250);
+  if (!urlIn(d)) { closeDoor(); return { open: false, error: "The tunnel did not come up within 30 seconds." }; }
+  await Bun.sleep(4000); // give Cloudflare's DNS a moment before anyone asks for the address
   return doorStatus();
 }
 
 export function closeDoor() {
-  if (!door) return;
-  try { door.proc.kill(); } catch { /* already gone */ }
-  door = null;
+  const d = readDoor();
+  if (d) { try { process.kill(d.pid); } catch { /* already gone */ } }
+  try { unlinkSync(doorPath()); } catch { /* none */ }
 }
 
 export function instructionsFor(agent: string, url: string, key: string, person: string): string {
@@ -91,11 +102,13 @@ export function instructionsFor(agent: string, url: string, key: string, person:
     `Base address: ${url}`,
     `Send this header on every call: Authorization: Bearer ${key}`,
     ``,
-    `Send a message:   POST ${url}/x/send   JSON {"subject": "...", "body": "Markdown text", "link": "optional URL"}   returns {"thread": {"id": ...}}`,
+    `Send a message:   POST ${url}/x/send   JSON {"subject": "...", "body": "Markdown text", "link": "optional URL", "to": "optional agent name"}   returns {"thread": {"id": ...}}`,
+    `                  Leave "to" out to write to ${person}; set it to write to another agent directly. Who you can write to: GET ${url}/x/agents`,
     `Reply on a thread: POST ${url}/x/reply/<thread id>   JSON {"body": "..."}`,
     `Wait for a reply:  GET  ${url}/x/wait/<thread id>?timeout=50   returns {"messages": [...]} or {"timed_out": true}`,
     `Read new replies:  GET  ${url}/x/inbox`,
     ``,
-    `You appear in Dak as "${agent}". Keep messages short and say what you need from ${person}.`,
+    `Getting your mail: Dak cannot reach into your sandbox, so you must ask. At the start of every task and before you finish, call GET ${url}/x/inbox and act on what is there. While you wait for an answer, keep GET ${url}/x/wait/<thread id>?timeout=50 open in a loop rather than stopping.`,
+    `You appear in Dak as "${agent}". Keep messages short and say what you need.`,
   ].join("\n");
 }
