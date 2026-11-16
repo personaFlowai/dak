@@ -14,7 +14,9 @@ Claude Code, Codex, Cursor and your own scripts send you PRs, docs and questions
   <a href="https://github.com/personaflowai/dak/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/personaflowai/dak?style=flat&color=1f6f8b"></a>
 </p>
 
-<p align="center"><img src="docs/screenshots/demo.gif" width="900" alt="Dak: a conversation with an agent, a PR explained in chapters, the diff side by side, a doc, and search"></p>
+<p align="center"><img src="docs/screenshots/story.gif" width="900" alt="From install to daily use: install, connect your agents, an agent sends a PR, it arrives explained in chapters, you approve, the answer reaches the agent's session as JSON, everything waiting on you in one order, the merge queue, and the same PR on a phone"></p>
+
+<p align="center"><sub>Install → connect agents → an agent sends a PR → read it in chapters → approve → the agent gets your answer → the queues → your phone.</sub></p>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/personaflowai/dak/main/install.sh | sh
@@ -22,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/personaflowai/dak/main/install.sh |
 
 Dak (डाक, "the post") gives every agent on your machine (Claude Code, Cursor, Codex, Grok, your own scripts) one place to send you work and get your answer back. A PR arrives as chapters you can read in order, with the diff, the whole file and a helper that explains any line. A brief arrives as a rendered document you can comment on paragraph by paragraph. You pick a verdict, press Send, and the agent that asked gets your comments as JSON on the same thread.
 
-Everything stays on your machine: one SQLite file, a localhost server, no accounts.
+Everything stays on your machine: one SQLite file, a localhost server, no accounts. The phone link and the door for outside agents are off until you open them.
 
 ## Screens
 
@@ -35,6 +37,12 @@ Everything stays on your machine: one SQLite file, a localhost server, no accoun
 | ![A doc to comment on](docs/screenshots/5-doc.png) | ![Search everything](docs/screenshots/6-search.png) |
 | **Docs to comment on**, word by word. | **⌘K** across every conversation. |
 
+| ![Everything waiting on you, in one order](docs/screenshots/8-waiting.png) | ![The merge queue](docs/screenshots/9-queue.png) |
+| **Waiting on you.** PRs, briefs and decisions in one order. Agents propose it; your order wins. | **The merge queue, live:** what is testing, what is next, how long it should take. |
+
+<p align="center"><img src="docs/screenshots/10-phone.png" width="760" alt="A PR on a phone: the overview, the chapters with their files, and one file open with Mark reviewed"></p>
+<p align="center"><b>On your phone:</b> the overview, the chapters, and one file at a time with Mark reviewed.</p>
+
 <p align="center"><img src="docs/screenshots/7-dark.png" width="800" alt="Dak in dark mode"></p>
 
 ## What it does
@@ -44,9 +52,14 @@ Everything stays on your machine: one SQLite file, a localhost server, no accoun
 - **Docs to comment on.** A brief arrives as a document; select words or a paragraph and comment there.
 - **Answers that travel back.** Your verdict and comments reach the agent's session as JSON. Agents can offer buttons, so a choice is one click.
 - **Push, not polling.** Connected Claude Code sessions get your reply at the next turn, and an idle session is woken when mail arrives. Codex and Cursor get it at the edges of their turns.
+- **Waiting on you, in one order.** Every PR, brief and decision that needs you, ordered by priority with what each answer releases. Agents propose the order (`dak queue review-order`); drag a row and your order wins. "I'm reviewing" tells the agent you have started.
+- **The merge queue.** Merge scripts report each PR's state (`dak queue set 412 --state testing --eta 6m`), and Dak shows what is running, what is next and how long is left.
+- **On your phone.** Settings → Your phone opens a private link (a Cloudflare quick tunnel, guarded by a key) to read PRs, open files, approve and reply from anywhere. Add it to the home screen and it opens like an app.
+- **Wakes closed sessions.** When you answer a Claude Code session that has closed, Dak resumes it in the background to read the reply, and tells you when it has.
+- **Agents outside the Mac.** Open a door in Settings and a remote agent (Grok, a cloud runner) sends and replies over HTTPS with its own key, under its own name.
 - **Notifications, search and a helper.** A banner when something needs you, ⌘K across every conversation, and a read-only helper (Claude Code, Codex or Cursor) to explain any line.
 
-Everything stays on your Mac: one SQLite file, a localhost server, no accounts.
+Everything stays on your Mac: one SQLite file, a localhost server, no accounts. Opening the phone link or the door for outside agents routes those requests through a Cloudflare quick tunnel; both are off until you turn them on.
 
 ## Install
 
@@ -125,7 +138,7 @@ Those builds carry an ad-hoc signature. To notarize, so a downloaded app opens w
 
 ## What is kept, and for how long
 
-Everything, until you delete it. Nothing expires and nothing leaves the Mac (except a GitHub review you choose to post).
+Everything, until you delete it. Nothing expires and nothing leaves the Mac, except a GitHub review you choose to post and what you open to the phone link or the door.
 
 - `~/.dak/dak.db`: threads, messages, comments, verdicts and button picks.
 - `~/.dak/blobs`: PR diffs, file snapshots, docs and images, stored once by content.
