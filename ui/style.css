@@ -509,7 +509,6 @@ html.native .main { background: var(--win); }
 .ctx { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; margin: 0; font-size: 13px; line-height: 1.5; max-width: 76ch; }
 .ctx dt { color: var(--text3); font-size: 12px; font-weight: 600; padding-top: 1px; }
 .ctx dd { margin: 0; color: var(--text2); }
-.ctx .proof { display: block; margin-top: 3px; } .ctx .proof b { font-weight: 600; color: var(--text); margin-right: 4px; }
 .checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; line-height: 1.45; color: var(--text); }
 .checks label { display: flex; gap: 8px; align-items: flex-start; cursor: default; }
 .checks input { margin: 3px 0 0; accent-color: var(--accent); flex: none; }

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.9
+- A chapter's Proof is its own row (Why, Needs care, Proof, People notice), not run on inside Needs care. The phone shows it too.
+
 ## 0.3.8
 - Phone: the file sheet's close button closes it. The sheet was inside the scrolling page, and on iPhone that sent its taps to the wrong place (the X hit Mark reviewed). It now sits beside the page, and the X is a full-size target.
 

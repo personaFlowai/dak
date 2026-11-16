@@ -56,6 +56,7 @@ export function phoneGuide(a: Pr, files: DiffFile[], done: Set<number>): string 
     <h2>${esc(c.title)}</h2>
     ${c.summary ? `<p>${esc(c.summary)}</p>` : ""}${c.why ? `<p class="why">${esc(c.why)}</p>` : ""}
     ${c.risk !== "low" && c.risk_why ? `<p class="prisk"><span class="risk ${c.risk}">${c.risk === "high" ? "High risk" : "Medium risk"}</span> ${esc(c.risk_why)}</p>` : ""}
+    ${c.proof ? `<p class="prisk"><b>Proof</b> ${esc(c.proof)}</p>` : ""}
     ${fileRows(a, files, chapterHunks(c, files), i)}</section>`).join("")}</div>`;
 }
 

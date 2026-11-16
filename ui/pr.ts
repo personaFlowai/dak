@@ -90,7 +90,8 @@ function chapterView(a: Pr, chapters: (Chapter & { plain?: boolean })[], files: 
         <label class="viewed-box" title="Mark every file in this chapter reviewed (V)"><input type="checkbox" data-chapter-reviewed ${done.has(S.chapter) ? "checked" : ""}> Reviewed</label></div>
       <h2>${esc(ch.plain ? ch.summary : ch.title)}</h2>${!ch.plain && ch.summary ? `<p>${esc(ch.summary)}</p>` : ""}
       ${ch.why ? `<dl class="ctx"><dt>Why</dt><dd>${esc(ch.why)}</dd></dl>` : ""}
-      ${ch.risk !== "low" || ch.proof ? `<dl class="ctx"><dt><span class="risk ${ch.risk}">${RISK[ch.risk]}</span></dt><dd>${esc(ch.risk_why ?? "")}${ch.proof ? `<span class="proof"><b>Proof</b> ${esc(ch.proof)}</span>` : ""}</dd></dl>` : ""}
+      ${ch.risk !== "low" ? `<dl class="ctx"><dt><span class="risk ${ch.risk}">${RISK[ch.risk]}</span></dt><dd>${esc(ch.risk_why ?? "")}</dd></dl>` : ""}
+      ${ch.proof ? `<dl class="ctx"><dt>Proof</dt><dd>${esc(ch.proof)}</dd></dl>` : ""}
       ${ch.noticed ? `<dl class="ctx"><dt>People notice</dt><dd>${esc(ch.noticed)}</dd></dl>` : ""}
       ${ch.check?.length ? checks(a.id, S.chapter, ch.check) : ""}
       ${keys ? `<div class="keys"><h3>What to review</h3><ul>${keys}</ul></div>` : ""}
