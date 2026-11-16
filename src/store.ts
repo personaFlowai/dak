@@ -200,8 +200,9 @@ function approvedSince(threadId: string, reader: string): boolean {
 function settleUpdates() {
   const s = db!;
   for (const t of s.query("SELECT id, to_reader FROM threads WHERE status = 'waiting'").all() as { id: string; to_reader: string }[]) {
-    const last = s.query("SELECT author, verdict FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT 1").get(t.id) as { author: string; verdict: string | null } | null;
-    if (last && last.author !== t.to_reader && last.verdict !== "question" && approvedSince(t.id, t.to_reader)) {
+    const last = s.query("SELECT author, verdict, options FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT 1").get(t.id) as { author: string; verdict: string | null; options: string | null } | null;
+    // Buttons are a question, even after an approval: those stay waiting.
+    if (last && last.author !== t.to_reader && last.verdict !== "question" && !last.options && approvedSince(t.id, t.to_reader)) {
       s.query("UPDATE threads SET status = 'answered' WHERE id = ?").run(t.id);
     }
   }
@@ -417,10 +418,41 @@ export function listThreads(reader: string, opts: { box?: "to" | "from" | "all" 
 // PRs waiting on a person's review, oldest first, and whether they have said they are on it.
 export interface PrSize { files: number; additions: number; deletions: number }
 export interface AwaitingReview { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null }
-export function awaitingReview(reader: string): AwaitingReview[] {
-  const rows = store().query(`SELECT t.id AS thread_id, t.subject, t.from_name AS "from", t.updated_at AS waiting_since, ${REVIEWING} AS reviewing_since
-    FROM threads t WHERE t.to_reader = ? AND t.kind = 'pr' AND t.status = 'waiting' ORDER BY t.updated_at`).all(reader) as any[];
-  return rows.map((r) => { const p = latestPr(r.thread_id); return { ...r, pr: p?.number ?? null, size: p?.size ?? null }; });
+/* Everything waiting on the person, with what kind of answer it needs:
+     pr: a PR to review (a new version since any approval);
+     brief: a doc, a spec, a mock to read and approve;
+     decision: a question with buttons, or a question asked after they approved.
+   Updates (FYIs), closed topics, and PRs they approved that only wait to merge are not here:
+   the merge queue holds those. An agent can name the type itself (--type), which wins. */
+export type ReviewType = "pr" | "brief" | "decision";
+export function awaitingReview(reader: string, typed: Map<string, string> = new Map()): (AwaitingReview & { type: ReviewType })[] {
+  const rows = store().query(`SELECT t.id AS thread_id, t.kind, t.subject, t.from_name AS "from", t.updated_at AS waiting_since, ${REVIEWING} AS reviewing_since
+    FROM threads t WHERE t.to_reader = ? AND t.status = 'waiting' ORDER BY t.updated_at`).all(reader) as any[];
+  return rows.map((r) => {
+    const p = latestPr(r.thread_id);
+    const { kind: _k, ...rest } = r;
+    return { ...rest, pr: p?.number ?? null, size: p?.size ?? null, type: (typed.get(r.thread_id) as ReviewType) ?? reviewTypeOf(r.thread_id, r.kind, reader) };
+  });
+}
+
+function reviewTypeOf(threadId: string, kind: string, reader: string): ReviewType {
+  const msgs = store().query(`SELECT m.id, m.author, m.verdict, m.options,
+      (SELECT group_concat(a.type) FROM attachments a WHERE a.message_id = m.id) AS atts
+    FROM messages m WHERE m.thread_id = ? ORDER BY m.id`).all(threadId) as { id: number; author: string; verdict: string | null; options: string | null; atts: string | null }[];
+  const last = [...msgs].reverse().find((m) => m.author !== reader);
+  // A PR waiting for its review is a PR, whatever buttons came with it.
+  if (kind === "pr") {
+    // After an approval, only a new version is a PR to review again; anything else is a question.
+    let approved = false, newVersion = false;
+    for (const m of msgs) {
+      if (m.author === reader && m.verdict) { approved = m.verdict === "approve"; newVersion = false; }
+      else if (approved && m.author !== reader && (m.atts ?? "").includes("pr")) newVersion = true;
+    }
+    return approved && !newVersion ? "decision" : "pr";
+  }
+  if (last?.options) return "decision"; // buttons are a choice
+  if (kind === "doc" || /link|file/.test(last?.atts ?? "")) return "brief";
+  return "decision";
 }
 
 // The newest PR on a thread: its number and how big it is, so a reader can tell a ten-line

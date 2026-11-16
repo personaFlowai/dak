@@ -816,3 +816,12 @@ table.diff td.ln button { white-space: nowrap; }
 .app.phone .notes-col > header { overflow: visible; padding: 12px 14px 16px; }
 .app.phone .code-col { overflow: visible; }
 .app.phone .code-col .fcards { overflow-x: auto; }
+
+/* Waiting on you: the type of each ask, a filter by type, and what an answer releases. */
+.rtype { flex: none; font-size: 10.5px; font-weight: 600; color: var(--text3); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; text-transform: uppercase; letter-spacing: .03em; }
+.rtype.decision { color: var(--accent-text); border-color: var(--accent-tint2); }
+.qblocks { margin-top: 3px; font-size: 12px; color: var(--text); font-weight: 500; }
+.chips-f { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.chip-f { font-size: 12px; color: var(--text2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; background: none; }
+.chip-f span { color: var(--text3); margin-left: 2px; }
+.chip-f.on { background: var(--accent-tint); border-color: var(--accent-tint2); color: var(--accent-text); }

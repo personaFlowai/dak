@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6
+- "Waiting on you" holds PRs, briefs and decisions in one order, with chips to filter by type. Updates and approved PRs that only wait to merge stay out; a question asked after an approval counts as a decision.
+- `--type pr|brief|decision` and `--blocks "Rohan, #2433"` on sends and replies; each brief or decision shows what its answer releases.
+- Fixed: a button question asked after an approval was marked answered on its own and dropped out of what waits on you.
+- Fixed: setting a review priority before anything was in the merge queue failed.
+
 ## 0.2.5
 - Dak on your phone. Settings → Your phone opens a private link through a Cloudflare quick tunnel (no account) and shows a code to scan. Only a phone holding that key gets in; it cannot change the Mac's setup; "Sign out phone" replaces the key. The tunnel runs apart from Dak, so the phone's saved address survives Dak updates.
 - A phone layout: the list (merge queue first, then agents) and what you open from it, with a back button. PRs open full-screen with the reply bar at the bottom; a chapter reads as notes then code, single-column diff.

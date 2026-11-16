@@ -3,7 +3,7 @@ import { tickRunners } from "./reviewer";
 import { closePhone, cookieKey, isPhoneKey, openPhone, phoneHost, phoneMayNot, phoneStatus } from "./phone";
 import { recentWakes, settleWakes, tickSleepers } from "./sleeper";
 import { next, queue, queueStamp, removeQueue, setQueue } from "./queue";
-import { orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
+import { describeReview, orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
 import type { Participant } from "./types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -279,7 +279,8 @@ async function api(req: Request, url: URL): Promise<Response> {
   }
   if (parts[0] === "reviews" && parts[1] && parts[2] === "priority" && method === "PUT") {
     const { b, who } = await by();
-    prioritizeReview(parts[1], who, { tier: tierOf(b.tier), why: b.why });
+    if (b.tier || b.why) prioritizeReview(parts[1], who, { tier: tierOf(b.tier), why: b.why });
+    describeReview(parts[1], { type: b.type, blocks: b.blocks });
     return json({ ok: true });
   }
   if (parts[0] === "queue" && parts[1] === "next" && method === "GET") return json({ next: next() });

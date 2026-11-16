@@ -97,6 +97,8 @@ If Dak has a runner named `codex` (`dak runner add codex`), sending a PR to it, 
 
 Merge scripts keep it current: `dak queue set <pr> --state approved|testing|building|merging|merged|migrated|deployed|failed|held [--eta 4m] [--after <pr>] [--head sha] [--migration f] [--note "full suite"]`. Set `--eta` at each step so the person sees time left; use `--after` for a PR that waits on another, not the title. Approval is read from the person's verdict on the thread, so never mark a PR approved they have not approved. `dak queue` prints what waits for their review, what is moving and what waits its turn. When the person presses "I'm reviewing", you get a Dak message and `dak show` says so.
 
+What waits on the person is one list across types: PRs, briefs (a doc, a spec or a mock: one type) and decisions (buttons, or a question after an approval). Updates (`--fyi`) and PRs they approved that only wait to merge are not in it. Dak works out the type; say it when it is not obvious (`--type brief`), and say what the answer releases (`--blocks "Rohan, #2433"`) on any send, reply or `dak queue priority <thread> --review`. The order is one order across types: a brief that holds an engineer goes before a normal PR.
+
 Priorities. Three tiers (urgent: a production bug, security, an unblocker; normal; later), with an order inside each:
 - Review order, what the person should review first: `dak queue priority <pr> --review --tier urgent --why "unblocks 8 PRs"`, and `dak queue review-order <pr> <pr>...` for the order. A PR sent with `--hotfix` goes urgent on its own.
 - Merge order: `dak queue order <pr> <pr>...` and `dak queue set <pr> --tier urgent --why "production bug"`. Dak refuses an order that puts a PR ahead of the one it waits for (`--after`).

@@ -17,7 +17,7 @@ import { DakError, type Message, type Verdict } from "./types";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners } from "./reviewer";
 import { next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
-import { orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
+import { describeReview, orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
 import type { AwaitingReview } from "./store";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
@@ -159,7 +159,7 @@ function queueText(rows: QueueRow[], reviews: OrderedReview[], who: string): str
   const waiting = rows.filter((r) => ["approved", "held", "failed"].includes(r.state));
   const done = rows.filter((r) => r.state === "deployed");
   return [
-    `Waiting for ${who}'s review (${reviews.length})`, ...reviews.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}${r.tier !== "normal" ? `  ${r.tier.toUpperCase()}` : ""}${r.why ? ` (${r.why})` : ""}  [from ${r.from}, ${r.reviewing_since ? `reviewing for ${ago(r.reviewing_since)}` : `waiting ${ago(r.waiting_since)}`}]`),
+    `Waiting on ${who} (${reviews.length})`, ...reviews.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}  {${r.type}}${r.tier !== "normal" ? `  ${r.tier.toUpperCase()}` : ""}${r.why ? ` (${r.why})` : ""}${r.blocks ? `  blocks: ${r.blocks}` : ""}  [from ${r.from}, ${r.reviewing_since ? `reviewing for ${ago(r.reviewing_since)}` : `waiting ${ago(r.waiting_since)}`}]`),
     "", `In progress (${moving.length})`, ...moving.map(line),
     "", `Approved, waiting (${waiting.length})`, ...waiting.map(line),
     ...(done.length ? ["", `Deployed today (${done.length})`, ...done.map(line)] : []),
@@ -219,7 +219,7 @@ const OPTIONS = {
   proof: { type: "string", multiple: true }, skipped: { type: "string", multiple: true }, cost: { type: "string" }, cap: { type: "string" },
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
   eta: { type: "string" }, after: { type: "string" }, tier: { type: "string" }, why: { type: "string" }, waiting: { type: "string" },
-  review: { type: "boolean" }, hotfix: { type: "boolean" },
+  review: { type: "boolean" }, hotfix: { type: "boolean" }, type: { type: "string" }, blocks: { type: "string" },
   state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
 } as const;
 
@@ -287,6 +287,7 @@ export async function main(argv: string[]): Promise<number> {
         participants: (values.cc ?? []).map(parseParticipant), extra, ...(values.fyi ? { needs_reply: false } : {}) });
       // A hotfix goes to the top of the reader's review list.
       if (values.hotfix) prioritizeReview(thread.id, values.from, { tier: "urgent", why: values.why ?? "Hotfix" });
+      describeReview(thread.id, { type: values.type, blocks: values.blocks });
       out(json, { thread, message }, () => `Sent ${thread.id} to ${thread.to}: ${thread.subject}\nWait for the reply with: dak wait ${thread.id} --for ${thread.from}`);
       return 0;
     }
@@ -352,6 +353,7 @@ export async function main(argv: string[]): Promise<number> {
       if (values.ready && !prMeta) prMeta = messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop()?.meta ?? null;
       const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
       for (const c of values.cc ?? []) addParticipant(id, parseParticipant(c));
+      describeReview(id, { type: values.type, blocks: values.blocks });
       const body = readBody(positionals, values);
       if (values["head-only"] && !body.trim() && !values.ready) { out(json, { thread: id, head_sha: prMeta.head_sha }, () => `Moved ${id} to ${prMeta.head_sha?.slice(0, 7)}.`); return 0; }
       // --done: the work is finished (merged, shipped). The note is an update, and the topic
@@ -461,7 +463,8 @@ export async function main(argv: string[]): Promise<number> {
       if (sub === "priority" && n) {
         // One row's tier and reason: --review for the review list, else the merge queue.
         const v = { tier: tierOf(values.tier), why: values.why };
-        if (values.review) prioritizeReview(n, by, v); else prioritizeQueue(num(n), by, v);
+        if (values.review) { if (v.tier || v.why) prioritizeReview(n, by, v); describeReview(n, { type: values.type, blocks: values.blocks }); }
+        else prioritizeQueue(num(n), by, v);
         out(json, { [values.review ? "review" : "pr"]: n, ...v }, () => `${n}: ${v.tier ?? "tier unchanged"}${v.why ? `, ${v.why}` : ""}.`);
         return 0;
       }

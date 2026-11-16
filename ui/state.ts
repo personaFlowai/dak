@@ -57,7 +57,8 @@ export const S = {
     state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null;
     tier: string; rank: number | null; why: string | null; rank_by: string | null; pair_id: string | null; waiting_reason: string | null }[],
   reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null;
-    tier: string; rank: number | null; why: string | null; rank_by: string | null }[], // PRs waiting on your review, in priority order
+    tier: string; rank: number | null; why: string | null; rank_by: string | null; type: string; blocks: string | null }[], // everything waiting on you, in priority order
+  reviewFilter: local.get("reviewFilter", "") as string, // the merge queue's "Waiting on you": all, or one type
   allTopics: local.get("allTopics", false), // the conversation shows every topic at once, not just the one you are on
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
   newTopic: false, // the reply box is starting a new thread with this agent, not answering one

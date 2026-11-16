@@ -302,13 +302,33 @@ function queueRow(r: QRow, pos?: number): string {
       ${r.waiting_reason ? `<span class="qwait">${esc(r.waiting_reason)}</span>` : ""}${r.note ? `<span class="qnote">${esc(r.note)}</span>` : ""}${placedBy(r.rank_by)}</div></li>`;
 }
 
+const TYPE_WORD: Record<string, string> = { pr: "PR", brief: "Brief", decision: "Decision" };
+
 function reviewRow(r: (typeof S.reviews)[number], pos: number): string {
+  // A decision is answered with a tap, not reviewed: no "I'm reviewing" for it.
+  const reviewable = r.type !== "decision";
+  const action = r.reviewing_since ? `<b class="st reviewing">You're reviewing</b>`
+    : reviewable ? `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`
+    : `<button class="btn" data-topic="${esc(r.thread_id)}">Answer</button>`;
   return `<li class="qrow review" draggable="true" data-drag-review="${esc(r.thread_id)}" data-tier="${r.tier}"><span class="qpos">${pos}</span>
-    <div class="qmain"><div class="qhead">${prTitle(r.pr, r.subject, r.thread_id)}</div>
+    <div class="qmain"><div class="qhead"><span class="rtype ${r.type}">${TYPE_WORD[r.type] ?? esc(r.type)}</span>${prTitle(r.pr, r.subject, r.thread_id)}</div>
       <div class="qmeta">${sizeLabel(r.size)}${r.size ? " · " : ""}From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div>
-      ${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}</div>
-    <div class="qside"><div class="qtop">${r.reviewing_since ? `<b class="st reviewing">You're reviewing</b>` : `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`}${tierMenu("review", r.thread_id, r.tier)}</div>
+      ${r.blocks ? `<div class="qblocks">Blocks: ${esc(r.blocks)}</div>` : ""}${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}</div>
+    <div class="qside"><div class="qtop">${action}${tierMenu("review", r.thread_id, r.tier)}</div>
       ${r.reviewing_since ? `<span>since ${when(r.reviewing_since)}</span>` : ""}${placedBy(r.rank_by)}</div></li>`;
+}
+
+/* Everything waiting on you, in one order across types: a brief that holds an engineer can
+   come before a PR. The chips filter by type; the order and tiers stay the same. */
+function reviewGroup(): string {
+  const f = S.reviewFilter;
+  const count = (t: string) => S.reviews.filter((r) => r.type === t).length;
+  const chips = ["pr", "brief", "decision"].filter(count).map((t) =>
+    `<button class="chip-f ${f === t ? "on" : ""}" data-review-filter="${t}">${TYPE_WORD[t]}s <span>${count(t)}</span></button>`).join("");
+  const shown = f ? S.reviews.filter((r) => r.type === f) : S.reviews;
+  const list = shown.length ? `<ol class="qlist" data-drop="review">${tiered(shown, reviewRow).join("")}</ol>` : `<p class="qempty">Nothing is waiting on you.</p>`;
+  return `<section class="qgroup"><h3>Waiting on you <span class="count">${S.reviews.length}</span></h3>
+    ${chips ? `<div class="chips-f"><button class="chip-f ${f ? "" : "on"}" data-review-filter="">All</button>${chips}</div>` : ""}${list}</section>`;
 }
 
 function queueSummary(): string {
@@ -338,7 +358,7 @@ function queueView(): string {
   const group = (title: string, hint: string, rows: string[], count: number, kind = "") => `<section class="qgroup"><h3>${title} <span class="count">${count}</span></h3>
     ${rows.length ? `<ol class="qlist" ${kind ? `data-drop="${kind}"` : ""}>${rows.join("")}</ol>` : `<p class="qempty">${hint}</p>`}</section>`;
   return `<div class="pane-body"><div class="queue-page">
-    ${group("Waiting for your review", "Nothing is waiting for you.", tiered(S.reviews, reviewRow), S.reviews.length, "review")}
+    ${reviewGroup()}
     ${group("In progress", "Nothing is merging right now.", moving.filter((r) => firstOfPair(r, moving)).map((r) => queueRow(r)), moving.length)}
     ${group("Approved, waiting their turn", "Nothing approved is waiting.", tiered(waiting, queueRow), waiting.length, "pr")}
     ${done.length ? group("Deployed today", "", done.map((r) => queueRow(r)), done.length) : ""}
@@ -789,6 +809,7 @@ document.addEventListener("click", async (e) => {
   if (d.to && S.compose) { S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
   if (d.queue !== undefined) { S.view = "queue"; S.phoneList = false; return render(); }
+  if (d.reviewFilter !== undefined) { S.reviewFilter = d.reviewFilter; local.set("reviewFilter", S.reviewFilter); return renderMain(); }
   if (d.allTopics !== undefined) { S.allTopics = !S.allTopics; local.set("allTopics", S.allTopics); S.scrollTo = "end"; return renderMain(); }
   if (d.reviewing) {
     // "I'm on it": the sender hears through Dak, and the PR stays waiting on you.

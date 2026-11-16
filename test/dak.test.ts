@@ -499,6 +499,33 @@ describe("waking a closed session", () => {
   });
 });
 
+describe("waiting on you, by type", () => {
+  test("PRs, briefs and decisions in one order; updates and approved PRs stay out; a question after approval is a decision; blocks show", async () => {
+    writeFileSync(join(repo, "d2.diff"), "diff --git a/q.ts b/q.ts\n--- a/q.ts\n+++ b/q.ts\n@@ -1 +1 @@\n-a\n+b\n");
+    const send = (...a: string[]) => { const r = dak("send", "--to", "zari", "--from", "atlas", ...a, "--json"); if (r.code) throw new Error(r.out + r.err); return r.json().thread.id; };
+    const pr = send("--diff", "d2.diff", "--subject", "A PR", "--option", "Approve", "--option", "Hold"); // buttons on a PR: still a PR
+    const brief = send("--subject", "The brief", "--link", "https://example.com/mock", "Read this", "--blocks", "Rohan, #2433");
+    const ask = send("--subject", "Which way?", "Pick one", "--option", "A", "--option", "B");
+    send("--subject", "FYI", "Tests running", "--fyi");
+    const merged = send("--diff", "d2.diff", "--subject", "Approved PR");
+    dak("reply", merged, "--from", "zari", "--verdict", "approve", "ok");
+    const after = send("--diff", "d2.diff", "--subject", "Approved then asked");
+    dak("reply", after, "--from", "zari", "--verdict", "approve", "ok");
+    dak("reply", after, "--from", "atlas", "Merge now or after the pair?", "--option", "Now", "--option", "After");
+    const typed = send("--subject", "Spec", "Please read", "--type", "brief");
+    const list = (await (await http("/v1/reviews?for=zari")).json()) as any[];
+    const byId = new Map(list.map((r) => [r.thread_id, r]));
+    expect(byId.get(pr).type).toBe("pr");
+    expect(byId.get(brief)).toMatchObject({ type: "brief", blocks: "Rohan, #2433" });
+    expect(byId.get(ask).type).toBe("decision");
+    expect(byId.get(after).type).toBe("decision");
+    expect(byId.get(typed).type).toBe("brief");
+    expect(byId.has(merged)).toBe(false);
+    expect(list.some((r) => r.subject === "FYI")).toBe(false);
+    expect(dak("send", "--to", "zari", "--from", "atlas", "--subject", "x", "y", "--type", "doc", "--json").json().error.code).toBe("bad_type");
+  });
+});
+
 describe("the phone", () => {
   test("only the phone's key gets in through its tunnel; it cannot change the Mac's setup; signing out locks the old key out", async () => {
     const { writeFileSync: wf } = await import("node:fs");

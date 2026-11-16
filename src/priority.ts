@@ -13,6 +13,10 @@ export interface Priority { tier: Tier; rank: number | null; why: string | null;
 
 export function ensurePriority() {
   const s = store();
+  // The queue may not exist yet (a review priority set before anything was queued).
+  s.exec(`CREATE TABLE IF NOT EXISTS queue (
+    pr INTEGER PRIMARY KEY, title TEXT NOT NULL, head TEXT, migration TEXT, state TEXT NOT NULL,
+    note TEXT, thread_id TEXT, added_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
   const cols = new Set((s.query("PRAGMA table_info(queue)").all() as { name: string }[]).map((c) => c.name));
   for (const [c, type] of [["tier", "TEXT NOT NULL DEFAULT 'normal'"], ["rank", "INTEGER"], ["why", "TEXT"], ["rank_by", "TEXT"], ["waiting", "TEXT"], ["pair_id", "TEXT"]]) {
     if (!cols.has(c)) s.exec(`ALTER TABLE queue ADD COLUMN ${c} ${type}`);
@@ -20,6 +24,10 @@ export function ensurePriority() {
   // Review order lives on the thread: a PR waiting for review is not in the merge queue yet.
   s.exec(`CREATE TABLE IF NOT EXISTS review_order (thread_id TEXT PRIMARY KEY, tier TEXT NOT NULL DEFAULT 'normal',
     rank INTEGER, why TEXT, rank_by TEXT, updated_at TEXT NOT NULL)`);
+  // type: what kind of answer the agent says it needs; blocks: what the answer releases.
+  const rcols = new Set((s.query("PRAGMA table_info(review_order)").all() as { name: string }[]).map((c) => c.name));
+  if (!rcols.has("type")) s.exec("ALTER TABLE review_order ADD COLUMN type TEXT");
+  if (!rcols.has("blocks")) s.exec("ALTER TABLE review_order ADD COLUMN blocks TEXT");
 }
 
 export function tierOf(v: string | undefined): Tier | undefined {
@@ -124,6 +132,25 @@ function threadFor(ref: string): string {
   return id;
 }
 
+export const REVIEW_TYPES = ["pr", "brief", "decision"] as const;
+export function reviewTypeOf(v: string | undefined) {
+  if (v === undefined) return undefined;
+  if (!REVIEW_TYPES.includes(v as any)) throw new DakError("bad_type", "A type is pr, brief or decision. (A doc, spec or mock is a brief; an update needs --fyi, not a type.)");
+  return v;
+}
+
+// What the agent knows about the ask: its type and what the answer releases. Anyone may set these.
+export function describeReview(ref: string, v: { type?: string; blocks?: string }) {
+  if (v.type === undefined && v.blocks === undefined) return;
+  ensurePriority();
+  const id = threadFor(ref);
+  const blocks = v.blocks === undefined ? null : ["", "none"].includes(v.blocks.trim()) ? "" : v.blocks.trim();
+  store().query(`INSERT INTO review_order (thread_id, tier, type, blocks, updated_at) VALUES (?, 'normal', ?, ?, ?)
+    ON CONFLICT(thread_id) DO UPDATE SET type = coalesce(?, type), blocks = CASE WHEN ? IS NULL THEN blocks WHEN ? = '' THEN NULL ELSE ? END, updated_at = ?`)
+    .run(id, reviewTypeOf(v.type) ?? null, blocks || null, new Date().toISOString(), reviewTypeOf(v.type) ?? null, blocks, blocks, blocks, new Date().toISOString());
+  touchQueue();
+}
+
 export function prioritizeReview(ref: string, by: string, v: { tier?: Tier; why?: string; rank?: number }) {
   ensurePriority();
   const id = threadFor(ref);
@@ -153,13 +180,14 @@ export function orderReviews(refs: string[], by: string, opts: { tier?: Tier } =
   return { ordered, kept };
 }
 
-export type OrderedReview = AwaitingReview & Priority;
+export type OrderedReview = AwaitingReview & Priority & { type: string; blocks: string | null };
 export function reviewsInOrder(reader: string): OrderedReview[] {
   ensurePriority();
   const pr = new Map((store().query("SELECT * FROM review_order").all() as any[]).map((r) => [r.thread_id, r]));
-  return awaitingReview(reader).map((r) => {
+  const typed = new Map([...pr].filter(([, r]) => r.type).map(([id, r]) => [id, r.type as string]));
+  return awaitingReview(reader, typed).map((r) => {
     const p = pr.get(r.thread_id);
-    return { ...r, tier: (p?.tier ?? "normal") as Tier, rank: p?.rank ?? null, why: p?.why ?? null, rank_by: p?.rank_by ?? null };
+    return { ...r, tier: (p?.tier ?? "normal") as Tier, rank: p?.rank ?? null, why: p?.why ?? null, rank_by: p?.rank_by ?? null, blocks: p?.blocks ?? null };
   }).sort((a, b) => byPriority(a, b, (x, y) => x.waiting_since.localeCompare(y.waiting_since)));
 }
 
