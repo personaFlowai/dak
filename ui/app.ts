@@ -914,6 +914,8 @@ document.addEventListener("click", async (e) => {
     $(".psheet-body")?.scrollTo({ top: 0 });
     return;
   }
+  // The file's Reviewed on a phone: a big button in the sheet's bar, not a tiny box in a pinned header.
+  if (d.toggleViewed && S.att) { setViewed(S.att, [d.toggleViewed], !viewed(S.att).has(d.toggleViewed)); return renderMain(); }
   if (d.phoneTab) { S.phoneTab = d.phoneTab as any; S.phoneFile = null; renderMain(); $(".phone-pr")?.scrollTo({ top: 0 }); return; }
   if (d.gotoFile) {
     // Bring the file to the top of the code column, under any pinned header.

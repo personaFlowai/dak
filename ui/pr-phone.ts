@@ -73,5 +73,7 @@ export function phoneSheet(a: Pr, files: DiffFile[], done: Set<number>, fileSect
     <header class="psheet-top"><div>${ch ? `<b>${esc(ch.title)}</b><div class="pch-meta"><span>${pad(S.phoneFileChapter + 1)} / ${pad(chapters.length)}</span>
       <label class="viewed-box"><input type="checkbox" data-chapter-reviewed="${S.phoneFileChapter}" ${done.has(S.phoneFileChapter) ? "checked" : ""}> Reviewed</label></div>` : `<b>All changes</b>`}</div>
       <button class="icon-btn psheet-x" data-phone-file="" aria-label="Close">${I.close}</button></header>
+    <div class="psheet-file"><span class="pf-name"><b>${esc(path.split("/").pop()!)}</b></span>
+      <button class="pf-toggle ${viewed(a.id).has(path) ? "on" : ""}" data-toggle-viewed="${esc(path)}" aria-pressed="${viewed(a.id).has(path)}">${viewed(a.id).has(path) ? `${I.check} Reviewed` : "Mark reviewed"}</button></div>
     <div class="psheet-body">${fileSection(a, f, path, starts)}</div></div>`;
 }

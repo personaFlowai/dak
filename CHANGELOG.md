@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.7
+- Phone: a file's Reviewed is now a large button in the sheet's bar under the chapter title. The small box in the pinned file header did not take taps on iPhone.
+
 ## 0.3.6
 - Phone PR view: Overview and Chapters (the separate Diff tab is gone); the page scrolls, and keeps its place when a file sheet closes; Start reading and the risk rows go to that chapter; the Ask button opens on the first tap; no zooming in the home-screen app.
 

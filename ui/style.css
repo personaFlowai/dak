@@ -886,7 +886,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .pf-open span { color: var(--text3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .pf-row .n { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pf-row .n .a { color: var(--accent-text); } .pf-row .n .d { color: var(--danger-text); }
-.pf-row input { width: 18px; height: 18px; }
+.pf-row input { width: 22px; height: 22px; margin: 0; }
 .psheet { position: fixed; left: 0; right: 0; top: 44px; bottom: 0; z-index: 30; display: flex; flex-direction: column; background: var(--win); border-radius: 14px 14px 0 0; box-shadow: 0 -8px 30px -12px rgba(0,0,0,.45); }
 .psheet-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line2); }
 .psheet-top b { font-size: 14px; }
@@ -910,3 +910,10 @@ body { overflow-x: hidden; }
 /* No zoom in the home-screen app: type fields at 16px (iOS zooms below that) and no double-tap zoom. */
 .app.phone textarea, .app.phone input, .app.phone select { font-size: 16px; }
 html { touch-action: manipulation; }
+.psheet-file { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line2); }
+.psheet-file .pf-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.pf-toggle { flex: none; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.pf-toggle.on { background: var(--accent-tint); border-color: var(--accent-tint2); color: var(--accent-text); }
+.pf-toggle svg { width: 14px; height: 14px; }
+.psheet .fhead .viewed-box { display: none; }
+.psheet .fhead { position: static; }
