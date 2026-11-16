@@ -2,10 +2,11 @@
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
+import qrcode from "qrcode-generator";
 import {
   S, me, esc, $, name, mark, when, standing, approvedNow, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
   setViewed, viewed, chapterFiles, keepUnsent, helperLabel, agentOf, type Summary, type AgentRow,
-  fullWhen, sizeLabel, opensInPane,
+  fullWhen, sizeLabel, opensInPane, onPhone,
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending } from "./doc";
@@ -41,7 +42,7 @@ async function openThread(id: string, keep = false) {
   const peer = peerOf({ ...data.thread, participants: data.participants?.map((p) => p.name) });
   S.scrollTo = peer !== S.peer || S.view !== "thread" ? "end" : changed ? id : S.scrollTo;
   if (peer !== S.peer || changed) { S.newTopic = false; S.newSubject = ""; }
-  S.cur = id; S.data = data; S.view = "thread"; S.peer = peer;
+  S.cur = id; S.data = data; S.view = "thread"; S.peer = peer; S.phoneList = false;
   if (changed || !keep) {
     S.paneClosed = false; useAtt(defaultAtt()); S.sel = null; S.editing = null; S.askContext = null; S.sendError = ""; S.sendNote = ""; S.pane = "chat";
     clearPending();
@@ -60,6 +61,7 @@ async function openPeer(peer: string) {
 
 async function loadSettings() {
   try { S.door = await api("/door"); } catch { /* the door section says closed */ }
+  try { S.phone = await api("/phone"); } catch { /* the phone section says closed */ }
   try { S.settings = await api("/settings"); } catch { /* the settings view says so */ }
 }
 
@@ -154,20 +156,22 @@ function render() {
 
 function renderSide() {
   const review = S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "");
-  $("#app")!.classList.toggle("side-closed", S.focus && review ? !S.focusSide : !S.sideOpen);
+  $("#app")!.classList.toggle("phone", onPhone());
+  $("#app")!.classList.toggle("side-closed", onPhone() ? !S.phoneList : S.focus && review ? !S.focusSide : !S.sideOpen);
   $("#side")!.innerHTML = `
     <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
     <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.reviews.length ? `<span class="count you" title="Waiting for your review">${S.reviews.length}</span>` : ""}</button>
     <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
     <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>
-    <div class="side-foot"><button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
+    <div class="side-foot" ${(window as any).DAK?.phone ? "hidden" : ""}><button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
     <div class="splitter" data-split="side" title="Drag to resize"></div>`;
   postControls();
 }
 
 function toolbar(title: string, sub = "", right = ""): string {
   return `<header class="toolbar">
-    <button class="icon-btn" data-toggle-side title="${S.sideOpen ? "Hide" : "Show"} sidebar (⌘\\)" aria-label="Toggle sidebar">${I.sidebar}</button>
+    ${onPhone() ? `<button class="icon-btn back" data-phone-back aria-label="Back">${I.prev}</button>`
+      : `<button class="icon-btn" data-toggle-side title="${S.sideOpen ? "Hide" : "Show"} sidebar (⌘\\)" aria-label="Toggle sidebar">${I.sidebar}</button>`}
     <div class="title"><b>${title}</b>${sub ? `<span>${sub}</span>` : ""}</div>
     <div class="tools">${right}</div></header>`;
 }
@@ -233,7 +237,7 @@ function threadView(): string {
     : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${topicMenu(t.subject)}${roles()}`, right);
   if (!review) return head + `<div class="solo-wrap">${chatPane(t, false)}</div>`;
   // Focus: chapters and code only; the reply floats at the bottom until you open it.
-  if (S.focus) return head + `<div class="focus-wrap"><div class="pane-body review">${reviewBody(a!)}</div>
+  if (S.focus || onPhone()) return head + `<div class="focus-wrap"><div class="pane-body review">${reviewBody(a!)}</div>
     ${S.pane === "ask" && S.dockOpen ? `<div class="dock open ask-dock"><div class="dock-top"><span>Ask ${esc(helperLabel())}</span><button type="button" class="link" data-pane="chat">Hide</button></div>${askPane(t)}</div>`
       : canReply(t) ? `<div class="dock ${S.dockOpen ? "open" : ""}">${composer(t, true)}</div>` : ""}</div>`;
   return head + `<div class="split">${chatPane(t, true)}<div class="pane-body review">${reviewBody(a!)}</div></div>`;
@@ -342,6 +346,23 @@ function queueView(): string {
   </div></div>`;
 }
 
+/* Your phone: one code to scan, then Dak opens on the phone from anywhere. The code carries
+   a key; whoever holds it can act as you in Dak, so it shows only here, and "Sign out phone"
+   replaces the key. */
+function phoneView(): string {
+  const p = S.phone ?? { open: false };
+  const head = `<section><h2>Your phone</h2><p class="lead">See the merge queue and PRs, approve and reply, from your phone while away from this Mac. Your Mac has to be on, awake and running Dak.</p>`;
+  if (p.opening) return head + `<p class="lead">Starting the private link. This takes up to half a minute.</p></section>`;
+  if (p.error) return head + `<p class="err">${esc(p.error)}</p><button class="btn primary" data-phone="open">Try again</button></section>`;
+  if (!p.open || !p.link) return head + `<div class="conn sub"><span class="nm"><b>Open Dak on your phone</b><span>Starts a private link from this Mac through Cloudflare (no account needed). You scan a code once; only a phone with that code gets in. Nothing else on this Mac is reachable through it.</span></span>
+    <button class="btn primary" data-phone="open">Open on phone</button></div></section>`;
+  const qr = qrcode(0, "M"); qr.addData(p.link); qr.make();
+  return head + `<div class="phone-pair"><div class="qr">${qr.createSvgTag({ cellSize: 4, margin: 3, scalable: true })}</div>
+    <div class="nm"><b>Scan with your phone's camera</b><span>Then add it to your home screen (Share → Add to Home Screen) to open it like an app. The code works once per phone and is a key: don't share it.</span>
+      <span class="muted">Address: ${esc(p.url)}</span>
+      <div class="row"><button class="btn" data-phone="close">Close the link</button><button class="btn" data-phone="signout" title="A new key: phones signed in now are signed out">Sign out phone</button></div></div></div></section>`;
+}
+
 function reviewBody(a: any): string {
   const body = a.type === "pr" ? prView(a) : a.type === "doc" ? docView(a) : mediaView(a);
   return paneHead(a) + body;
@@ -355,10 +376,10 @@ function paneHead(a: any): string {
   const title = a.type === "pr" ? (a.meta.title ? `${a.name} · ${a.meta.title}` : a.name) : a.name;
   const versions = same.length > 1 ? `<label class="popup"><select id="version" aria-label="Version">${same.map(({ x, m }, n) => `<option value="${x.id}" ${x.id === a.id ? "selected" : ""}>Version ${n + 1} of ${same.length} · ${when(m.created_at)}</option>`).join("")}</select></label>${i < same.length - 1 ? `<button class="link" data-att="${same[same.length - 1].x.id}">Newest</button>` : ""}` : "";
   // Words, not an icon: "Unified" and "Split" say exactly what they do.
-  const splitBtn = a.type === "pr" ? `<div class="seg mini" role="group" aria-label="Diff layout"><button type="button" data-split-view="0" aria-pressed="${!S.split}">Unified</button><button type="button" data-split-view="1" aria-pressed="${S.split}">Split</button></div>` : "";
+  const splitBtn = a.type === "pr" && !onPhone() ? `<div class="seg mini" role="group" aria-label="Diff layout"><button type="button" data-split-view="0" aria-pressed="${!S.split}">Unified</button><button type="button" data-split-view="1" aria-pressed="${S.split}">Split</button></div>` : "";
   const findBtn = a.type === "pr" && !S.find.open ? `<button class="icon-btn" data-find-open title="Find in this PR (⌘F)" aria-label="Find in this PR">${I.search}</button>` : "";
   // Expand and close sit together: both act on this pane, not on the conversation.
-  const focusBtn = `<button class="icon-btn" data-focus title="${S.focus ? "Show the conversation (F)" : "Focus on the review (F)"}" aria-label="${S.focus ? "Leave focus" : "Focus"}">${S.focus ? I.collapse : I.expand}</button>`;
+  const focusBtn = onPhone() ? "" : `<button class="icon-btn" data-focus title="${S.focus ? "Show the conversation (F)" : "Focus on the review (F)"}" aria-label="${S.focus ? "Leave focus" : "Focus"}">${S.focus ? I.collapse : I.expand}</button>`;
   // Stacked: the PR below this one, which should be approved first.
   const st = a.type === "pr" ? a.meta.stacked_on : null;
   const stack = st ? (st.thread ? `<button class="stack" data-topic="${esc(st.thread)}" title="Open the PR this one is stacked on">Stacked on ${st.number ? `#${st.number}` : esc(st.branch)}</button>`
@@ -543,6 +564,8 @@ function settingsView(): string {
       <div class="conn sub"><span class="nm"><b>Teach Cursor to use Dak</b><span>Cursor keeps its global rules in Settings → Rules → User Rules. Copy the instructions and paste them there. For any other agent, the same text comes from <code>dak skill --plain</code>.</span></span>
         <button class="btn" data-copy-instructions>Copy instructions</button></div>
       ${doorView()}</section>
+
+    ${phoneView()}
 
     ${native ? `<section><h2>Start at login</h2><div class="conn"><span class="mark md">${I.check}</span><span class="nm"><b>Open Dak when you log in</b><span>${S.login === "approve" ? "macOS needs your OK: System Settings → General → Login Items → allow Dak." : "Keeps Dak running from the moment you log in, so new mail always shows a banner."}</span></span>
       <label class="check"><input type="checkbox" data-login ${S.login === "on" || S.login === "approve" ? "checked" : ""}> ${S.login === "on" ? "On" : S.login === "approve" ? "Waiting for macOS" : "Off"}</label></div></section>` : ""}
@@ -755,6 +778,7 @@ document.addEventListener("click", async (e) => {
   if (d.askOpen !== undefined) return openAsk();
   if (d.dock) { S.dockOpen = d.dock === "open"; renderMain(); if (S.dockOpen) $<HTMLTextAreaElement>("#message")?.focus(); return; }
   if (d.toggleSide !== undefined) return toggleSide();
+  if (d.phoneBack !== undefined) { S.phoneList = true; return render(); }
   if (d.unfold) { const k = `${S.att}:${d.unfold}`; S.unfold.has(k) ? S.unfold.delete(k) : S.unfold.add(k); return renderMain(); }
   if (d.finish === "approve") return send("approve");
   if (d.finish === "changes") { S.verdict[S.cur!] = "changes"; keepUnsent(); return writeReview(); }
@@ -764,7 +788,7 @@ document.addEventListener("click", async (e) => {
   if (d.closeCompose !== undefined) { S.compose = null; S.view = "thread"; return render(); }
   if (d.to && S.compose) { S.compose.to = d.to; S.compose.error = ""; local.set("compose", { ...S.compose }); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
-  if (d.queue !== undefined) { S.view = "queue"; return render(); }
+  if (d.queue !== undefined) { S.view = "queue"; S.phoneList = false; return render(); }
   if (d.allTopics !== undefined) { S.allTopics = !S.allTopics; local.set("allTopics", S.allTopics); S.scrollTo = "end"; return renderMain(); }
   if (d.reviewing) {
     // "I'm on it": the sender hears through Dak, and the PR stays waiting on you.
@@ -772,6 +796,13 @@ document.addEventListener("click", async (e) => {
     await loadList(); return render();
   }
   if (d.settings !== undefined) { S.view = "settings"; askLogin(); render(); await Promise.all([loadSettings(), loadAgents(true)]); return render(); }
+  if (d.phone) {
+    if (d.phone === "open") {
+      S.phone = { opening: true }; renderMain();
+      try { S.phone = await api("/phone", { method: "POST" }); } catch (err: any) { S.phone = { error: err.message }; }
+    } else S.phone = await api(`/phone${d.phone === "signout" ? "?signout=1" : ""}`, { method: "DELETE" });
+    return renderMain();
+  }
   if (d.door) {
     if (d.door === "close") { await api("/door?revoke=", { method: "DELETE" }); S.door = { open: false }; return renderMain(); }
     S.door = { ...(S.door ?? {}), opening: true }; renderMain();
@@ -1204,5 +1235,7 @@ function listen() {
   const first = target?.id ?? (S.threads[0] ? topicFor(peerOf(S.threads[0])) : null);
   if (first) await openThread(first);
   else { if (!local.get("welcomed", false)) S.view = "welcome"; render(); }
+  // A phone opens on the list, merge queue first, unless the link named a thread.
+  if (onPhone() && !mine.some((t) => t.id === fromHash)) { S.view = "queue"; S.phoneList = true; render(); }
   listen();
 })();

@@ -1,5 +1,6 @@
 import { buildCost, parseParticipant } from "./handoff";
 import { tickRunners } from "./reviewer";
+import { closePhone, cookieKey, isPhoneKey, openPhone, phoneHost, phoneMayNot, phoneStatus } from "./phone";
 import { recentWakes, settleWakes, tickSleepers } from "./sleeper";
 import { next, queue, queueStamp, removeQueue, setQueue } from "./queue";
 import { orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
@@ -69,6 +70,10 @@ export function serve(port?: number) {
       if (url.pathname.startsWith("/x/")) {
         try { return await outside(req, url); } catch (e) { return fail(e); }
       }
+      // Through the phone tunnel: only a request carrying the phone's key gets anywhere.
+      if (!allowedHosts.has(req.headers.get("host") ?? "") || req.headers.has("cf-ray")) {
+        try { return await phoneRequest(req, url); } catch (e) { return fail(e); }
+      }
       // A page on another site can point a request here (or rebind a domain to
       // 127.0.0.1); checking Host and Origin refuses both before anything runs.
       if (!allowedHosts.has(req.headers.get("host") ?? "")) return new Response("Wrong host", { status: 403 });
@@ -93,6 +98,38 @@ export function serve(port?: number) {
       }
     },
   });
+}
+
+/* The person's phone, through its tunnel. The first visit is the link from the QR code,
+   /m?k=<key>, which sets a cookie and drops the key from the address. After that every
+   request must carry the key (the cookie, or the page's own Authorization header). The
+   page is the same one the Mac shows, told it is on a phone. */
+async function phoneRequest(req: Request, url: URL): Promise<Response> {
+  const host = req.headers.get("host") ?? "";
+  const ph = phoneHost();
+  if (!ph || host !== ph) return new Response("Wrong host", { status: 403 });
+  const origin = req.headers.get("origin");
+  if (origin && origin !== `https://${ph}`) return new Response("Wrong origin", { status: 403 });
+  if (url.pathname === "/m") {
+    const k = url.searchParams.get("k");
+    if (!isPhoneKey(k)) return new Response("This link has expired. Scan the code in Dak's Settings again.", { status: 401 });
+    return new Response(null, { status: 303, headers: { location: "/",
+      "set-cookie": `dak_phone=${encodeURIComponent(k!)}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax` } });
+  }
+  const bearer = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
+  const key = isPhoneKey(bearer) ? bearer : isPhoneKey(cookieKey(req)) ? cookieKey(req) : null;
+  if (!key) return new Response("Sign in by scanning the code in Dak's Settings on your Mac.", { status: 401 });
+  if (url.pathname === "/" || url.pathname === "/index.html") {
+    const c = loadConfig();
+    const boot = `<script>window.DAK=${JSON.stringify({ token: key, me: person(c), readers: c.readers, phone: true })}</script>`;
+    return new Response(asset("index.html", indexHtml as unknown as string).replace("<!--BOOT-->", boot), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  }
+  if (url.pathname === "/app.js") return new Response(asset("app.js", appJs), { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } });
+  if (url.pathname === "/style.css") return new Response(asset("style.css", styleCss), { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "no-cache" } });
+  if (!url.pathname.startsWith("/v1/")) return new Response("Not found", { status: 404 });
+  const parts = url.pathname.split("/").filter(Boolean).slice(1);
+  if (phoneMayNot(req.method, parts)) throw new DakError("not_from_phone", "That is set on the Mac, not from the phone.", 403);
+  return await api(req, url);
 }
 
 // The only routes reachable through a tunnel. The caller is whoever its agent key
@@ -359,6 +396,13 @@ async function api(req: Request, url: URL): Promise<Response> {
       return json(withInstructions(await openDoor(agent, c.port, b.tool === "ngrok" ? "ngrok" : "cloudflare")));
     }
     if (method === "DELETE") { const s = doorStatus() as any; closeDoor(); if (s.agent && url.searchParams.get("revoke")) revokeKey(s.agent); return json({ open: false }); }
+  }
+
+  // Opening Dak on the phone: Settings starts the tunnel and shows the link as a code to scan.
+  if (parts[0] === "phone") {
+    if (method === "GET") return json(phoneStatus());
+    if (method === "POST") return json(await openPhone(loadConfig().port));
+    if (method === "DELETE") { closePhone(q.get("signout") === "1"); return json(phoneStatus()); }
   }
 
   if (parts[0] === "agents" && method === "GET") return json(agents({ scan: q.get("scan") === "1" }));

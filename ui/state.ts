@@ -16,12 +16,18 @@ export type View = "thread" | "compose" | "settings" | "welcome" | "queue";
 
 export const me = boot.me;
 
+/* On a phone (through the phone link, or any narrow screen) Dak is two screens: the list
+   (merge queue first, then agents) and whatever you opened from it, with a back button.
+   A PR or doc opens full-screen with the reply floating at the bottom. */
+export const onPhone = () => !!(window as any).DAK?.phone || matchMedia("(max-width: 760px)").matches;
+
 export const S = {
   view: "thread" as View,
   focus: local.get("focus", false), // review fills the window; the reply floats at the bottom
   dockOpen: false,
   paneClosed: false, // you closed the PR or doc beside the chat; a card reopens it
   door: null as any, // the tunnel for a remote agent, when open
+  phone: null as any, // the private link to your phone: { open, url, link } or { opening } or { error }
   sideOpen: local.get("sideOpen", true),
   focusSide: false, // focus hides the sidebar; the sidebar button can still bring it back
   unfold: new Set<string>(), // reviewed files opened again, as "attachment:path"
@@ -46,6 +52,7 @@ export const S = {
   find: { open: false, q: "", i: 0, list: false }, // find in the open PR
   archived: {} as Record<string, string>, // conversation (agent, or "a+b") → when you archived it
   showArchived: false,
+  phoneList: true, // on a phone: the list is showing, not what was opened from it
   queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string;
     state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null;
     tier: string; rank: number | null; why: string | null; rank_by: string | null; pair_id: string | null; waiting_reason: string | null }[],

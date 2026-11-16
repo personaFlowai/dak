@@ -1,5 +1,5 @@
 import { local } from "./api";
-import { esc, S, me, name, chaptersOf, reviewed, viewed, chapterFiles, drafts, findAtt, when, mark, helperMark, plain, type Pr, type Sel } from "./state";
+import { esc, S, me, name, chaptersOf, reviewed, viewed, chapterFiles, drafts, findAtt, when, mark, helperMark, plain, onPhone, type Pr, type Sel } from "./state";
 import { hunkStart, type DiffFile, type Hunk } from "../src/diff";
 import type { Anchor, Chapter } from "../src/types";
 import { highlightLine } from "./hl";
@@ -151,7 +151,7 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
   const isMd = /\.md$/i.test(path) && !!pf?.new_blob && S.docs.has(pf.new_blob);
   const preview = isMd && S.fileMode[`${a.id}:${path}`] !== "diff" && S.fileMode[`${a.id}:${path}`] !== "full";
   // Side by side applies to the changes; the whole file is one column by nature.
-  const split = S.split && mode !== "full";
+  const split = S.split && mode !== "full" && !onPhone(); // a phone is too narrow for two columns
   cols = split ? 6 : 3;
   const rows = folded || preview ? "" : mode === "full" ? fullRows(a, df, path, full!) : split ? splitRows(a, path, hunks, full) : diffRows(a, path, hunks, full);
   return `<section class="fcard ${seen ? "viewed" : ""}" data-file="${esc(path)}">

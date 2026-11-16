@@ -499,6 +499,40 @@ describe("waking a closed session", () => {
   });
 });
 
+describe("the phone", () => {
+  test("only the phone's key gets in through its tunnel; it cannot change the Mac's setup; signing out locks the old key out", async () => {
+    const { writeFileSync: wf } = await import("node:fs");
+    // A stand-in tunnel: a live process and a log that names the address.
+    const fakeTunnel = Bun.spawn(["sleep", "60"]);
+    wf(join(home, "phone.json"), JSON.stringify({ pid: fakeTunnel.pid, url: "https://test-phone.trycloudflare.com", started_at: "now" }));
+    wf(join(home, "phone-tunnel.log"), "https://test-phone.trycloudflare.com\nRegistered tunnel connection");
+    const { phoneKey } = await import("../src/phone");
+    const key = phoneKey();
+    const via = (path: string, init: RequestInit = {}) => fetch(base + path, { ...init, redirect: "manual",
+      headers: { host: "test-phone.trycloudflare.com", "cf-ray": "x", ...(init.headers ?? {}) } });
+    expect((await via("/")).status).toBe(401);
+    expect((await via(`/v1/queue`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(401); // the Mac's token is not the phone's
+    expect((await via("/m?k=wrong")).status).toBe(401);
+    const signin = await via(`/m?k=${key}`);
+    expect(signin.status).toBe(303);
+    const cookie = signin.headers.get("set-cookie")!.split(";")[0];
+    expect(signin.headers.get("set-cookie")).toContain("HttpOnly");
+    const page = await (await via("/", { headers: { cookie } })).text();
+    expect(page).toContain('"phone":true');
+    expect(page).not.toContain(token);
+    expect((await via("/v1/queue", { headers: { cookie } })).status).toBe(200);
+    expect((await via("/v1/settings", { method: "PUT", headers: { cookie, "content-type": "application/json" }, body: "{}" })).status).toBe(403);
+    expect((await via("/v1/phone", { method: "POST", headers: { cookie } })).status).toBe(403);
+    // Another tunnel's host gets nothing.
+    expect((await fetch(base + "/", { headers: { host: "other.trycloudflare.com", "cf-ray": "x", cookie } })).status).toBe(403);
+    // Sign out on the Mac: a new key, the tunnel closed, the old cookie refused.
+    expect((await http("/v1/phone?signout=1", { method: "DELETE" })).status).toBe(200);
+    await fakeTunnel.exited;
+    expect((await via("/v1/queue", { headers: { cookie } })).status).toBe(403);
+    expect(phoneKey()).not.toBe(key);
+  });
+});
+
 describe("PRs", () => {
   test("chapters check names the hunk that is in no chapter", () => {
     writeFileSync(join(repo, "ch.json"), JSON.stringify([{ title: "Return ten", summary: "", risk: "low", hunks: [{ file: "taps.ts", start: 1 }] }]));
