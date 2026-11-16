@@ -377,7 +377,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let url = action.request.url, url.host != "127.0.0.1", url.scheme?.hasPrefix("http") == true {
+        guard let url = action.request.url else { return decisionHandler(.allow) }
+        if url.host != "127.0.0.1", url.scheme?.hasPrefix("http") == true {
+            NSWorkspace.shared.open(url)
+            return decisionHandler(.cancel)
+        }
+        // The window only ever shows Dak's own page. Anything else it is pointed at (a file,
+        // a download) opens in the browser instead: once the window left, nothing on screen
+        // could bring it back.
+        if action.targetFrame?.isMainFrame != false, url.host == "127.0.0.1", url.path != "/" && !url.path.isEmpty {
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
         }

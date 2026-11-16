@@ -5,7 +5,7 @@ import { api, local } from "./api";
 import {
   S, me, esc, $, name, mark, when, standing, approvedNow, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
   setViewed, viewed, chapterFiles, keepUnsent, helperLabel, agentOf, type Summary, type AgentRow,
-  fullWhen, sizeLabel,
+  fullWhen, sizeLabel, opensInPane,
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending } from "./doc";
@@ -205,7 +205,7 @@ function renderMain() {
 function threadView(): string {
   const t = S.data!.thread;
   const a = findAtt(S.att);
-  const media = a?.type === "file" && /^(image|video)\//.test(a.meta.mime);
+  const media = a?.type === "file" && opensInPane(a.meta.mime);
   const review = a?.type === "pr" || a?.type === "doc" || media;
   const other = t.to === me ? t.from : t.from === me ? t.to : t.from;
   const st = status(t);
@@ -262,20 +262,49 @@ function span(iso: string): string {
 function left(eta: string | null): string {
   if (!eta) return "";
   const m = Math.round((Date.parse(eta) - Date.now()) / 60000);
-  return m >= 1 ? `<span class="eta">about ${m} min left</span>` : m > -1 ? `<span class="eta">finishing now</span>` : `<span class="eta over">${-m} min over</span>`;
+  const dur = (n: number) => n < 60 ? `${n} min` : `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ""}`;
+  return m >= 1 ? `<span class="eta">about ${dur(m)} left</span>` : m > -1 ? `<span class="eta">finishing now</span>` : `<span class="eta over">${dur(-m)} over</span>`;
 }
 const prTitle = (pr: number | null, title: string, thread: string | null) =>
   `${pr ? `<span class="qnum">#${pr}</span>` : ""}${thread ? `<button class="link qtitle" data-topic="${esc(thread)}">${esc(title)}</button>` : `<span class="qtitle">${esc(title)}</span>`}`;
 
-function queueRow(r: (typeof S.queue)[number]): string {
-  const approved = r.approval ? `Approved by you ${when(r.approval.at)}` : `<span class="warn">No approval from you on Dak</span>`;
-  const meta = [approved, sizeLabel(r.size), r.head ? `<code>${esc(r.head.slice(0, 8))}</code>` : "", r.migration ? `migration <code>${esc(r.migration)}</code>` : ""].filter(Boolean).join(" · ");
-  const blocker = r.after_pr ? S.queue.find((x) => x.pr === r.after_pr) : null;
-  const waitFor = r.after_pr ? ` · after #${r.after_pr}${blocker ? ` (${STATE_WORD[blocker.state].toLowerCase()})` : ""}` : "";
+type QRow = (typeof S.queue)[number];
+const TIER_WORD: Record<string, string> = { urgent: "Urgent", normal: "Normal", later: "Later" };
+
+// The tier menu on a row: the person can move it between urgent, normal and later.
+const tierMenu = (kind: "pr" | "review", id: string | number, tier: string) =>
+  `<label class="tier-pick ${tier}" title="Priority"><span>${TIER_WORD[tier] ?? tier}</span><select data-tier-${kind}="${esc(String(id))}" aria-label="Priority">${Object.entries(TIER_WORD).map(([k, w]) =>
+    `<option value="${k}" ${k === tier ? "selected" : ""}>${w}</option>`).join("")}</select></label>`;
+
+// Who placed the row: Atlas's order, or yours (which Atlas's reordering leaves alone).
+const placedBy = (by: string | null) => by === me ? `<span class="placed" title="You placed this; agents' reordering leaves it here">placed by you</span>` : "";
+
+function queueRow(r: QRow, pos?: number): string {
+  // A pair is one row: both PRs, tested and merged together.
+  const mates = r.pair_id ? S.queue.filter((x) => x.pair_id === r.pair_id) : [r];
+  const approved = mates.every((m) => m.approval) ? `Approved by you ${when(r.approval!.at)}` : `<span class="warn">No approval from you on Dak${mates.length > 1 ? " for one of the pair" : ""}</span>`;
+  const size = mates.length > 1 && mates.some((m) => m.size) ? sizeLabel(mates.reduce((z, m) => m.size ? { files: z.files + m.size.files, additions: z.additions + m.size.additions, deletions: z.deletions + m.size.deletions } : z, { files: 0, additions: 0, deletions: 0 })) : mates.length > 1 ? "" : sizeLabel(r.size);
+  const meta = [approved, size, r.head ? `<code>${esc(r.head.slice(0, 8))}</code>` : "", r.migration ? `migration <code>${esc(r.migration)}</code>` : ""].filter(Boolean).join(" · ");
   const at = TRAIL.findIndex(([k]) => k === r.state);
   const trail = MOVING.includes(r.state) ? `<ol class="trail">${TRAIL.map(([, w], i) => `<li class="${i < at ? "past" : i === at ? "now" : ""}">${w}</li>`).join("")}</ol>` : "";
-  return `<li class="qrow ${r.state}"><div class="qmain"><div class="qhead">${prTitle(r.pr, r.title, r.thread_id)}</div><div class="qmeta">${meta}</div>${trail}</div>
-    <div class="qside"><b class="st ${r.state}">${STATE_WORD[r.state] ?? esc(r.state)}</b><span>${r.state === "deployed" ? when(r.state_since) : `for ${span(r.state_since)}`}${waitFor}</span>${left(r.eta_at)}${r.note ? `<span class="qnote">${esc(r.note)}</span>` : ""}</div></li>`;
+  const titles = mates.map((m) => `<div class="qhead">${prTitle(m.pr, m.title, m.thread_id)}</div>`).join("");
+  const waitingRow = ["approved", "held", "failed"].includes(r.state);
+  return `<li class="qrow ${r.state} ${mates.length > 1 ? "pair" : ""}" ${waitingRow ? `draggable="true" data-drag-pr="${r.pr}" data-tier="${r.tier}"` : ""}>
+    ${pos !== undefined ? `<span class="qpos">${pos}</span>` : ""}
+    <div class="qmain">${mates.length > 1 ? `<span class="pair-tag">Pair, tested together</span>` : ""}${titles}<div class="qmeta">${meta}</div>
+      ${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}${trail}</div>
+    <div class="qside"><div class="qtop"><b class="st ${r.state}">${STATE_WORD[r.state] ?? esc(r.state)}</b>${waitingRow ? tierMenu("pr", r.pr, r.tier) : ""}</div>
+      <span>${r.state === "deployed" ? when(r.state_since) : `for ${span(r.state_since)}`}</span>${left(r.eta_at)}
+      ${r.waiting_reason ? `<span class="qwait">${esc(r.waiting_reason)}</span>` : ""}${r.note ? `<span class="qnote">${esc(r.note)}</span>` : ""}${placedBy(r.rank_by)}</div></li>`;
+}
+
+function reviewRow(r: (typeof S.reviews)[number], pos: number): string {
+  return `<li class="qrow review" draggable="true" data-drag-review="${esc(r.thread_id)}" data-tier="${r.tier}"><span class="qpos">${pos}</span>
+    <div class="qmain"><div class="qhead">${prTitle(r.pr, r.subject, r.thread_id)}</div>
+      <div class="qmeta">${sizeLabel(r.size)}${r.size ? " · " : ""}From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div>
+      ${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}</div>
+    <div class="qside"><div class="qtop">${r.reviewing_since ? `<b class="st reviewing">You're reviewing</b>` : `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`}${tierMenu("review", r.thread_id, r.tier)}</div>
+      ${r.reviewing_since ? `<span>since ${when(r.reviewing_since)}</span>` : ""}${placedBy(r.rank_by)}</div></li>`;
 }
 
 function queueSummary(): string {
@@ -283,23 +312,33 @@ function queueSummary(): string {
   return [n(S.reviews.length, "for your review"), n(S.queue.filter((r) => MOVING.includes(r.state)).length, "in progress"), n(S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state)).length, "waiting")].join(" · ");
 }
 
+// Rows already come in priority order. A tier label opens each run of urgent, normal or later
+// rows, so the order and the reason for it read together. Drag a row to change the order.
+function tiered<T extends { tier: string }>(rows: T[], draw: (r: T, pos: number) => string): string[] {
+  const out: string[] = [];
+  const several = new Set(rows.map((r) => r.tier)).size > 1 || rows.some((r) => r.tier !== "normal");
+  rows.forEach((r, i) => {
+    if (several && (i === 0 || rows[i - 1].tier !== r.tier)) out.push(`<li class="tier-head ${r.tier}">${TIER_WORD[r.tier]}</li>`);
+    out.push(draw(r, i + 1));
+  });
+  return out;
+}
+
 function queueView(): string {
-  const reviews = S.reviews;
   const moving = S.queue.filter((r) => MOVING.includes(r.state));
-  const waiting = S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state));
+  // A pair shows once, at its first member's place.
+  const firstOfPair = (r: QRow, list: QRow[]) => !r.pair_id || list.find((x) => x.pair_id === r.pair_id) === r;
+  const waitingAll = S.queue.filter((r) => ["approved", "held", "failed"].includes(r.state));
+  const waiting = waitingAll.filter((r) => firstOfPair(r, waitingAll));
   const done = S.queue.filter((r) => r.state === "deployed");
-  const group = (title: string, hint: string, rows: string[]) => `<section class="qgroup"><h3>${title} <span class="count">${rows.length}</span></h3>
-    ${rows.length ? `<ol class="qlist">${rows.join("")}</ol>` : `<p class="qempty">${hint}</p>`}</section>`;
-  const reviewRows = reviews.map((r) => `<li class="qrow review"><div class="qmain"><div class="qhead">${prTitle(r.pr, r.subject, r.thread_id)}</div>
-      <div class="qmeta">${sizeLabel(r.size)}${r.size ? " · " : ""}From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div></div>
-    <div class="qside">${r.reviewing_since ? `<b class="st reviewing">You're reviewing</b><span>since ${when(r.reviewing_since)}</span>`
-      : `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`}</div></li>`);
+  const group = (title: string, hint: string, rows: string[], count: number, kind = "") => `<section class="qgroup"><h3>${title} <span class="count">${count}</span></h3>
+    ${rows.length ? `<ol class="qlist" ${kind ? `data-drop="${kind}"` : ""}>${rows.join("")}</ol>` : `<p class="qempty">${hint}</p>`}</section>`;
   return `<div class="pane-body"><div class="queue-page">
-    ${group("Waiting for your review", "Nothing is waiting for you.", reviewRows)}
-    ${group("In progress", "Nothing is merging right now.", moving.map(queueRow))}
-    ${group("Approved, waiting their turn", "Nothing approved is waiting.", waiting.map(queueRow))}
-    ${done.length ? group("Deployed today", "", done.map(queueRow)) : ""}
-    <p class="qfoot">Atlas's merge scripts update this with <code>dak queue set &lt;pr&gt; --state … --eta 4m --after &lt;pr&gt;</code>. "Approved by you" is read from your verdict on the PR's thread.</p>
+    ${group("Waiting for your review", "Nothing is waiting for you.", tiered(S.reviews, reviewRow), S.reviews.length, "review")}
+    ${group("In progress", "Nothing is merging right now.", moving.filter((r) => firstOfPair(r, moving)).map((r) => queueRow(r)), moving.length)}
+    ${group("Approved, waiting their turn", "Nothing approved is waiting.", tiered(waiting, queueRow), waiting.length, "pr")}
+    ${done.length ? group("Deployed today", "", done.map((r) => queueRow(r)), done.length) : ""}
+    <p class="qfoot">Drag rows to set the order, or change a row's priority; your order wins over Atlas's. Atlas's merge loop takes the next ready PR with <code>dak queue next</code>. "Approved by you" is read from your verdict on the PR's thread.</p>
   </div></div>`;
 }
 
@@ -331,8 +370,14 @@ function paneHead(a: any): string {
 function mediaView(a: any): string {
   const f = a.meta;
   const src = `/v1/blobs/${f.blob}?token=${(window as any).DAK.token}&type=${encodeURIComponent(f.mime)}`;
-  return `<div class="viewer">${f.mime.startsWith("video/") ? `<video src="${src}" controls autoplay></video>` : `<img src="${src}" alt="${esc(a.name)}">`}
-    <div class="viewer-bar"><b>${esc(a.name)}</b><a class="link" href="${src}" target="_blank" rel="noopener" download="${esc(a.name)}">Download</a></div></div>`;
+  // An HTML page runs in a sandbox with its own origin, from its text: it never sees Dak's
+  // token or address, and it cannot navigate Dak's window away.
+  const body = f.mime.startsWith("text/html") ? `<iframe class="page" sandbox="allow-scripts allow-forms allow-popups" srcdoc="${esc(S.texts.get(f.blob) ?? "")}" title="${esc(a.name)}"></iframe>`
+    : /^text\//.test(f.mime) ? `<pre class="plain">${esc(S.texts.get(f.blob) ?? "")}</pre>`
+    : f.mime.startsWith("application/pdf") ? `<iframe class="page" src="${src}" title="${esc(a.name)}"></iframe>`
+    : f.mime.startsWith("video/") ? `<video src="${src}" controls autoplay></video>` : `<img src="${src}" alt="${esc(a.name)}">`;
+  return `<div class="viewer ${/^(text|application)\//.test(f.mime) ? "pagefile" : ""}">${body}
+    <div class="viewer-bar"><b>${esc(a.name)}</b><a class="link" href="${src}" target="_blank" rel="noopener">Open in browser</a></div></div>`;
 }
 
 function status(t: Thread): { label: string; cls: string } | null {
@@ -658,6 +703,12 @@ document.addEventListener("input", (e) => {
 document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "topic-jump") return openThread(el.value);
+  // A row's priority, set by you: it wins over the order an agent set.
+  if (el.dataset.tierPr || el.dataset.tierReview) {
+    const path = el.dataset.tierPr ? `/queue/${el.dataset.tierPr}/priority` : `/reviews/${el.dataset.tierReview}/priority`;
+    await api(path, { method: "PUT", body: { tier: el.value, by: me } });
+    await loadList(); return renderMain();
+  }
   if (el.id === "topic") {
     // Moving the reply to another topic, or to a new one, takes what you typed with it.
     const from = draftKey(), to = el.value === "__new" ? `new:${S.peer}` : el.value;
@@ -1085,6 +1136,50 @@ async function refresh() {
 
 // Back in front: what is on screen is now read, so the badge and the notifier agree.
 addEventListener("focus", () => { if (S.view === "thread" && S.cur) { forgetConvo(); openThread(S.cur, true); } });
+
+/* Drag to reorder the queue's waiting rows or your review list. The new order is saved as
+   yours, so an agent's reordering leaves it alone. */
+let dragging: HTMLElement | null = null;
+document.addEventListener("dragstart", (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>("[data-drag-pr], [data-drag-review]");
+  if (!row) return;
+  dragging = row; row.classList.add("dragging");
+  e.dataTransfer?.setData("text/plain", row.dataset.dragPr ?? row.dataset.dragReview ?? "");
+});
+document.addEventListener("dragover", (e) => {
+  if (!dragging) return;
+  const list = (e.target as HTMLElement).closest<HTMLElement>("[data-drop]");
+  if (!list || !list.contains(dragging)) return;
+  e.preventDefault();
+  const over = (e.target as HTMLElement).closest<HTMLElement>(".qrow");
+  if (!over || over === dragging) return;
+  const box = over.getBoundingClientRect();
+  list.insertBefore(dragging, e.clientY < box.top + box.height / 2 ? over : over.nextSibling);
+});
+document.addEventListener("dragend", async () => {
+  const row = dragging; dragging = null;
+  if (!row) return;
+  row.classList.remove("dragging");
+  const list = row.closest<HTMLElement>("[data-drop]")!;
+  // Dropped among another tier's rows, it joins that tier: the place you put it is where it goes.
+  const rows = [...list.querySelectorAll<HTMLElement>("[data-tier]")];
+  const i = rows.indexOf(row);
+  const near = rows[i - 1] ?? rows[i + 1]; // the row above it, or below when it is now first
+  const tier = near && near.dataset.tier !== row.dataset.tier ? near.dataset.tier : undefined;
+  try {
+    if (list.dataset.drop === "pr") {
+      const prs = [...list.querySelectorAll<HTMLElement>("[data-drag-pr]")].map((x) => Number(x.dataset.dragPr));
+      // A pair moves as one: its other half follows its first.
+      const withMates = prs.flatMap((p) => { const r = S.queue.find((x) => x.pr === p); return r?.pair_id ? S.queue.filter((x) => x.pair_id === r.pair_id).map((x) => x.pr) : [p]; });
+      if (tier) await api(`/queue/${row.dataset.dragPr}/priority`, { method: "PUT", body: { tier, by: me } });
+      await api("/queue/order", { method: "PUT", body: { prs: withMates, by: me } });
+    } else {
+      if (tier) await api(`/reviews/${row.dataset.dragReview}/priority`, { method: "PUT", body: { tier, by: me } });
+      await api("/reviews/order", { method: "PUT", body: { threads: [...list.querySelectorAll<HTMLElement>("[data-drag-review]")].map((x) => x.dataset.dragReview), by: me } });
+    }
+  } catch (err: any) { toast(err.message ?? "Could not save that order.", S.cur ?? ""); }
+  await loadList(); renderMain();
+});
 
 // The queue's "for 6 min" and "about 4 min left" move with the clock.
 setInterval(() => { if (S.view === "queue" && !document.hidden) renderMain(); }, 30_000);

@@ -47,8 +47,10 @@ export const S = {
   archived: {} as Record<string, string>, // conversation (agent, or "a+b") → when you archived it
   showArchived: false,
   queue: [] as { pr: number; title: string; head: string | null; migration: string | null; state: string; note: string | null; thread_id: string | null; updated_at: string;
-    state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null }[],
-  reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null }[], // PRs waiting on your review
+    state_since: string; eta_at: string | null; after_pr: number | null; approval: { by: string; at: string } | null; size: PrSize | null;
+    tier: string; rank: number | null; why: string | null; rank_by: string | null; pair_id: string | null; waiting_reason: string | null }[],
+  reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null;
+    tier: string; rank: number | null; why: string | null; rank_by: string | null }[], // PRs waiting on your review, in priority order
   allTopics: local.get("allTopics", false), // the conversation shows every topic at once, not just the one you are on
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
   newTopic: false, // the reply box is starting a new thread with this agent, not answering one
@@ -70,7 +72,11 @@ export const S = {
   diffs: new Map<string, DiffFile[]>(),
   files: new Map<string, string[]>(),
   docs: new Map<string, Block[]>(),
+  texts: new Map<string, string>(), // an HTML page or a text file, by blob, for the viewer
 };
+
+// Files that open beside the conversation, with a close button, instead of leaving Dak.
+export const opensInPane = (mime: string) => /^(image|video)\//.test(mime) || mime.startsWith("application/pdf") || /^text\//.test(mime);
 
 // Mail counts as read only when you can see it: Dak in front and on screen. A conversation
 // left open in the background must not mark new messages read, or nothing would notify you.
@@ -179,6 +185,7 @@ export async function prepare() {
     }));
   }
   if (a.type === "doc" && !S.docs.has(a.meta.blob)) S.docs.set(a.meta.blob, blocks(await blobText(a.meta.blob)));
+  if (a.type === "file" && /^text\//.test(a.meta.mime) && !S.texts.has(a.meta.blob)) S.texts.set(a.meta.blob, await blobText(a.meta.blob));
 }
 
 export async function loadAgents(scan = false) {

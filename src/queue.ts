@@ -7,6 +7,7 @@
 import { loadConfig, person } from "./config";
 import { latestPr, store, threadForPr, type PrSize } from "./store";
 import { DakError } from "./types";
+import { byPriority, ensurePriority, nextInQueue, prioritizeQueue, tierOf, touchStamp, waitingReason, type Tier } from "./priority";
 
 export const STATES = ["approved", "testing", "building", "merging", "merged", "migrated", "deployed", "failed", "held"] as const;
 export type QueueState = (typeof STATES)[number];
@@ -18,6 +19,10 @@ export interface QueueRow {
   after_pr: number | null; // waits for this PR first (a stack, a rebase)
   approval: { by: string; at: string } | null; // the person's own approval on the thread, if there is one
   size: PrSize | null; // files and lines changed, from the PR on its thread
+  tier: Tier; rank: number | null; why: string | null; rank_by: string | null; // priority: see priority.ts
+  waiting: string | null; // what the agent says it is waiting on: "a migration renumber"
+  pair_id: string | null; // two PRs tested and merged together: "2420+2433"
+  waiting_reason: string | null; // the plain-words reason it is not moving, derived or said
 }
 
 function ensure() {
@@ -29,6 +34,7 @@ function ensure() {
   if (!cols.has("state_since")) { s.exec("ALTER TABLE queue ADD COLUMN state_since TEXT"); s.exec("UPDATE queue SET state_since = updated_at"); }
   if (!cols.has("eta_at")) s.exec("ALTER TABLE queue ADD COLUMN eta_at TEXT");
   if (!cols.has("after_pr")) s.exec("ALTER TABLE queue ADD COLUMN after_pr INTEGER");
+  ensurePriority();
 }
 
 // The person's latest verdict on the thread, when it is an approval and nothing new came after it.
@@ -48,13 +54,22 @@ function approvalOn(thread: string | null): QueueRow["approval"] {
 const hydrate = (r: any): QueueRow => ({ ...r, state_since: r.state_since ?? r.updated_at, approval: approvalOn(r.thread_id),
   size: r.thread_id ? latestPr(r.thread_id)?.size ?? null : null });
 
-// Order is when a PR joined; the page groups them. A deployed PR stays a day, so the morning
-// view shows what went out overnight.
+// In priority order: tier, then the order set inside it, then when a PR joined. A deployed PR
+// stays a day, so the morning view shows what went out overnight.
 export function queue(opts: { all?: boolean } = {}): QueueRow[] {
   ensure();
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
-  return (store().query("SELECT * FROM queue ORDER BY added_at, pr").all() as any[])
-    .filter((r) => opts.all || r.state !== "deployed" || r.updated_at > dayAgo).map(hydrate);
+  const all = store().query("SELECT * FROM queue").all() as any[];
+  return all.filter((r) => opts.all || r.state !== "deployed" || r.updated_at > dayAgo)
+    .sort((a, b) => byPriority(a, b, (x, y) => x.added_at.localeCompare(y.added_at) || x.pr - y.pr))
+    .map((r) => ({ ...hydrate(r), waiting_reason: waitingReason(r, all) }));
+}
+
+// The next PR (or pair) the merge loop should take; null when nothing is ready.
+export function next(): QueueRow[] | null {
+  ensure();
+  const prs = nextInQueue(store().query("SELECT * FROM queue").all() as any[]);
+  return prs ? queue().filter((r) => prs.includes(r.pr)) : null;
 }
 
 // "4m", "90s", "1h", or a number of minutes.
@@ -65,7 +80,8 @@ function minutes(v: string): number {
   return (m[2] ?? "m").toLowerCase() === "s" ? n / 60 : (m[2] ?? "m").toLowerCase() === "h" ? n * 60 : n;
 }
 
-export function setQueue(pr: number, v: { state?: string; title?: string; head?: string; migration?: string; note?: string; thread?: string; eta?: string; after?: string | number }): QueueRow {
+export function setQueue(pr: number, v: { state?: string; title?: string; head?: string; migration?: string; note?: string; thread?: string; eta?: string; after?: string | number;
+  tier?: string; why?: string; waiting?: string; by?: string }): QueueRow {
   ensure();
   if (!Number.isInteger(pr) || pr <= 0) throw new DakError("bad_pr", "Say which PR by its number: dak queue set 2427 --state testing.");
   if (v.state && !STATES.includes(v.state as QueueState)) throw new DakError("bad_state", `A state is one of: ${STATES.join(", ")}.`);
@@ -87,12 +103,15 @@ export function setQueue(pr: number, v: { state?: string; title?: string; head?:
     state_since: moved || !old ? now.toISOString() : old.state_since ?? old.updated_at,
     after_pr: after,
   };
-  store().query(`INSERT INTO queue (pr, title, head, migration, state, note, thread_id, added_at, updated_at, state_since, eta_at, after_pr)
-    VALUES ($pr,$title,$head,$migration,$state,$note,$thread_id,$added_at,$updated_at,$state_since,$eta_at,$after_pr)
+  // What it waits on belongs to its step, like the note: a new step clears it, and so does "none".
+  const waiting = v.waiting !== undefined ? (["", "none"].includes(v.waiting.trim()) ? null : v.waiting.trim()) : moved ? null : old?.waiting ?? null;
+  store().query(`INSERT INTO queue (pr, title, head, migration, state, note, thread_id, added_at, updated_at, state_since, eta_at, after_pr, waiting)
+    VALUES ($pr,$title,$head,$migration,$state,$note,$thread_id,$added_at,$updated_at,$state_since,$eta_at,$after_pr,$waiting)
     ON CONFLICT(pr) DO UPDATE SET title=$title, head=$head, migration=$migration, state=$state, note=$note, thread_id=$thread_id,
-      updated_at=$updated_at, state_since=$state_since, eta_at=$eta_at, after_pr=$after_pr`)
-    .run(Object.fromEntries(Object.entries(row).map(([k, x]) => [`$${k}`, x])) as any);
-  return hydrate(row);
+      updated_at=$updated_at, state_since=$state_since, eta_at=$eta_at, after_pr=$after_pr, waiting=$waiting`)
+    .run(Object.fromEntries(Object.entries({ ...row, waiting }).map(([k, x]) => [`$${k}`, x])) as any);
+  if (v.tier !== undefined || v.why !== undefined) prioritizeQueue(pr, v.by ?? person(loadConfig()), { tier: tierOf(v.tier), why: v.why });
+  return queue({ all: true }).find((r) => r.pr === pr)!;
 }
 
 export function removeQueue(pr: number) {
@@ -103,7 +122,7 @@ export function removeQueue(pr: number) {
 // For the page's live refresh: changes when any row does, or a thread gets a verdict.
 export function queueStamp(): string {
   ensure();
-  return (store().query("SELECT coalesce(max(updated_at), '') || count(*) AS s FROM queue").get() as { s: string }).s;
+  return (store().query("SELECT coalesce(max(updated_at), '') || count(*) AS s FROM queue").get() as { s: string }).s + touchStamp();
 }
 
 function subjectOf(thread: string): string {

@@ -413,6 +413,52 @@ describe("merge queue", () => {
   });
 });
 
+describe("priorities", () => {
+  test("tiers then order; next skips what waits or is held; an order against --after is refused; pairs merge together", () => {
+    for (const [pr, extra] of [[4001, []], [4002, ["--after", "4001"]], [4003, []], [4004, []], [4005, []]] as [number, string[]][]) {
+      dak("queue", "set", String(pr), "--state", "approved", "--title", `P${pr}`, ...extra);
+    }
+    expect(dak("queue", "order", "4002", "4001", "--from", "atlas", "--json").json().error.code).toBe("order_conflict");
+    expect(dak("queue", "order", "4003", "4001", "4002", "--from", "atlas").code).toBe(0);
+    dak("queue", "set", "4004", "--tier", "urgent", "--why", "production bug", "--from", "atlas");
+    const ours = dak("queue", "--json").json().filter((r: any) => r.pr > 4000).map((r: any) => r.pr);
+    expect(ours.slice(0, 4)).toEqual([4004, 4003, 4001, 4002]);
+    expect(dak("queue", "next", "--json").json().next.map((r: any) => r.pr)).toEqual([4004]);
+    dak("queue", "set", "4004", "--state", "held", "--waiting", "a migration renumber");
+    expect(dak("queue", "--json").json().find((r: any) => r.pr === 4004).waiting_reason).toBe("a migration renumber");
+    expect(dak("queue", "next", "--json").json().next.map((r: any) => r.pr)).toEqual([4003]);
+    // 4002 waits for 4001; it is not next even when ordered first, and says why.
+    expect(dak("queue", "--json").json().find((r: any) => r.pr === 4002).waiting_reason).toBe("Waiting on #4001 (approved)");
+    dak("queue", "pair", "4003", "4005");
+    expect(dak("queue", "next", "--json").json().next.map((r: any) => r.pr).sort()).toEqual([4003, 4005]);
+    dak("queue", "set", "4005", "--state", "testing");
+    expect(dak("queue", "--json").json().find((r: any) => r.pr === 4003).waiting_reason).toBe("Waiting on its pair #4005 (testing)");
+  });
+
+  test("the person's order wins: an agent's reorder leaves the rows the person placed", async () => {
+    await http("/v1/queue/order", { method: "PUT", body: JSON.stringify({ prs: [4002, 4001], by: "sam" }) }).then(async (r) => expect((await r.json()).error.code).toBe("order_conflict"));
+    expect((await http("/v1/queue/order", { method: "PUT", body: JSON.stringify({ prs: [4001, 4003], by: "sam" }) })).status).toBe(200);
+    const r = dak("queue", "order", "4003", "4001", "--from", "atlas", "--json").json();
+    expect(r.kept.sort()).toEqual([4001, 4003]);
+    const rows = dak("queue", "--json").json().filter((x: any) => [4001, 4003].includes(x.pr));
+    expect(rows.map((x: any) => [x.pr, x.rank, x.rank_by])).toEqual([[4001, 1, "sam"], [4003, 2, "sam"]]);
+    expect(dak("queue", "priority", "4001", "--tier", "later", "--from", "atlas", "--json").json().error.code).toBe("person_ordered");
+  });
+
+  test("review order: urgent first with its reason; a hotfix goes urgent on its own", async () => {
+    const a = dak("send", "--to", "sam", "--from", "atlas", "--diff", "d2.diff", "--subject", "Normal one", "--json").json().thread.id;
+    const b = dak("send", "--to", "sam", "--from", "atlas", "--diff", "d2.diff", "--subject", "Unblocker", "--json").json().thread.id;
+    const h = dak("send", "--to", "sam", "--from", "atlas", "--diff", "d2.diff", "--subject", "Hotfix", "--hotfix", "--json").json().thread.id;
+    expect(dak("queue", "priority", b, "--review", "--tier", "urgent", "--why", "unblocks 8 PRs", "--from", "atlas").code).toBe(0);
+    dak("queue", "review-order", b, h, "--from", "atlas");
+    const list = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    const ids = list.map((r) => r.thread_id).filter((id) => [a, b, h].includes(id));
+    expect(ids).toEqual([b, h, a]);
+    expect(list.find((r) => r.thread_id === b)).toMatchObject({ tier: "urgent", why: "unblocks 8 PRs" });
+    expect(list.find((r) => r.thread_id === h)).toMatchObject({ tier: "urgent", why: "Hotfix" });
+  });
+});
+
 describe("PRs", () => {
   test("chapters check names the hunk that is in no chapter", () => {
     writeFileSync(join(repo, "ch.json"), JSON.stringify([{ title: "Return ten", summary: "", risk: "low", hunks: [{ file: "taps.ts", start: 1 }] }]));

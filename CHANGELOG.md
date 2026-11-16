@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+- Priorities in the merge queue: urgent, normal and later, with an order inside each, and a reason per row. Agents set them (`dak queue order`, `review-order`, `priority`, `--hotfix`); you drag rows or change a row's tier, and your order wins.
+- `dak queue next`: the next ready PR or pair, for a merge loop.
+- Pairs tested together show as one row. Each waiting row says what it waits on, in plain words.
+- An HTML, PDF or text file opens beside the conversation with a close button; an HTML page runs sandboxed. Before, it took over the window with no way back.
+- The app's window can no longer be navigated away from Dak; and an update's code always reaches an open window.
+
 ## 0.2.2
 - PR size (+lines −lines · files) on every review and queue row, with large changes in bold.
 - The merge queue sits at the top of the sidebar, with a count of PRs waiting for your review.

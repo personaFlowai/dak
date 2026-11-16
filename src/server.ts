@@ -1,6 +1,7 @@
 import { buildCost, parseParticipant } from "./handoff";
 import { tickRunners } from "./reviewer";
-import { queue, queueStamp, removeQueue, setQueue } from "./queue";
+import { next, queue, queueStamp, removeQueue, setQueue } from "./queue";
+import { orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
 import type { Participant } from "./types";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -74,8 +75,8 @@ export function serve(port?: number) {
           const boot = `<script>window.DAK=${JSON.stringify({ token: secret, me: person(c), readers: c.readers })}</script>`;
           return new Response(asset("index.html", indexHtml as unknown as string).replace("<!--BOOT-->", boot), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
         }
-        if (url.pathname === "/app.js") return new Response(asset("app.js", appJs), { headers: { "content-type": "text/javascript; charset=utf-8" } });
-        if (url.pathname === "/style.css") return new Response(asset("style.css", styleCss), { headers: { "content-type": "text/css; charset=utf-8" } });
+        if (url.pathname === "/app.js") return new Response(asset("app.js", appJs), { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } }); // an update must reach an open window
+        if (url.pathname === "/style.css") return new Response(asset("style.css", styleCss), { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "no-cache" } });
         if (!url.pathname.startsWith("/v1/")) return new Response("Not found", { status: 404 });
 
         const auth = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
@@ -226,7 +227,28 @@ async function api(req: Request, url: URL): Promise<Response> {
     return json(listThreads(reader));
   }
 
-  if (parts[0] === "reviews" && method === "GET") return json(awaitingReview(q.get("for") ?? person(loadConfig())));
+  // Priorities. "by" is who is ordering; the person's own order wins over an agent's.
+  const by = async () => { const b = await body(); return { b, who: String(b.by ?? person(loadConfig())).toLowerCase() }; };
+  if (parts[0] === "reviews" && parts.length === 1 && method === "GET") return json(reviewsInOrder(q.get("for") ?? person(loadConfig())));
+  if (parts[0] === "reviews" && parts[1] === "order" && method === "PUT") {
+    const { b, who } = await by();
+    return json(orderReviews((b.threads ?? []).map(String), who, { tier: tierOf(b.tier) }));
+  }
+  if (parts[0] === "reviews" && parts[1] && parts[2] === "priority" && method === "PUT") {
+    const { b, who } = await by();
+    prioritizeReview(parts[1], who, { tier: tierOf(b.tier), why: b.why });
+    return json({ ok: true });
+  }
+  if (parts[0] === "queue" && parts[1] === "next" && method === "GET") return json({ next: next() });
+  if (parts[0] === "queue" && parts[1] === "order" && method === "PUT") {
+    const { b, who } = await by();
+    return json(orderQueue((b.prs ?? []).map(Number), who, { tier: tierOf(b.tier) }));
+  }
+  if (parts[0] === "queue" && parts[1] && parts[2] === "priority" && method === "PUT") {
+    const { b, who } = await by();
+    prioritizeQueue(Number(parts[1]), who, { tier: tierOf(b.tier), why: b.why });
+    return json({ ok: true });
+  }
   if (parts[0] === "queue" && parts.length === 1 && method === "GET") return json(queue({ all: q.get("all") === "1" }));
   if (parts[0] === "queue" && parts[1] && method === "PUT") return json(setQueue(Number(parts[1]), await body()));
   if (parts[0] === "queue" && parts[1] && method === "DELETE") { removeQueue(Number(parts[1])); return json({ removed: Number(parts[1]) }); }

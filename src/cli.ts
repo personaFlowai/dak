@@ -16,7 +16,8 @@ import { snapshotPr, loadChapters, checkChapters, diffForChapters, draftChapters
 import { DakError, type Message, type Verdict } from "./types";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners } from "./reviewer";
-import { queue, removeQueue, setQueue, type QueueRow } from "./queue";
+import { next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
+import { orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
 import type { AwaitingReview } from "./store";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
@@ -62,6 +63,13 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
                                                  --eta 4m: how long this step should take; --after 2413: waits for that PR first
   dak reviewing <thread> [text]                  tell the sender you are reviewing it (the person's "I'm on it")
   dak queue remove <pr>
+  dak queue set <pr> --tier urgent|normal|later --why "unblocks 8 PRs" --waiting "a rebase"
+  dak queue order <pr>... [--tier t]             merge order; refused if it puts a PR before the one it waits for
+  dak queue review-order <pr|thread>... [--tier t]   the order the person reviews in
+  dak queue priority <pr|thread> [--review] --tier t --why text
+  dak queue pair <pr> <pr> | unpair <pr>         two PRs tested and merged together
+  dak queue next [--json]                        the next ready PR or pair (exit 3 when none): what a merge loop takes
+  dak send ... --hotfix                          the PR goes to the top of the review list as urgent
   dak chapters draft [--pr n | --base ref | --diff f]   a chapters.json with every hunk listed, grouped by folder
   dak chapters check <file> [--pr n | --base ref | --diff f] [--repo .]
   dak agents                                     readers and every session Dak has seen or can see running
@@ -143,15 +151,15 @@ function refreshThread(id: string, values: any) {
 }
 
 // The queue as Atlas reads it in a terminal: what waits on the person, what is moving, what waits.
-function queueText(rows: QueueRow[], reviews: AwaitingReview[], who: string): string {
+function queueText(rows: QueueRow[], reviews: OrderedReview[], who: string): string {
   const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
   const left = (r: QueueRow) => { if (!r.eta_at) return ""; const m = Math.round((Date.parse(r.eta_at) - Date.now()) / 60000); return m >= 0 ? `, about ${m} min left` : `, ${-m} min over`; };
-  const line = (r: QueueRow) => `  #${String(r.pr).padEnd(6)} ${r.title}  [${r.state} for ${ago(r.state_since)}${left(r)}]${r.after_pr ? ` after #${r.after_pr}` : ""}${r.approval ? "" : ` (no approval from ${who} on the thread)`}${r.note ? `  ${r.note}` : ""}`;
+  const line = (r: QueueRow) => `  #${String(r.pr).padEnd(6)} ${r.title}  [${r.state} for ${ago(r.state_since)}${left(r)}]${r.tier !== "normal" ? ` ${r.tier}` : ""}${r.why ? ` (${r.why})` : ""}${r.pair_id ? ` pair ${r.pair_id}` : ""}${r.waiting_reason ? `  ${r.waiting_reason}` : ""}${r.approval ? "" : ` (no approval from ${who} on the thread)`}${r.note ? `  ${r.note}` : ""}`;
   const moving = rows.filter((r) => ["testing", "building", "merging", "merged", "migrated"].includes(r.state));
   const waiting = rows.filter((r) => ["approved", "held", "failed"].includes(r.state));
   const done = rows.filter((r) => r.state === "deployed");
   return [
-    `Waiting for ${who}'s review (${reviews.length})`, ...reviews.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}  [from ${r.from}, ${r.reviewing_since ? `reviewing for ${ago(r.reviewing_since)}` : `waiting ${ago(r.waiting_since)}`}]`),
+    `Waiting for ${who}'s review (${reviews.length})`, ...reviews.map((r) => `  ${r.pr ? `#${r.pr}`.padEnd(7) : "".padEnd(7)} ${r.subject}${r.tier !== "normal" ? `  ${r.tier.toUpperCase()}` : ""}${r.why ? ` (${r.why})` : ""}  [from ${r.from}, ${r.reviewing_since ? `reviewing for ${ago(r.reviewing_since)}` : `waiting ${ago(r.waiting_since)}`}]`),
     "", `In progress (${moving.length})`, ...moving.map(line),
     "", `Approved, waiting (${waiting.length})`, ...waiting.map(line),
     ...(done.length ? ["", `Deployed today (${done.length})`, ...done.map(line)] : []),
@@ -210,7 +218,8 @@ const OPTIONS = {
   cc: { type: "string", multiple: true }, ready: { type: "boolean" }, head: { type: "string" }, migration: { type: "string" },
   proof: { type: "string", multiple: true }, skipped: { type: "string", multiple: true }, cost: { type: "string" }, cap: { type: "string" },
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
-  eta: { type: "string" }, after: { type: "string" },
+  eta: { type: "string" }, after: { type: "string" }, tier: { type: "string" }, why: { type: "string" }, waiting: { type: "string" },
+  review: { type: "boolean" }, hotfix: { type: "boolean" },
   state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
 } as const;
 
@@ -276,6 +285,8 @@ export async function main(argv: string[]): Promise<number> {
       const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
       const { thread, message } = createThread({ to: values.to, from: values.from, subject: subject ?? "", kind, body: readBody(positionals, values), attachments: atts, options: values.option,
         participants: (values.cc ?? []).map(parseParticipant), extra, ...(values.fyi ? { needs_reply: false } : {}) });
+      // A hotfix goes to the top of the reader's review list.
+      if (values.hotfix) prioritizeReview(thread.id, values.from, { tier: "urgent", why: values.why ?? "Hotfix" });
       out(json, { thread, message }, () => `Sent ${thread.id} to ${thread.to}: ${thread.subject}\nWait for the reply with: dak wait ${thread.id} --for ${thread.from}`);
       return 0;
     }
@@ -430,15 +441,41 @@ export async function main(argv: string[]): Promise<number> {
     case "queue": {
       // dak queue | dak queue set <pr> --state testing [--head sha] [--migration f] [--note text] | dak queue remove <pr>
       const [sub, n] = positionals;
+      const num = (x: string) => Number(String(x).replace(/^#/, ""));
+      // Who is ordering: an agent's order never moves rows the person placed by hand.
+      const by = String(values.from ?? (inAgent() ? whoami() : person(loadConfig()))).toLowerCase();
       if (sub === "set" && n) {
-        const row = setQueue(Number(String(n).replace(/^#/, "")), { state: values.state, title: values.title ?? values.subject, head: values.head, migration: values.migration, note: values.note, thread: values.thread, eta: values.eta, after: values.after });
+        const row = setQueue(num(n), { state: values.state, title: values.title ?? values.subject, head: values.head, migration: values.migration, note: values.note,
+          thread: values.thread, eta: values.eta, after: values.after, tier: values.tier, why: values.why, waiting: values.waiting, by });
         out(json, row, () => `#${row.pr} ${row.state}${row.note ? ` (${row.note})` : ""}`);
         return 0;
       }
-      if (sub === "remove" && n) { removeQueue(Number(String(n).replace(/^#/, ""))); out(json, { removed: n }, () => `Removed #${n}.`); return 0; }
+      if (sub === "remove" && n) { removeQueue(num(n)); out(json, { removed: n }, () => `Removed #${n}.`); return 0; }
+      if (sub === "order" || sub === "review-order") {
+        const refs = positionals.slice(1);
+        if (!refs.length) throw new DakError("usage", `dak queue ${sub} <pr> <pr>... [--tier urgent|normal|later]`);
+        const r = sub === "order" ? orderQueue(refs.map(num), by, { tier: tierOf(values.tier) }) : orderReviews(refs, by, { tier: tierOf(values.tier) });
+        out(json, r, () => `Ordered ${r.ordered.length}.${r.kept.length ? ` Kept ${person(loadConfig())}'s order for ${r.kept.join(", ")}.` : ""}`);
+        return 0;
+      }
+      if (sub === "priority" && n) {
+        // One row's tier and reason: --review for the review list, else the merge queue.
+        const v = { tier: tierOf(values.tier), why: values.why };
+        if (values.review) prioritizeReview(n, by, v); else prioritizeQueue(num(n), by, v);
+        out(json, { [values.review ? "review" : "pr"]: n, ...v }, () => `${n}: ${v.tier ?? "tier unchanged"}${v.why ? `, ${v.why}` : ""}.`);
+        return 0;
+      }
+      if (sub === "pair" && n && positionals[2]) { pairQueue(num(n), num(positionals[2])); out(json, { paired: [num(n), num(positionals[2])] }, () => `Paired #${n} and #${positionals[2]}.`); return 0; }
+      if (sub === "unpair" && n) { pairQueue(num(n), null); out(json, { unpaired: num(n) }, () => `Unpaired #${n}.`); return 0; }
+      if (sub === "next") {
+        // The merge loop asks Dak what to take: exit 0 with the PR (or pair), 3 when nothing is ready.
+        const rows = next();
+        out(json, { next: rows }, () => rows ? rows.map((r) => `#${r.pr} ${r.title}`).join("\n") : "Nothing is ready to merge.");
+        return rows ? 0 : 3;
+      }
       const rows = queue({ all: values.all });
       const who = person(loadConfig());
-      const reviews = awaitingReview(who);
+      const reviews = reviewsInOrder(who);
       out(json, rows, () => queueText(rows, reviews, who));
       return 0;
     }

@@ -97,6 +97,13 @@ If Dak has a runner named `codex` (`dak runner add codex`), sending a PR to it, 
 
 Merge scripts keep it current: `dak queue set <pr> --state approved|testing|building|merging|merged|migrated|deployed|failed|held [--eta 4m] [--after <pr>] [--head sha] [--migration f] [--note "full suite"]`. Set `--eta` at each step so the person sees time left; use `--after` for a PR that waits on another, not the title. Approval is read from the person's verdict on the thread, so never mark a PR approved they have not approved. `dak queue` prints what waits for their review, what is moving and what waits its turn. When the person presses "I'm reviewing", you get a Dak message and `dak show` says so.
 
+Priorities. Three tiers (urgent: a production bug, security, an unblocker; normal; later), with an order inside each:
+- Review order, what the person should review first: `dak queue priority <pr> --review --tier urgent --why "unblocks 8 PRs"`, and `dak queue review-order <pr> <pr>...` for the order. A PR sent with `--hotfix` goes urgent on its own.
+- Merge order: `dak queue order <pr> <pr>...` and `dak queue set <pr> --tier urgent --why "production bug"`. Dak refuses an order that puts a PR ahead of the one it waits for (`--after`).
+- Say what a held or waiting row is waiting on, in plain words: `--waiting "a migration renumber"` (cleared when its state changes). Dak adds "Waiting on #2413" and "Waiting on its pair" itself.
+- Pairs tested together: `dak queue pair 2420 2433`; they show as one row and merge together.
+- The person can drag rows and change tiers; their order wins, and your reordering leaves their rows in place (the command says which it kept). So read the order rather than assume it: your merge loop asks `dak queue next --json` for the next ready PR or pair (approved, not held, what it waits for already merged), and gets exit code 3 when nothing is ready.
+
 ## 4. Wait for the answer
 
 In Claude Code with Dak connected, you do not need to wait at all: finish your turn, and the answer wakes this session when it arrives. Otherwise:

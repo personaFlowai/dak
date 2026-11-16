@@ -1,4 +1,4 @@
-import { esc, S, me, name, drafts, findAtt, when, fullWhen, mark, helperLabel, helperMark } from "./state";
+import { esc, S, me, name, drafts, findAtt, when, fullWhen, mark, helperLabel, helperMark, opensInPane } from "./state";
 import { render as renderMd } from "./md";
 import { anchorLabel, prLink } from "./pr";
 import { blobUrl } from "./api";
@@ -101,6 +101,7 @@ function chip(a: Attachment, topic: Topic): string {
   const f = a.meta;
   if (/^image\//.test(f.mime)) return `<button class="acard thumb ${on ? "on" : ""}" data-att="${a.id}" ${inn}><img src="${blobUrl(f.blob, f.mime)}" alt="${esc(a.name)}" loading="lazy"><span class="nm"><b>${esc(a.name)}</b><span>Image · ${size(f.size)}</span></span></button>`;
   if (/^video\//.test(f.mime)) return card(I.doc, a.name, `Video · ${size(f.size)}`, "Play");
+  if (opensInPane(f.mime)) return card(I.doc, a.name, `${f.mime.startsWith("text/html") ? "Page" : f.mime.startsWith("application/pdf") ? "PDF" : "Text"} · ${size(f.size)}`, "Open");
   return `<a class="acard" href="${blobUrl(f.blob, f.mime)}" target="_blank" rel="noopener" download="${esc(a.name)}"><span class="aicon">${I.doc}</span><span class="nm"><b>${esc(a.name)}</b><span>${size(f.size)}</span></span><span class="go">Download</span></a>`;
 }
 
