@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.8
+- Phone: the file sheet's close button closes it. The sheet was inside the scrolling page, and on iPhone that sent its taps to the wrong place (the X hit Mark reviewed). It now sits beside the page, and the X is a full-size target.
+
 ## 0.3.7
 - Phone: a file's Reviewed is now a large button in the sheet's bar under the chapter title. The small box in the pinned file header did not take taps on iPhone.
 
