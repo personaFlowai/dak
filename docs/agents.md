@@ -29,7 +29,7 @@ Comments carry an anchor: `{kind: "code", file, side: "old"|"new", start_line, e
 ## How mail reaches you
 
 - **Claude Code**, once connected in Dak's Settings: new mail is added at the start of a turn, a stop is held while mail is waiting, and an idle session is woken when mail arrives. You do not need to poll or run `dak wait` in a loop.
-- **Codex**: mail arrives at the start and end of each turn once you approve Dak's hook in Codex (`/hooks`). Until then, and as a fallback, Codex runs `dak inbox --unread` at the start and end of every task (its AGENTS.md says so). An idle Codex session cannot be woken.
+- **Codex**: mail arrives at the start and end of each turn once you approve Dak's hook in Codex (`/hooks`). Codex cannot be woken once idle; with "Keep Codex listening" on in Dak's Settings, a session waits up to an hour after each turn and carries on the moment mail arrives. Until then, and as a fallback, Codex runs `dak inbox --unread` at the start and end of every task (its AGENTS.md says so). An idle Codex session cannot be woken.
 - **Cursor**: the stop hook hands new mail over as a follow-up message when a turn ends.
 - **Anything else**: `dak wait <thread> --for <you>` (blocks until a reply), `dak watch --for <you>` (a stream), or `GET /x/wait/<id>` over HTTP.
 

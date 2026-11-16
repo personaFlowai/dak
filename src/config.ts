@@ -25,6 +25,7 @@ export interface Config {
   helper: HelperName;
   explain: { command: string[]; timeout_seconds: number };
   models: Partial<Record<HelperName, string>>; // empty means the tool's own default
+  codex_listen?: boolean; // at the end of a Codex turn, wait for Dak mail (up to an hour) instead of stopping
 }
 
 // The read-only helper behind Explain and Ask. Each preset is told to read only;
@@ -63,6 +64,7 @@ export function loadConfig(): Config {
     helper,
     explain: { command, timeout_seconds: raw.explain?.timeout_seconds ?? 180 },
     models: Object.fromEntries(Object.entries(raw.explain?.models ?? {}).map(([k, v]) => [k, String(v)]).filter(([, v]) => v)),
+    codex_listen: raw.codex?.listen === true,
   };
 }
 
@@ -87,6 +89,10 @@ export function writeConfig(c: Config) {
     "# Model per helper; leave out for the tool's own default.",
     ...Object.entries(c.models ?? {}).filter(([, v]) => v).map(([k, v]) => `${k} = ${q(v!)}`),
     "",
+    "[codex]",
+    "# listen: at the end of a Codex turn, wait up to an hour for Dak mail instead of stopping.",
+    `listen = ${c.codex_listen ? "true" : "false"}`,
+    "",
   ];
   writeFileSync(configPath(), lines.join("\n"));
 }
@@ -97,6 +103,12 @@ export function setModel(helper: HelperName, model: string) {
   if (m && !/^[A-Za-z0-9._:\-\/]+$/.test(m)) throw new Error("bad model");
   c.models = { ...c.models, [helper]: m };
   if (!m) delete c.models[helper];
+  writeConfig(c);
+}
+
+export function setCodexListen(on: boolean) {
+  const c = loadConfig();
+  c.codex_listen = on;
   writeConfig(c);
 }
 

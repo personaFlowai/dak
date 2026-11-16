@@ -204,6 +204,28 @@ describe("Codex sessions have names of their own", () => {
   });
 });
 
+describe("keep Codex listening", () => {
+  test("off: Codex's Stop hook returns at once; on: it waits and hands over mail that arrives later", async () => {
+    const wt = join(home, ".codex", "worktrees", "zz11", "shop");
+    require("node:fs").mkdirSync(wt, { recursive: true });
+    const stop = () => Bun.spawn(["bun", CLI, "hook", "codex"], { env: { ...process.env, DAK_HOME: home, DAK_LISTEN_MS: "6000" },
+      stdin: new TextEncoder().encode(JSON.stringify({ hook_event_name: "Stop", cwd: wt })), stdout: "pipe" });
+    await http("/v1/settings", { method: "PUT", body: JSON.stringify({ codex_listen: false }) });
+    let t0 = Date.now(), p = stop();
+    expect(await new Response(p.stdout).text()).toBe("");
+    expect(Date.now() - t0).toBeLessThan(3000);
+    const on = await (await http("/v1/settings", { method: "PUT", body: JSON.stringify({ codex_listen: true }) })).json();
+    expect(on.codex_listen).toBe(true);
+    p = stop();
+    await Bun.sleep(1500);
+    dak("send", "--to", "shop-codex-zz11", "--from", "sam", "--subject", "Late mail", "Please check the totals.");
+    const out = JSON.parse(await new Response(p.stdout).text());
+    expect(out.decision).toBe("block");
+    expect(out.reason).toContain("Please check the totals.");
+    await http("/v1/settings", { method: "PUT", body: JSON.stringify({ codex_listen: false }) });
+  });
+});
+
 describe("the Ask helper is not an agent", () => {
   test("hooks inside Dak's own helper record nothing and deliver nothing", () => {
     const input = new TextEncoder().encode(JSON.stringify({ hook_event_name: "SessionStart", cwd: "/tmp/dak-ask-zz9", session_id: "helper-1" }));

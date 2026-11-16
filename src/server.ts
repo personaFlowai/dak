@@ -6,8 +6,8 @@ import {
   requireReader, takeUnread, archives, setArchived, setStatus, search, type NewAttachment, type NewComment,
 } from "./store";
 import { explain, ask } from "./explain";
-import { HELPERS, setHelper, setModel, writeConfig, type HelperName } from "./config";
-import { connected, connect, disconnect, type HookTool } from "./claude-hooks";
+import { HELPERS, setHelper, setModel, setCodexListen, writeConfig, type HelperName } from "./config";
+import { connected, connect, disconnect, ensureCodexListenTimeout, type HookTool } from "./claude-hooks";
 import { codexDefaultModel } from "./presence";
 import { postReview } from "./github";
 import { waitForMail } from "./wake";
@@ -244,6 +244,8 @@ async function api(req: Request, url: URL): Promise<Response> {
       if (!["claude", "codex", "cursor", "custom"].includes(b.helper)) throw new DakError("bad_helper", "The helper is claude, codex, cursor or custom.");
       setHelper(b.helper as HelperName, Array.isArray(b.command) ? b.command.map(String) : undefined);
     }
+    // Keep Codex listening: the setting, and the longer Stop limit it needs in Codex's hooks.
+    if (typeof b.codex_listen === "boolean") { setCodexListen(b.codex_listen); if (b.codex_listen) ensureCodexListenTimeout(); }
     if (b.model && typeof b.model === "object") {
       if (!["claude", "codex", "cursor"].includes(b.model.helper)) throw new DakError("bad_helper", "A model belongs to claude, codex or cursor.");
       try { setModel(b.model.helper, String(b.model.value ?? "")); }
@@ -382,6 +384,7 @@ function settings() {
     claude_connected: connected("claude"),
     codex_connected: connected("codex"),
     cursor_connected: connected("cursor"),
+    codex_listen: !!c.codex_listen,
     default_models: { codex: codexDefaultModel() },
     github_login: ghLogin(),
     instructions: INSTRUCTIONS, // what Settings offers to copy into Cursor's rules, or any other agent

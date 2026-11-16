@@ -36,6 +36,25 @@ const ours = (t: HookTool) => (entry: any) => t === "cursor"
 const hasWake = (s: any) => (s.hooks?.Stop ?? []).some((e: any) => (e?.hooks ?? []).some((h: any) => h?.asyncRewake && isOurs("claude", h.command)));
 const eventsFor = (t: HookTool): readonly string[] => (t === "cursor" ? CURSOR_EVENTS : EVENTS);
 
+// Codex's Stop hook may wait for mail for up to an hour ("keep listening"), so its limit is
+// a little over that. Every other hook answers at once.
+const CODEX_STOP_TIMEOUT = 3660;
+const timeoutFor = (t: HookTool, e: string) => (t === "codex" && e === "Stop" ? CODEX_STOP_TIMEOUT : 5);
+
+// Give an existing Codex connection the longer Stop limit. Codex sees a changed hook and asks
+// the person to approve it again, once.
+export function ensureCodexListenTimeout(): boolean {
+  if (!connected("codex")) return false;
+  const path = hooksPath("codex");
+  const s = read("codex");
+  let changed = false;
+  for (const entry of s.hooks?.Stop ?? []) for (const h of entry?.hooks ?? []) {
+    if (isOurs("codex", h?.command) && h.timeout !== CODEX_STOP_TIMEOUT) { h.timeout = CODEX_STOP_TIMEOUT; changed = true; }
+  }
+  if (changed) { copyFileSync(path, `${path}.before-dak`); writeFileSync(path, JSON.stringify(s, null, 2) + "\n"); }
+  return changed;
+}
+
 export function connected(t: HookTool): boolean {
   const s = read(t);
   return eventsFor(t).every((e) => (s.hooks?.[e] ?? []).some(ours(t))) && (t !== "claude" || hasWake(s));
@@ -50,7 +69,7 @@ export function connect(t: HookTool, bin: string) {
   if (t === "cursor") s.version ??= 1;
   for (const e of eventsFor(t)) {
     s.hooks[e] = (s.hooks[e] ?? []).filter((x: any) => !ours(t)(x));
-    s.hooks[e].push(t === "cursor" ? { command: `${bin}${MARK[t]}`, timeout: 5 } : { hooks: [{ type: "command", command: `${bin}${MARK[t]}`, timeout: 5 }] });
+    s.hooks[e].push(t === "cursor" ? { command: `${bin}${MARK[t]}`, timeout: 5 } : { hooks: [{ type: "command", command: `${bin}${MARK[t]}`, timeout: timeoutFor(t, e) }] });
   }
   // Codex and Cursor have no hook that can wake an idle session, so only Claude Code gets this.
   if (t === "claude") s.hooks.Stop.push({ hooks: [{ type: "command", command: writeWakeScript(), asyncRewake: true, timeout: 43200 }] });

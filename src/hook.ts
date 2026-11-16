@@ -1,4 +1,5 @@
 import { touch, whoami } from "./presence";
+import { loadConfig } from "./config";
 import { getThreadRow, takeUnread } from "./store";
 import type { Message } from "./types";
 
@@ -18,6 +19,9 @@ export function sessionName(input: any, _tool: string): { name: string; where: s
   return { where, name: whoami({ tool: _tool, where, session: input.session_id ?? "" }) };
 }
 
+const LISTEN_MS = Number(process.env.DAK_LISTEN_MS || 60 * 60 * 1000);
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
 export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "claude-code"): Promise<void> {
   let input: any = {};
   try { input = JSON.parse(await Bun.stdin.text()); } catch { return; }
@@ -34,7 +38,18 @@ export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "clau
     console.log(JSON.stringify(mail.length ? { followup_message: brief(name, mail) } : {}));
     return;
   }
-  const msgs = takeUnread(name);
+  let msgs = takeUnread(name);
+  // Codex cannot be woken once idle, so with "keep listening" on, its Stop hook waits here
+  // for mail (up to an hour, while Codex is still running) and hands it over as a reason to
+  // carry on. Typing to the session or pressing Esc ends the wait, as with any running turn.
+  if (!msgs.length && tool === "codex" && event === "Stop" && loadConfig().codex_listen) {
+    const until = Date.now() + LISTEN_MS;
+    const parent = process.ppid;
+    while (!msgs.length && Date.now() < until && alive(parent)) {
+      await Bun.sleep(2000);
+      msgs = takeUnread(name);
+    }
+  }
   if (!msgs.length) return;
   const text = brief(name, msgs);
   // Both tools name the event hook_event_name; Codex sessions are untested until one runs it.

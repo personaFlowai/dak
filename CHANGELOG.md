@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.6
+- "Keep Codex listening" in Settings: after each turn a Codex session waits up to an hour for Dak mail and carries on when it arrives, since Codex cannot be woken once idle.
+
 ## 0.1.5
 - Each chapter lists its files with the lines it adds and removes in each; a click jumps the code to that file.
 
