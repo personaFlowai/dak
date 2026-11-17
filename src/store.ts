@@ -296,6 +296,22 @@ export function setArchived(reader: string, peer: string, on: boolean) {
   return archives(reader);
 }
 
+/* ---------- pins ---------- */
+
+// Agents the person keeps at the top of their list, in the order they pinned them.
+export function pins(reader: string): Record<string, string> {
+  store().exec("CREATE TABLE IF NOT EXISTS pins (reader TEXT NOT NULL, peer TEXT NOT NULL, pinned_at TEXT NOT NULL, PRIMARY KEY (reader, peer))");
+  const rows = store().query("SELECT peer, pinned_at FROM pins WHERE reader = ? ORDER BY pinned_at").all(reader) as { peer: string; pinned_at: string }[];
+  return Object.fromEntries(rows.map((r) => [r.peer, r.pinned_at]));
+}
+export function setPinned(reader: string, peer: string, on: boolean): Record<string, string> {
+  if (!peer.trim()) throw new DakError("no_peer", "Say which conversation to pin.");
+  pins(reader);
+  if (on) store().query("INSERT INTO pins VALUES (?,?,?) ON CONFLICT(reader, peer) DO NOTHING").run(reader, peer, now());
+  else store().query("DELETE FROM pins WHERE reader = ? AND peer = ?").run(reader, peer);
+  return pins(reader);
+}
+
 /* ---------- reads ---------- */
 
 function rowToThread(r: any): Thread {

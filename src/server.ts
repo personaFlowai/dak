@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { loadConfig, person, token } from "./config";
 import {
   addMessage, blobPath, store, createThread, getThread, latestMessageId, listThreads, markRead, putBlob,
-  requireReader, takeUnread, archives, setArchived, setStatus, search, type NewAttachment, type NewComment,
+  requireReader, takeUnread, archives, setArchived, pins, setPinned, setStatus, search, type NewAttachment, type NewComment,
   addParticipant, decisions, groups, setGroup, awaitingReview,
 } from "./store";
 import { explain, ask } from "./explain";
@@ -387,6 +387,11 @@ async function api(req: Request, url: URL): Promise<Response> {
       const text = h.text.length > 160 ? (i > 60 ? "…" : "") + h.text.slice(Math.max(0, i - 60), i + 100).replace(/\s+/g, " ") + "…" : h.text.replace(/\s+/g, " ");
       return { ...h, text };
     }));
+  }
+  if (parts[0] === "pins") {
+    const reader = person(loadConfig());
+    if (method === "GET") return json(pins(reader));
+    if (method === "PUT" || method === "DELETE") { const b = await body(); return json(setPinned(reader, String(b.peer ?? ""), method === "PUT")); }
   }
   if (parts[0] === "archives") {
     const reader = person(loadConfig());

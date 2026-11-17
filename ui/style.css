@@ -1166,3 +1166,9 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 .tab-go { padding-right: 4px; }
 /* A little air between the tab row and the cards, so their rounded tops stand clear of it. */
 @media (min-width: 761px) { .app:not(.phone) { grid-template-rows: var(--tabs-h) minmax(0, 1fr); row-gap: 2px; } }
+/* Pin beside archive on a hovered agent row. */
+.row-wrap .pin { position: absolute; right: 34px; bottom: 6px; width: 24px; height: 24px; opacity: 0; background: var(--side-card, var(--side)); }
+.row-wrap:hover .pin, .row-wrap .pin:focus-visible { opacity: 1; }
+.row-wrap .pin svg { width: 14px; height: 14px; }
+.row-wrap .pin.on { color: var(--accent-text); }
+.row-wrap .arch { background: var(--side-card, var(--side)); }

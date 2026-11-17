@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.9
+- Pin agents: the pin beside a hovered agent, or Pin in the ⋯ menu, keeps it in a Pinned group at the top of the agents list, in the order you pinned them. Pins are kept by Dak, so the phone shows them too.
+
 ## 0.7.8
 - Fixed: the Done group in the sidebar's topics did not open; its click redrew only the conversation.
 

@@ -65,7 +65,15 @@ export function pairList(): string {
 export function peerList(): string {
   const list = peers();
   if (!list.length) return `<p class="empty">Nothing yet. Agents send here with <code>dak send --to ${esc(me)}</code>, or start one with the pencil above.</p>`;
-  return list.map((p) => {
+  // Pinned agents first, in the order you pinned them; the rest newest first.
+  const pinned = list.filter((p) => S.pins[p.name]).sort((a, b) => S.pins[a.name].localeCompare(S.pins[b.name]));
+  const rest = list.filter((p) => !S.pins[p.name]);
+  const rows = (ps: Peer[]) => ps.map(peerRow).join("");
+  return pinned.length ? `<div class="side-head sub">Pinned</div>${rows(pinned)}<div class="side-head sub">Others</div>${rows(rest)}` : rows(rest);
+}
+
+function peerRow(p: Peer): string {
+  {
     const about = agentOf(p.name)?.about;
     // The row names what needs you, not whatever moved last (a topic just closed, say).
     const shown = S.threads.find((t) => t.id === topicFor(p.name)) ?? p.latest;
@@ -73,9 +81,13 @@ export function peerList(): string {
     return `<div class="row-wrap" role="listitem"><button class="item ${p.unread ? "unread" : ""}" data-peer="${esc(p.name)}" aria-current="${S.view === "thread" && S.peer === p.name}">
       <span class="top">${mark(p.name, "sm")}<span class="who">${esc(name(p.name))}</span><time>${when(p.latest.updated_at)}</time></span>
       <span class="subj">${esc(shown.subject)}</span>
-      <span class="sub">${[state, about ? esc(about) : ""].filter(Boolean).join(" · ")}</span></button>${archiveBtn(p.name)}</div>`;
-  }).join("");
+      <span class="sub">${[state, about ? esc(about) : ""].filter(Boolean).join(" · ")}</span></button>${pinBtn(p.name)}${archiveBtn(p.name)}</div>`;
+  }
 }
+
+const pinBtn = (peer: string) => S.pins[peer]
+  ? `<button class="pin icon-btn on" data-unpin="${esc(peer)}" title="Unpin" aria-label="Unpin">${I.pin}</button>`
+  : `<button class="pin icon-btn" data-pin="${esc(peer)}" title="Pin to the top" aria-label="Pin to the top">${I.pin}</button>`;
 
 // Put-away conversations, at the foot of the list, folded until you open the section.
 export function archivedList(): string {

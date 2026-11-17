@@ -1089,3 +1089,14 @@ describe("code hopping", () => {
     expect((await (await http(`/v1/lookup?thread=${sent.thread_id}&att=${att}&name=${encodeURIComponent("a b")}`)).json()).error.code).toBe("bad_name");
   });
 });
+
+describe("pins", () => {
+  test("an agent pinned stays pinned, in the order pinned, and can be unpinned", async () => {
+    const put = (peer: string, on: boolean) => http("/v1/pins", { method: on ? "PUT" : "DELETE", body: JSON.stringify({ peer }) }).then((r) => r.json());
+    await put("atlas", true);
+    const both = await put("mitra", true);
+    expect(Object.keys(both)).toEqual(["atlas", "mitra"]);
+    expect(Object.keys(await put("atlas", false))).toEqual(["mitra"]);
+    expect(Object.keys(await (await http("/v1/pins")).json())).toEqual(["mitra"]);
+  });
+});

@@ -26,10 +26,11 @@ const native = document.documentElement.classList.contains("native");
 /* ================= data ================= */
 
 async function loadList() {
-  [S.threads, S.others, S.archived] = await Promise.all([
+  [S.threads, S.others, S.archived, S.pins] = await Promise.all([
     api<Summary[]>(`/threads?for=${encodeURIComponent(me)}&box=all`),
     api<Summary[]>(`/threads?for=${encodeURIComponent(me)}&box=others`),
     api<Record<string, string>>("/archives").catch(() => ({})),
+    api<Record<string, string>>("/pins").catch(() => ({})),
   ]);
   const [q, all] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => [])]);
   // Held rows (being reworked, parked) are listed apart and never counted as waiting on you.
@@ -282,6 +283,7 @@ function threadView(): string {
   const statusWords = onIt ? { label: "You're reviewing", cls: "reviewing" } : st;
   const menu = [
     S.peer && !isPair(S.peer) && canReply(t) ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
+    S.peer && !isPair(S.peer) ? `<button class="mi" data-${S.pins[S.peer] ? "unpin" : "pin"}="${esc(S.peer)}">${I.pin}${S.pins[S.peer] ? `Unpin ${esc(name(S.peer))}` : `Pin ${esc(name(S.peer))} to the top`}</button>` : "",
     S.peer ? `<button class="mi" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}">${archived ? `${I.lineUp}Back to the Inbox` : `${I.archive}Archive conversation`}</button>` : "",
     gh ? `<a class="mi" href="${esc(gh)}" target="_blank" rel="noopener">${I.github}Open on GitHub</a>` : "",
   ].filter(Boolean).join("");
@@ -1060,6 +1062,7 @@ document.addEventListener("click", async (e) => {
   if (d.choose !== undefined && d.mid) return choose(d.in!, Number(d.mid), Number(d.choose));
   if (d.done) return markDone(d.done, d.on !== "0");
   if (d.showDone !== undefined) { S.showDone = !S.showDone; return render(); } // the Done group is in the sidebar too
+  if (d.pin || d.unpin) { S.pins = await api<Record<string, string>>("/pins", { method: d.pin ? "PUT" : "DELETE", body: { peer: d.pin || d.unpin } }); return render(); }
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
