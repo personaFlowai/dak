@@ -1164,3 +1164,5 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 .tab-x svg { width: 11px; height: 11px; }
 .tab.on { box-shadow: none; }
 .tab-go { padding-right: 4px; }
+/* A little air between the tab row and the cards, so their rounded tops stand clear of it. */
+@media (min-width: 761px) { .app:not(.phone) { grid-template-rows: var(--tabs-h) minmax(0, 1fr); row-gap: 2px; } }

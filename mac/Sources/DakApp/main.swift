@@ -255,6 +255,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         window.title = "Dak"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // No line under the title bar: it would cut across the window under the tab row.
+        window.titlebarSeparatorStyle = .none
         window.delegate = self
         window.minSize = NSSize(width: 900, height: 600)
         // A translucent material behind the page: where the page is transparent (the

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.6
+- Fixed: a line ran across the Mac window under the tab row (the title bar's separator, drawn at the bottom of the taller title bar), and the cards' rounded tops touched it. The separator is off, and the cards sit just below the tabs.
+
 ## 0.7.5
 - A tab's × is a plain mark that appears when you point at the tab, with no box around it; the open tab is a quiet fill.
 
