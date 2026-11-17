@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.0
+- ⌘-click a name in a PR to see where it is defined and who uses it, in a peek over the code. It searches the PR's files and the repo at the PR's head (the working tree when that commit is not fetched). A place in the PR's diff scrolls the PR there; anything else opens in the peek. ⌘-click inside the peek to go further; Back or ⌘[ returns; Esc closes. Mac only: the phone link never reads files outside the PR.
+
 ## 0.5.2
 - A chapter is at most 6 files and 12 hunks. `dak chapters check` and `dak send` refuse a bigger one unless it says why: `"big_why"` on the chapter, or `--allow-big "why"`. The reason shows on the chapter as "Why so big". Concept chapters are exempt.
 

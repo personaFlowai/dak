@@ -1072,3 +1072,20 @@ describe("chapters a reader can hold", () => {
     expect(ok.message.attachments[0].meta.chapters[0].big_why).toBe("one rename across the folder");
   });
 });
+
+describe("code hopping", () => {
+  test("a name's definition comes from the PR's files and the repo at its head, with the places that use it", async () => {
+    writeFileSync(join(repo, "lib.ts"), "export function helperOne(x: number) {\n  return x + 1;\n}\n");
+    writeFileSync(join(repo, "use.ts"), "import { helperOne } from './lib';\nexport const two = helperOne(1);\n");
+    git("add", "."); git("commit", "-qm", "lib");
+    const sent = dak("send", "--to", "sam", "--from", "atlas", "--base", "main", "--subject", "Hop", "--json").json();
+    const att = sent.message.attachments[0].id;
+    const r = await (await http(`/v1/lookup?thread=${sent.thread_id}&att=${att}&name=helperOne`)).json();
+    expect(r.defs.map((d: any) => [d.file, d.line])).toEqual([["lib.ts", 1]]);
+    expect(r.defs[0].snippet.lines[0]).toContain("export function helperOne");
+    expect(r.refs.map((x: any) => x.file).sort()).toEqual(["use.ts", "use.ts"]);
+    const sn = await (await http(`/v1/lookup?thread=${sent.thread_id}&att=${att}&file=use.ts&line=2`)).json();
+    expect(sn.lines.join("\n")).toContain("helperOne(1)");
+    expect((await (await http(`/v1/lookup?thread=${sent.thread_id}&att=${att}&name=${encodeURIComponent("a b")}`)).json()).error.code).toBe("bad_name");
+  });
+});

@@ -85,11 +85,13 @@ export function closePhone(signOut = false) {
   if (signOut) phoneKey(true);
 }
 
-// What the phone may not do from outside: change how this Mac is set up.
+// What the phone may not do from outside: change how this Mac is set up, or read past the PR.
 export function phoneMayNot(method: string, parts: string[]): boolean {
   if (["door", "phone", "wake"].includes(parts[0])) return true;
   if (parts[0] === "settings" && method !== "GET") return true;
   if (parts[0] === "connect" || parts[0] === "login") return true;
+  // Code hopping reads any file in the checkout, not just the PR: it stays on the Mac.
+  if (parts[0] === "lookup") return true;
   return false;
 }
 

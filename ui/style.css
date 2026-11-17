@@ -975,3 +975,27 @@ html { touch-action: manipulation; }
 /* A settings row that is only a switch and its words: no tool mark, no control on the right. */
 .option.toggle-row { grid-template-columns: auto minmax(0, 1fr); }
 .option.toggle-row .nm > span { white-space: normal; line-height: 1.45; }
+
+/* ---------- the peek: a definition over the code, opened with ⌘-click ---------- */
+body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
+.peek { position: fixed; z-index: 40; top: 92px; right: 18px; width: min(680px, 54vw); max-height: calc(100vh - 130px); display: flex; flex-direction: column;
+  background: var(--win); border-radius: 10px; box-shadow: 0 0 0 .5px var(--line), 0 22px 50px -18px rgba(0,0,0,.45); overflow: hidden; }
+.peek-top { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--line2); }
+.peek-top .pt { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.peek-top .pt b code { font: 600 13px var(--mono); }
+.peek-top .pt span { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peek .pf { font-family: var(--mono); font-size: 11.5px; color: var(--text2); }
+.peek .pl { font-family: var(--mono); font-size: 11.5px; color: var(--text3); }
+.peek .inpr { margin-left: 6px; font-size: 10.5px; font-weight: 600; color: var(--accent-text); }
+.pdefs { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+.peek-body { flex: 1; min-height: 0; overflow: auto; }
+.peek-code { width: 100%; border-collapse: collapse; font: 12px/1.6 var(--mono); }
+.peek-code td.ln { width: 1%; padding: 0 10px 0 12px; text-align: right; color: var(--text3); user-select: none; white-space: nowrap; }
+.peek-code td.tx { padding: 0 12px 0 0; white-space: pre-wrap; word-break: break-word; }
+.peek-code tr.at { background: var(--accent-tint); }
+.perr { padding: 12px; font-size: 12.5px; color: var(--text2); }
+.prefs { border-top: 1px solid var(--line2); padding: 4px 6px 10px; }
+.pref { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border-radius: 6px; text-align: left; }
+.pref:hover { background: var(--hover); }
+.pref code { font: 11.5px var(--mono); color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pmore { padding: 4px 8px; font-size: 12px; color: var(--text3); }

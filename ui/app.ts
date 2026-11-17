@@ -2,6 +2,7 @@
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
+import { closePeek, openPeek, peekBackStep, peekView, showSpot, wordAt } from "./peek";
 import { topicRows, topicsColumn } from "./topics";
 import qrcode from "qrcode-generator";
 import {
@@ -202,6 +203,9 @@ function renderMain() {
   else main.innerHTML = threadView();
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
   const tl = $("#tlist"); if (tl) tl.scrollTop = keep.topics;
+  // The peek floats over whatever PR is open; it goes when you leave the PR.
+  if (S.peek && (S.view !== "thread" || findAtt(S.att)?.type !== "pr" || onPhone())) closePeek();
+  if (S.peek) main.insertAdjacentHTML("beforeend", peekView());
   // A topic opened from elsewhere (the queue, search) is scrolled into sight in the list, once.
   if (tl && S.cur !== listShows) { listShows = S.cur; tl.querySelector<HTMLElement>(".trow.on")?.scrollIntoView({ block: "nearest" }); }
   // A re-render while you search the topics leaves the cursor where it was.
@@ -878,10 +882,35 @@ document.addEventListener("change", async (e) => {
 
 document.addEventListener("mousedown", (e) => { if (S.search.open && !(e.target as HTMLElement).closest(".pal")) closeSearch(); });
 
+// ⌘-click a name in a PR's code (or in the peek) to see where it is defined and used.
+document.addEventListener("click", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || onPhone()) return;
+  const cell = (e.target as HTMLElement).closest(".diff td.tx, .peek-code td.tx");
+  if (!cell || findAtt(S.att)?.type !== "pr") return;
+  const w = wordAt(e.clientX, e.clientY);
+  if (!w) return;
+  e.preventDefault(); e.stopPropagation(); getSelection()?.removeAllRanges();
+  openPeek(w, renderMain);
+}, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.add("cmd"); });
+document.addEventListener("keyup", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.remove("cmd"); });
+window.addEventListener("blur", () => document.body.classList.remove("cmd"));
+
 document.addEventListener("click", async (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>("button, [data-thread]");
   if (!b) return;
   const d = b.dataset;
+  if (d.peekClose !== undefined) { closePeek(); return renderMain(); }
+  if (d.peekBack !== undefined) { peekBackStep(); return renderMain(); }
+  if (d.peekDef !== undefined && S.peek) { S.peek = { ...S.peek, def: Number(d.peekDef) }; return renderMain(); }
+  if (d.peekRefs !== undefined && S.peek) { S.peek = { ...S.peek, refsOpen: !S.peek.refsOpen }; return renderMain(); }
+  if (d.peekAt) {
+    // A place in this PR's diff, if it is on screen, scrolls the PR there; anything else opens in the peek.
+    const [file, line, inPr] = d.peekAt.split("|");
+    const key = `${file}|new|${line}`;
+    if (inPr === "1" && document.querySelector(`.code-col [data-key="${CSS.escape(key)}"]`)) return scrollToRow(key);
+    return showSpot(file, Number(line), renderMain);
+  }
   if (d.focus !== undefined) { S.focus = !S.focus; S.dockOpen = false; local.set("focus", S.focus); return render(); }
   if (d.askOpen !== undefined) return openAsk();
   if (d.dock) { S.dockOpen = d.dock === "open"; renderMain(); if (S.dockOpen) $<HTMLTextAreaElement>("#message")?.focus(); return; }
@@ -1171,6 +1200,8 @@ document.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).cl
 document.addEventListener("scroll", () => { if (pending) readSelection(); }, true);
 
 document.addEventListener("keydown", (e) => {
+  if (S.peek && e.key === "Escape") { e.preventDefault(); closePeek(); return renderMain(); }
+  if (S.peek && (e.metaKey || e.ctrlKey) && e.key === "[" && S.peekBack.length) { e.preventDefault(); peekBackStep(); return renderMain(); }
   if ((e.metaKey || e.ctrlKey) && (e.key === "[" || e.key === "]")) { e.preventDefault(); return e.key === "[" ? (nav.idx > 0 && history.back()) : (nav.idx < nav.max && history.forward()); }
   if (e.key === "Enter" && (e.target as HTMLElement)?.id === "att-link") { e.preventDefault(); return addLink(); }
   const id = document.activeElement?.id ?? "";

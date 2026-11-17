@@ -1,4 +1,5 @@
 import { buildCost, parseParticipant } from "./handoff";
+import { lookup, snippet } from "./lookup";
 import { tickRunners } from "./reviewer";
 import { closePhone, cookieKey, isPhoneKey, openPhone, phoneHost, phoneMayNot, phoneStatus } from "./phone";
 import { recentWakes, settleWakes, tickSleepers } from "./sleeper";
@@ -480,6 +481,13 @@ async function api(req: Request, url: URL): Promise<Response> {
     const file = Bun.file(blobPath(parts[1]));
     const type = q.get("type") || "application/octet-stream";
     return new Response(file, { headers: { "content-type": type, "cache-control": "private, max-age=31536000, immutable" } });
+  }
+
+  // Code hopping: where a name is defined and used, and a few lines of any file, for a PR.
+  if (parts[0] === "lookup" && method === "GET") {
+    const t = q.get("thread") ?? "", att = q.get("att") ?? "";
+    if (q.get("file")) return json(await snippet(t, att, q.get("file")!, Number(q.get("line") ?? 1)));
+    return json(await lookup(t, att, q.get("name") ?? ""));
   }
 
   if (parts[0] === "explain" && method === "POST") {
