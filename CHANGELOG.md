@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.8
+- Fixed: the Done group in the sidebar's topics did not open; its click redrew only the conversation.
+
 ## 0.7.7
 - Fixed: opening a topic (from the sidebar, a tab or the queue) stayed at the top instead of going to the latest message; it looked for the topic's divider, which the one-topic view on the Mac does not have. It stays at the end while pictures load, too.
 

@@ -1059,7 +1059,7 @@ document.addEventListener("click", async (e) => {
   if (d.connect) { S.settings = await api(`/connect/${d.tool ?? "claude"}`, { method: d.connect === "on" ? "POST" : "DELETE" }); return renderMain(); }
   if (d.choose !== undefined && d.mid) return choose(d.in!, Number(d.mid), Number(d.choose));
   if (d.done) return markDone(d.done, d.on !== "0");
-  if (d.showDone !== undefined) { S.showDone = !S.showDone; return renderMain(); }
+  if (d.showDone !== undefined) { S.showDone = !S.showDone; return render(); } // the Done group is in the sidebar too
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
   if (d.showArchived !== undefined) { S.showArchived = !S.showArchived; return renderSide(); }
