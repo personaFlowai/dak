@@ -1056,3 +1056,19 @@ describe("coordination: holds, routes, confirmations, moved heads, try-it", () =
     expect([p.exitCode, p.stdout.toString().trim(), p.stderr.toString()]).toEqual([0, "[]", ""]);
   });
 });
+
+describe("chapters a reader can hold", () => {
+  test("a chapter over 6 files is refused at send and named by check; --allow-big lets it through with the reason on it", () => {
+    const parts = Array.from({ length: 7 }, (_, i) => `diff --git a/f${i}.ts b/f${i}.ts\n--- a/f${i}.ts\n+++ b/f${i}.ts\n@@ -1 +1 @@\n-a\n+b\n`).join("");
+    writeFileSync(join(repo, "big.diff"), parts);
+    writeFileSync(join(repo, "big.json"), JSON.stringify([{ title: "Everything", summary: "All of it.", risk: "low", hunks: Array.from({ length: 7 }, (_, i) => ({ file: `f${i}.ts`, start: 1 })) }]));
+    const sent = dak("send", "--to", "sam", "--from", "atlas", "--diff", "big.diff", "--chapters", "big.json", "--subject", "Big", "--json").json();
+    expect(sent.error.code).toBe("big_chapters");
+    expect(sent.error.message).toContain("7 files");
+    const check = dak("chapters", "check", "big.json", "--diff", "big.diff");
+    expect(check.code).toBe(1);
+    expect(dak("chapters", "check", "big.json", "--diff", "big.diff", "--allow-big", "one rename across the folder").code).toBe(0);
+    const ok = dak("send", "--to", "sam", "--from", "atlas", "--diff", "big.diff", "--chapters", "big.json", "--subject", "Big", "--allow-big", "one rename across the folder", "--json").json();
+    expect(ok.message.attachments[0].meta.chapters[0].big_why).toBe("one rename across the folder");
+  });
+});

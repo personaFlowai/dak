@@ -112,6 +112,7 @@ export interface Chapter {
   reviewer_note?: { by: string; text: string }; // from whoever read the code, if not the author
   hunks: { file: string; start: number }[];
   key_changes?: { text: string; file: string; side?: "old" | "new"; line: number }[];
+  big_why?: string; // why a chapter is bigger than a reader can hold (over 6 files or 12 hunks), when it must be
 }
 
 export interface DocMeta {

@@ -12,7 +12,7 @@ import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presenc
 import { SKILL, INSTRUCTIONS } from "./skill";
 import pkg from "../package.json";
 import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
-import { snapshotPr, loadChapters, checkChapters, diffForChapters, draftChapters } from "./pr";
+import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, draftChapters } from "./pr";
 import { DakError, type Message, type Verdict } from "./types";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
@@ -54,6 +54,7 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
       --message-file <f|->      the message from a file or stdin, untouched by the shell
       --type tryit [--ticket REVA-123]   a "try it" on a live feature: buttons Works / Something's wrong; on Works
                                 the reply says to post the proof on the ticket and move it to Done
+      --allow-big "why"         send chapters over 6 files or 12 hunks anyway; the reason shows on each big chapter
       --range base..head        (also on dak add) a reviewer runner reviews only these commits: a stacked PR's own
   dak add <thread> <name:role>...                bring someone onto a thread; they get it all as new mail
   dak group set <name> <member>... | dak group   send to all of them with --to group:<name>
@@ -154,7 +155,7 @@ function refreshThread(id: string, values: any) {
     const pr = values.pr ?? (values.base || values.diff ? undefined : old.number ? String(old.number) : undefined);
     const baseRef = values.base ?? (pr || values.diff ? undefined : old.base_ref);
     if (!pr && !baseRef && !values.diff) throw new DakError("usage", "That diff came from a file: pass --diff <file> (or --base <ref>).");
-    const { meta: fresh, files } = snapshotPr({ repo: values.repo ?? old.repo ?? ".", pr, base: baseRef, diffFile: values.diff, chaptersFile: values.chapters });
+    const { meta: fresh, files } = snapshotPr({ repo: values.repo ?? old.repo ?? ".", pr, base: baseRef, diffFile: values.diff, chaptersFile: values.chapters, allowBig: values["allow-big"] });
     if (values.chapters) return fresh;
     const problems = old.chapters.length ? checkChapters(old.chapters, files) : [];
     if (problems.length) throw new DakError("bad_chapters", "The old chapters no longer match the new head; pass --chapters:\n  " + problems.join("\n  "));
@@ -263,7 +264,7 @@ const OPTIONS = {
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
   eta: { type: "string" }, after: { type: "string" }, tier: { type: "string" }, why: { type: "string" }, waiting: { type: "string" },
   review: { type: "boolean" }, hotfix: { type: "boolean" }, "confirmed-by": { type: "string" }, type: { type: "string" }, blocks: { type: "string" },
-  rework: { type: "string" }, "from-group": { type: "string" }, via: { type: "string" }, range: { type: "string" }, ticket: { type: "string" }, state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
+  rework: { type: "string" }, "from-group": { type: "string" }, via: { type: "string" }, range: { type: "string" }, ticket: { type: "string" }, "allow-big": { type: "string" }, state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
 } as const;
 
 export async function main(argv: string[]): Promise<number> {
@@ -314,7 +315,7 @@ export async function main(argv: string[]): Promise<number> {
       let subject = values.subject as string | undefined;
       let prMeta: any = null;
       if (values.pr || values.base || values.diff) {
-        const { meta } = snapshotPr({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff, chaptersFile: values.chapters });
+        const { meta } = snapshotPr({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff, chaptersFile: values.chapters, allowBig: values["allow-big"] });
         atts.unshift({ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta });
         prMeta = meta;
         kind = "pr";
@@ -393,7 +394,7 @@ export async function main(argv: string[]): Promise<number> {
         // Same review, new head (a rebase, a renumbered migration): swap it in place, and say why.
         prMeta = refreshThread(id, values);
       } else if (values.pr || values.base || values.diff) {
-        const { meta } = snapshotPr({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff, chaptersFile: values.chapters });
+        const { meta } = snapshotPr({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff, chaptersFile: values.chapters, allowBig: values["allow-big"] });
         atts.unshift({ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta });
         prMeta = meta;
       }
@@ -631,8 +632,8 @@ export async function main(argv: string[]): Promise<number> {
       if (positionals[0] !== "check" || !positionals[1]) throw new DakError("usage", "dak chapters draft|check <file> [--pr n | --base ref | --diff f]");
       const chapters = loadChapters(positionals[1]);
       const files = diffForChapters({ repo: values.repo, pr: values.pr, base: values.base, diffFile: values.diff });
-      const problems = checkChapters(chapters, files);
-      out(json, { ok: !problems.length, problems }, () => problems.length ? problems.join("\n") : `All ${files.reduce((n, f) => n + f.hunks.length, 0)} hunks are in a chapter.`);
+      const problems = [...checkChapters(chapters, files), ...bigChapters(chapters, values["allow-big"])];
+      out(json, { ok: !problems.length, problems }, () => problems.length ? problems.join("\n") : `All ${files.reduce((n, f) => n + f.hunks.length, 0)} hunks are in a chapter, and every chapter is small enough to read.`);
       return problems.length ? 1 : 0;
     }
     case "serve": {

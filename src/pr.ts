@@ -33,7 +33,7 @@ function stackedOn(repo: string, branch: string | null): { stacked_on?: NonNulla
 }
 
 export function snapshotPr(opts: {
-  repo?: string; pr?: string; base?: string; diffFile?: string; chaptersFile?: string; url?: string; title?: string;
+  repo?: string; pr?: string; base?: string; diffFile?: string; chaptersFile?: string; url?: string; title?: string; allowBig?: string;
 }): { meta: PrMeta; files: DiffFile[] } {
   const repo = resolve(opts.repo ?? ".");
   let diff = "", url = opts.url ?? null, number: number | null = null, title = opts.title ?? null;
@@ -61,6 +61,8 @@ export function snapshotPr(opts: {
   if (chapters.length) {
     const problems = checkChapters(chapters, files);
     if (problems.length) throw new DakError("bad_chapters", "Chapters do not match the diff:\n  " + problems.join("\n  "));
+    const big = bigChapters(chapters, opts.allowBig);
+    if (big.length) throw new DakError("big_chapters", "Chapters too big to read:\n  " + big.join("\n  "));
   }
 
   const meta: PrMeta = {
@@ -115,12 +117,29 @@ export function parseChapters(raw: any): Chapter[] {
     const str = (v: any) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
     const note = c.reviewer_note && str(c.reviewer_note.text) ? { by: str(c.reviewer_note.by) ?? "reviewer", text: str(c.reviewer_note.text)! } : undefined;
     return { title: String(c.title), summary: String(c.summary ?? ""), risk, risk_why: c.risk_why ? String(c.risk_why) : undefined,
-      why: str(c.why), proof: str(c.proof), noticed: str(c.noticed), reviewer_note: note,
+      why: str(c.why), proof: str(c.proof), noticed: str(c.noticed), reviewer_note: note, big_why: str(c.big_why) ?? str(c.allow_big),
       check: Array.isArray(c.check) ? c.check.map(String).filter((x: string) => x.trim()).slice(0, 6) : undefined,
       hunks: (c.hunks ?? []).map((h: any) => ({ file: String(h.file), start: Number(h.start) })),
       key_changes: Array.isArray(c.key_changes) ? c.key_changes.map((k: any) => ({
         text: String(k.text), file: String(k.file), side: k.side === "old" ? "old" : "new", line: Number(k.line) })) : [] };
   });
+}
+
+/* A chapter is a part a reader can hold in their head: at most 6 files and about 12 hunks. A
+   concept chapter (no hunks of its own) is exempt. A bigger one goes out only with a reason,
+   given per chapter as "big_why" or for all of them with --allow-big "why", and shown on the
+   chapter. #2432 went out with 15- and 11-file chapters and nothing stopped it. */
+export const MAX_FILES = 6, MAX_HUNKS = 12;
+export function bigChapters(chapters: Chapter[], allowBig?: string): string[] {
+  const out: string[] = [];
+  chapters.forEach((c, i) => {
+    if (!c.hunks.length) return;
+    const files = new Set(c.hunks.map((h) => h.file)).size;
+    if (files <= MAX_FILES && c.hunks.length <= MAX_HUNKS) return;
+    if (!c.big_why && allowBig?.trim()) c.big_why = allowBig.trim();
+    if (!c.big_why) out.push(`Chapter ${i + 1} ("${c.title}") has ${files} files and ${c.hunks.length} hunks; a chapter is at most ${MAX_FILES} files and ${MAX_HUNKS} hunks. Split it, or say why it must stay whole: "big_why" on the chapter, or --allow-big "why".`);
+  });
+  return out;
 }
 
 // Every hunk in exactly one chapter, and every reference pointing at a real place.

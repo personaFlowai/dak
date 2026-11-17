@@ -68,6 +68,7 @@ A PR without chapters shows one section per file. Chapters make it reviewable in
 - `why`, `noticed`, `check` and `reviewer_note` are optional and show at the top of the chapter. A code reviewer who has read the diff (Cursor, Codex) often writes better chapters than the author: it can write the whole file, or add a `reviewer_note` to the chapters it has an opinion on.
 
 - `hunks[].start` is the hunk's first line on the new side (the old side for a deleted file). Every hunk must be in exactly one chapter.
+- A chapter is at most 6 files and 12 hunks. A bigger one needs `"big_why"` on the chapter or `--allow-big "why"` on the send, and the reason shows on it; `dak chapters check` and `dak send` refuse it otherwise.
 - `key_changes` are the three or four lines worth looking at first. `side: "old"` for a removed line.
 - Check before sending: `dak chapters check chapters.json --pr <n>` (or `--base main`, or `--diff file`). It names any hunk left out and any line that is not in the diff, and `dak send` refuses the same mistakes.
 - To list hunk starts: `git diff main...HEAD | grep -n '^@@'`, or send once without chapters and read the file list.

@@ -93,6 +93,7 @@ function chapterView(a: Pr, chapters: (Chapter & { plain?: boolean })[], files: 
       ${ch.why ? `<dl class="ctx"><dt>Why</dt><dd>${esc(ch.why)}</dd></dl>` : ""}
       ${ch.risk !== "low" ? `<dl class="ctx"><dt><span class="risk ${ch.risk}">${RISK[ch.risk]}</span></dt><dd>${esc(ch.risk_why ?? "")}</dd></dl>` : ""}
       ${ch.proof ? `<dl class="ctx"><dt>Proof</dt><dd>${esc(ch.proof)}</dd></dl>` : ""}
+      ${ch.big_why ? `<dl class="ctx"><dt>Why so big</dt><dd>${esc(ch.big_why)}</dd></dl>` : ""}
       ${ch.noticed ? `<dl class="ctx"><dt>People notice</dt><dd>${esc(ch.noticed)}</dd></dl>` : ""}
       ${ch.check?.length ? checks(a.id, S.chapter, ch.check) : ""}
       ${keys ? `<div class="keys"><h3>What to review</h3><ul>${keys}</ul></div>` : ""}

@@ -49,6 +49,7 @@ How to write them well:
 - **`key_changes`**: the two to four lines worth looking at first. `side: "old"` for a removed line.
 - **A concept chapter** has no `hunks`, only `key_changes`: use it to explain one part of a big hunk (a long migration, say) on its own. Its hunks still belong to another chapter.
 - **`hunks[].start`** is the hunk's first line on the new side (the old side for a deleted file). Every hunk must be in exactly one chapter. List them with `git diff main...HEAD | grep -n '^@@'`.
+- **Small chapters.** A chapter is at most 6 files and 12 hunks, so a reader can hold it. Split a bigger one by what each part does. If one truly must stay whole (a rename across a folder), give the reason as `"big_why"` on that chapter, or `--allow-big "why"` on the send; it shows on the chapter. `dak chapters check` and `dak send` refuse a big chapter without one. A concept chapter (key changes only) is exempt.
 - **A reviewer can write them, or add to them.** If a code reviewer (Cursor, Codex) has read the diff, ask it to write the chapters, or to add `"reviewer_note": { "by": "cursor", "text": "..." }` to the chapters it has an opinion on. The reader sees the note under the chapter's heading.
 
 Then:

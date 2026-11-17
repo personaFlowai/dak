@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.2
+- A chapter is at most 6 files and 12 hunks. `dak chapters check` and `dak send` refuse a bigger one unless it says why: `"big_why"` on the chapter, or `--allow-big "why"`. The reason shows on the chapter as "Why so big". Concept chapters are exempt.
+
 ## 0.5.1
 - Settings, Reviewing: the Fold test files row was cut to "Fo..."; it now reads in full.
 
