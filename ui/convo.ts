@@ -2,7 +2,7 @@
    thread, so a reply reaches the agent on the right piece of work with its anchors.
    On screen, all threads with one agent read as one timeline, split into topics. */
 import { api } from "./api";
-import { S, me, esc, name, mark, when, agentOf, standing, looking, sizeLabel, type Summary } from "./state";
+import { S, me, esc, name, mark, when, agentOf, standing, looking, sizeLabel, onPhone, type Summary } from "./state";
 import { I } from "./icons";
 
 // Where typed text is kept: per topic, or per agent while starting a new one.
@@ -19,7 +19,7 @@ export const peerOf = (t: Pick<Thread, "to" | "from"> & { participants?: string[
 export const onThread = (t: Pick<Thread, "to" | "from"> & { participants?: string[] }) => t.to === me || t.from === me || !!t.participants?.includes(me);
 export const isPair = (peer: string | null) => !!peer?.includes("+");
 export const peerName = (peer: string) => peer.split("+").map(name).join(" and ");
-const everyThread = () => [...S.threads, ...S.others];
+export const everyThread = () => [...S.threads, ...S.others];
 
 // Archived until someone other than you writes in it after you archived it; then it is back.
 export function isArchived(peer: string): boolean {
@@ -133,13 +133,15 @@ export function topicLabel(t: Topic): string {
 /* The merged timeline. A divider opens each run of messages from one topic; a closed
    topic you are not on folds to its divider. */
 export function timeline(render: (m: Message, topic: Topic) => string): string {
-  const shown = S.allTopics ? S.convo : S.convo.filter((t) => t.thread.id === S.cur);
+  // On the Mac the topics column picks the topic, so the conversation is always that one topic.
+  const all = S.allTopics && onPhone();
+  const shown = all ? S.convo : S.convo.filter((t) => t.thread.id === S.cur);
   const items = shown.flatMap((t) => t.messages.map((m) => ({ m, t })))
     .sort((a, b) => a.m.created_at.localeCompare(b.m.created_at) || a.m.id - b.m.id);
   const one = shown.length === 1;
   let last = "";
   const out: string[] = [];
-  if (S.olderTopics && S.allTopics) out.push(`<button class="older" data-more-topics>Show ${S.olderTopics} earlier topic${S.olderTopics === 1 ? "" : "s"}</button>`);
+  if (S.olderTopics && all) out.push(`<button class="older" data-more-topics>Show ${S.olderTopics} earlier topic${S.olderTopics === 1 ? "" : "s"}</button>`);
   // Done topics leave the conversation; the one you are on stays, so you can still read it.
   const done = shown.filter((t) => t.thread.status === "closed" && t.thread.id !== S.cur);
   const hidden = new Set(S.showDone ? [] : done.map((t) => t.thread.id));
@@ -152,7 +154,7 @@ export function timeline(render: (m: Message, topic: Topic) => string): string {
       const kind = t.thread.kind === "pr" ? I.pr : t.thread.kind === "doc" ? I.doc : I.chat;
       const st = standing(t.thread, t.messages);
       out.push(`<div class="topic ${id === S.cur ? "on" : ""} ${folded ? "folded" : ""}">
-        <button class="tbtn" data-topic="${id}" title="${id === S.cur ? "You are replying on this" : "Reply on this"}"><span class="tl">${kind}<b>${esc(topicLabel(t))}</b></span>${id === S.cur && S.allTopics ? `<span class="here">You're on this one</span>` : ""}<span class="ts ${st.cls}">${esc(closed ? "Done" : st.label)}</span></button>
+        <button class="tbtn" data-topic="${id}" title="${id === S.cur ? "You are replying on this" : "Reply on this"}"><span class="tl">${kind}<b>${esc(topicLabel(t))}</b></span>${id === S.cur && all ? `<span class="here">You're on this one</span>` : ""}<span class="ts ${st.cls}">${esc(closed ? "Done" : st.label)}</span></button>
         ${isPair(S.peer) ? "" : `<button class="done-btn" data-done="${id}" data-on="${closed ? "0" : "1"}" title="${closed ? "Bring this topic back" : "Mark this topic done: it leaves the conversation"}">${closed ? "Reopen" : `${I.check} Done`}</button>`}</div>`);
     }
     last = id;

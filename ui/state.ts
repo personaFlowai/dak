@@ -50,6 +50,8 @@ export const S = {
   data: null as { thread: Thread; messages: Message[] } | null,
   att: null as string | null,
   chapter: -1, // -1 is the PR's overview
+  topicFind: "", // the topics column's search
+  topicsOpen: local.get("topicsOpen", true), // the topics column beside a conversation, on the Mac
   hideTests: local.get("hideTests", false), // test files fold to their header in a PR; Show opens one
   split: local.get("split", false), // diffs side by side: removed on the left, added on the right
   restore: null as null | Record<string, number>,

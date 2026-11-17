@@ -2,6 +2,7 @@
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
+import { topicRows, topicsColumn } from "./topics";
 import qrcode from "qrcode-generator";
 import {
   S, me, esc, $, name, mark, when, standing, approvedNow, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
@@ -184,9 +185,11 @@ function toolbar(title: string, sub = "", right = ""): string {
     <div class="tools">${right}</div></header>`;
 }
 
+let listShows: string | null = null; // the topic the topics list last scrolled to
 function renderMain() {
   const main = $("#main")!;
-  const keep = { phonePr: $(".phone-pr")?.scrollTop ?? 0, reading: $("#reading")?.scrollTop ?? 0, msgs: $("#msgs")?.scrollTop, body: $(".pane-body")?.scrollTop ?? 0,
+  const finding = document.activeElement?.id === "topic-find" ? ($<HTMLInputElement>("#topic-find")!.selectionStart ?? 0) : -1;
+  const keep = { topics: $("#tlist")?.scrollTop ?? 0, phonePr: $(".phone-pr")?.scrollTop ?? 0, reading: $("#reading")?.scrollTop ?? 0, msgs: $("#msgs")?.scrollTop, body: $(".pane-body")?.scrollTop ?? 0,
     // Beside mode: each column keeps its place while you stay on the same chapter.
     chapter: $(".chapter.beside")?.dataset.key, code: $("#code-scroll")?.scrollTop ?? 0, notes: $(".notes-col > header")?.scrollTop ?? 0 };
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
@@ -198,6 +201,11 @@ function renderMain() {
   else if (!S.data) main.innerHTML = toolbar("Dak") + `<div class="blank"><p>Choose a thread to read it.</p></div>`;
   else main.innerHTML = threadView();
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
+  const tl = $("#tlist"); if (tl) tl.scrollTop = keep.topics;
+  // A topic opened from elsewhere (the queue, search) is scrolled into sight in the list, once.
+  if (tl && S.cur !== listShows) { listShows = S.cur; tl.querySelector<HTMLElement>(".trow.on")?.scrollIntoView({ block: "nearest" }); }
+  // A re-render while you search the topics leaves the cursor where it was.
+  if (finding >= 0) { const f = $<HTMLInputElement>("#topic-find"); f?.focus(); f?.setSelectionRange(finding, finding); }
   const ch = $(".chapter.beside");
   if (ch && ch.dataset.key === keep.chapter) { $("#code-scroll")!.scrollTop = keep.code; $(".notes-col > header")!.scrollTop = keep.notes; }
   const m = $("#msgs");
@@ -244,17 +252,22 @@ function threadView(): string {
   const reviewingBtn = readable && t.to === me && t.status === "waiting"
     ? onIt ? `<span class="status reviewing" title="Since ${esc(fullWhen(onIt))}">You're reviewing</span>`
       : `<button class="btn" data-reviewing="${t.id}" title="Tell ${esc(name(t.from))} you are reviewing this">I'm reviewing</button>` : "";
-  const right = `${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
+  const topicsBtn = onPhone() || S.focus ? "" : `<button class="icon-btn ${S.topicsOpen ? "on" : ""}" data-toggle-topics title="${S.topicsOpen ? "Hide" : "Show"} topics (T)" aria-label="${S.topicsOpen ? "Hide" : "Show"} the topics list" aria-pressed="${S.topicsOpen}">${I.list}</button>`;
+  const right = `${topicsBtn}${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
-    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${topicMenu(t.subject)}${roles()}`, right);
-  if (!review) return head + `<div class="solo-wrap">${chatPane(t, false)}</div>`;
+    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${onPhone() ? topicMenu(t.subject) : esc(t.subject)}${roles()}`, right);
+  // On the Mac the agent's topics sit in a column beside the conversation; expanding a review
+  // (focus) hides it, so reading keeps the whole width.
+  const col = !onPhone() && !S.focus && S.topicsOpen ? topicsColumn() : "";
+  const withTopics = (body: string) => col ? `<div class="with-topics">${col}${body}</div>` : body;
+  if (!review) return head + withTopics(`<div class="solo-wrap">${chatPane(t, false)}</div>`);
   // Focus: chapters and code only; the reply floats at the bottom until you open it.
   if (S.focus || onPhone()) return head + `<div class="focus-wrap"><div class="pane-body review">${reviewBody(a!)}</div>
     ${S.pane === "ask" && S.dockOpen ? `<div class="dock open ask-dock"><div class="dock-top"><span>Ask ${esc(helperLabel())}</span><button type="button" class="link" data-pane="chat">Hide</button></div>${askPane(t)}</div>`
       : canReply(t) ? `<div class="dock ${S.dockOpen ? "open" : ""}">${composer(t, true)}</div>` : ""}</div>`;
-  return head + `<div class="split">${chatPane(t, true)}<div class="pane-body review">${reviewBody(a!)}</div></div>`;
+  return head + withTopics(`<div class="split">${chatPane(t, true)}<div class="pane-body review">${reviewBody(a!)}</div></div>`);
 }
 
 // Who else is on the thread: " · Codex reviewing · Atlas watching".
@@ -787,6 +800,7 @@ document.addEventListener("input", (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "message" && S.cur) { S.message[draftKey()] = el.value; keepUnsent(); }
   if (el.id === "new-subject") S.newSubject = el.value;
+  if (el.id === "topic-find") { S.topicFind = el.value; const l = $("#tlist"); if (l) l.innerHTML = topicRows(); }
   if (el.id === "pal-q") {
     S.search.q = el.value; S.search.i = 0;
     clearTimeout(searchTimer);
@@ -937,6 +951,7 @@ document.addEventListener("click", async (e) => {
   if (d.connect) { S.settings = await api(`/connect/${d.tool ?? "claude"}`, { method: d.connect === "on" ? "POST" : "DELETE" }); return renderMain(); }
   if (d.choose !== undefined && d.mid) return choose(d.in!, Number(d.mid), Number(d.choose));
   if (d.done) return markDone(d.done, d.on !== "0");
+  if (d.toggleTopics !== undefined) { S.topicsOpen = !S.topicsOpen; local.set("topicsOpen", S.topicsOpen); return renderMain(); }
   if (d.showDone !== undefined) { S.showDone = !S.showDone; return renderMain(); }
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
@@ -1204,6 +1219,7 @@ document.addEventListener("keydown", (e) => {
     const open = openTopics(); const i = open.findIndex((t) => t.id === S.cur); const t = open[i + (k === "[" ? -1 : 1)];
     if (t) { e.preventDefault(); return openThread(t.id); }
   }
+  if (k === "t" && S.view === "thread" && !S.focus && !onPhone()) { e.preventDefault(); S.topicsOpen = !S.topicsOpen; local.set("topicsOpen", S.topicsOpen); return renderMain(); }
   if (k === "f" && S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "")) { e.preventDefault(); S.focus = !S.focus; S.dockOpen = false; local.set("focus", S.focus); return render(); }
   if (k === "a" && S.view === "thread") { e.preventDefault(); return openAsk(); }
   if (k === "r" && S.focus) { e.preventDefault(); S.dockOpen = true; renderMain(); $<HTMLTextAreaElement>("#message")?.focus(); return; }

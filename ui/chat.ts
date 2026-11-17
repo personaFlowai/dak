@@ -1,4 +1,4 @@
-import { esc, S, me, name, drafts, findAtt, when, fullWhen, mark, helperLabel, helperMark, opensInPane } from "./state";
+import { esc, S, me, name, drafts, findAtt, when, fullWhen, mark, helperLabel, helperMark, opensInPane, onPhone } from "./state";
 import { render as renderMd } from "./md";
 import { anchorLabel, prLink } from "./pr";
 import { blobUrl } from "./api";
@@ -17,7 +17,7 @@ export function chatPane(t: Thread, review: boolean): string {
   const split = review ? `<div class="splitter" data-split="chat" title="Drag to resize"></div>` : "";
   if (review && S.pane === "ask") return `<div class="chat">${tabs}${askPane(t)}${split}</div>`;
   return `<div class="chat ${review ? "" : "solo"}">${tabs}
-    ${topicBar()}
+    ${onPhone() ? topicBar() : ""}
     <div class="msgs" id="msgs">${timeline((m, topic) => message(m, topic))}</div>
     ${canReply(t) ? composer(t) : `<p class="readonly">Between ${esc(name(t.from))} and ${esc(name(t.to))}. You can read along; only they reply here.</p>`}
     ${split}</div>`;

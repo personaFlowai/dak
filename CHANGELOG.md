@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+- Topics in a list beside the conversation, like a chat history: grouped Waiting on you, In progress and Done (folded), with search by words, PR number or ticket. One click shows that topic alone, highlighted in the list; one opened from the merge queue is selected and scrolled into view. It replaces the previous and next arrows and the All topics timeline on the Mac (the phone keeps them).
+- The list hides with the toolbar button or T, and while a review is expanded.
+
 ## 0.4.1
 - The reply button says Send (or Approve) and never runs off a narrow conversation column; the verdict menu names the verdict.
 - A Markdown file in a PR stays inside the pane: a long code block scrolls in place instead of pushing the file header and Reviewed off screen.
