@@ -1156,3 +1156,11 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
   .app:not(.phone) .chat > .tabs button { padding: 0 10px; }
   .app:not(.phone) .pane-head { box-sizing: border-box; height: 40px; min-height: 40px; padding-top: 0; padding-bottom: 0; border-bottom: 1px solid var(--line2); }
 }
+/* A tab's × is a plain mark that shows on hover, with no box of its own. */
+.tab-x { width: 18px; height: 18px; margin-right: 6px; border-radius: 50%; color: var(--text3); }
+.tab .tab-x, .tab.on .tab-x { opacity: 0; }
+.tab:hover .tab-x { opacity: 1; }
+.tab-x:hover { background: transparent; color: var(--text); }
+.tab-x svg { width: 11px; height: 11px; }
+.tab.on { box-shadow: none; }
+.tab-go { padding-right: 4px; }

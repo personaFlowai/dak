@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.5
+- A tab's × is a plain mark that appears when you point at the tab, with no box around it; the open tab is a quiet fill.
+
 ## 0.7.4
 - The conversation's tabs and the review pane's header are one band: the same height and the same line under them.
 - Fixed: with the sidebar collapsed, the Mac app pushed the toolbar 84pt right to clear traffic lights that now sit in the tab row.
