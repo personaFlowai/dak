@@ -5,7 +5,8 @@
    Who approved a PR is never typed in: it is read from the PR's Dak thread, so the page can
    only say "Approved by you" when you did. */
 import { loadConfig, person } from "./config";
-import { latestPr, readBlobText, store, threadForPr, type PrSize } from "./store";
+import { getThread, readBlobText, store, threadForPr, type PrSize } from "./store";
+import { prStates, type PrState } from "./verdicts";
 import { DakError } from "./types";
 import { byPriority, ensurePriority, holdOf, nextInQueue, type Hold, prioritizeQueue, tierOf, touchStamp, waitingReason, type Tier } from "./priority";
 
@@ -42,23 +43,22 @@ function ensure() {
   ensurePriority();
 }
 
-// The person's latest verdict on the thread, when it is an approval and nothing new came after it.
-function approvalOn(thread: string | null): QueueRow["approval"] {
+// The person's approval of this PR on its thread, when nothing new came after it. Read per PR:
+// a thread can carry several, and an approval of #2450 says nothing about #2451.
+function prOn(thread: string | null, pr: number): PrState | null {
   if (!thread) return null;
-  const me = person(loadConfig());
-  const rows = store().query(`SELECT m.author, m.verdict, m.created_at, m.extra, (SELECT count(*) FROM attachments a WHERE a.message_id = m.id AND a.type = 'pr') AS prs
-    FROM messages m WHERE m.thread_id = ? ORDER BY m.id`).all(thread) as { author: string; verdict: string | null; created_at: string; extra: string | null; prs: number }[];
-  let ok: QueueRow["approval"] = null;
-  for (const r of rows) {
-    const approved = r.extra ? JSON.parse(r.extra).approved : undefined;
-    if (r.author === me && r.verdict) ok = r.verdict === "approve" ? { by: me, at: r.created_at, ...(approved ?? {}) } : null;
-    else if (r.author !== me && r.prs) ok = null; // a new version needs a new approval
-  }
-  return ok;
+  let states: PrState[];
+  try { states = prStates(getThread(thread).messages, [person(loadConfig())]); } catch { return null; }
+  // A thread whose only changes have no number (--base, --diff) is about this row's PR.
+  return states.find((s) => s.number === pr) ?? (states.length === 1 && states[0].number === null ? states[0] : null);
+}
+function approvalOn(thread: string | null, pr: number): QueueRow["approval"] {
+  const s = prOn(thread, pr);
+  return s?.verdict === "approve" ? { by: s.by!, at: s.at!, ...(s.approved ?? {}) } : null;
 }
 
-const hydrate = (r: any): QueueRow => { const approval = approvalOn(r.thread_id); return { ...r, state_since: r.state_since ?? r.updated_at, approval,
-  size: r.thread_id ? latestPr(r.thread_id)?.size ?? null : null, head_moved: headMoved(r, approval), head_check: undefined,
+const hydrate = (r: any): QueueRow => { const approval = approvalOn(r.thread_id, r.pr); return { ...r, state_since: r.state_since ?? r.updated_at, approval,
+  size: r.thread_id ? sizeOf(r.thread_id, r.pr) : null, head_moved: headMoved(r, approval), head_check: undefined,
   hold: r.state === "parked" ? { kind: "parked", note: r.waiting ?? r.note ?? null, at: r.state_since ?? r.updated_at, by: null } : holdOf(r.thread_id) }; };
 
 // The change itself, as git's patch-id sees it: which files, and the lines added and removed.
@@ -69,9 +69,7 @@ const comparable = (diff: string) => diff.split("\n").filter((l) => l.startsWith
 // the merge script's (--head), else the thread's newest snapshot. Same diff after a rebase: same change.
 function headMoved(r: any, approval: QueueRow["approval"]): QueueRow["head_moved"] {
   if (!approval?.head_sha || !r.thread_id) return null;
-  const snap = store().query(`SELECT a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
-    WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1`).get(r.thread_id) as { meta: string } | null;
-  const meta = snap ? JSON.parse(snap.meta) : null;
+  const meta = metaOf(r.thread_id, r.pr);
   const current: string | null = r.head ?? meta?.head_sha ?? null;
   if (!current || current.startsWith(approval.head_sha) || approval.head_sha.startsWith(current)) return null;
   let change: HeadChange | null = null;
@@ -89,9 +87,9 @@ function headMoved(r: any, approval: QueueRow["approval"]): QueueRow["head_moved
 export function checkHead(pr: number, head: string, run: (cmd: string[], cwd: string) => string | null) {
   ensure();
   const r = store().query("SELECT * FROM queue WHERE pr = ?").get(pr) as any;
-  const approval = r ? approvalOn(r.thread_id) : null;
+  const approval = r ? approvalOn(r.thread_id, r.pr) : null;
   if (!r || !approval?.head_sha || head.startsWith(approval.head_sha)) return;
-  const meta = latestMeta(r.thread_id);
+  const meta = metaOf(r.thread_id, r.pr);
   const repo = meta?.repo;
   let change: HeadChange | null = null;
   const same = (diff: string | null) => diff === null || !approval.diff_blob ? null : comparable(diff) === comparable(readBlobText(approval.diff_blob)) ? "rebase only" : "content changed";
@@ -107,11 +105,16 @@ export function checkHead(pr: number, head: string, run: (cmd: string[], cwd: st
   store().query("UPDATE queue SET head_check = ? WHERE pr = ?").run(JSON.stringify({ head, change }), pr);
 }
 
-function latestMeta(thread: string | null): any {
-  if (!thread) return null;
-  const row = store().query(`SELECT a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
-    WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1`).get(thread) as { meta: string } | null;
-  return row ? JSON.parse(row.meta) : null;
+// This PR's newest snapshot on its thread (not the thread's newest PR, which may be another).
+function metaOf(thread: string | null, pr: number): any {
+  const s = prOn(thread, pr);
+  if (!s) return null;
+  const a = getThread(thread!).messages.flatMap((m) => m.attachments).find((x) => x.id === s.att);
+  return a?.meta ?? null;
+}
+function sizeOf(thread: string, pr: number): PrSize | null {
+  const files = (metaOf(thread, pr)?.files ?? null) as { additions: number; deletions: number }[] | null;
+  return files ? { files: files.length, additions: files.reduce((n, f) => n + f.additions, 0), deletions: files.reduce((n, f) => n + f.deletions, 0) } : null;
 }
 
 // In priority order: tier, then the order set inside it, then when a PR joined. A deployed PR

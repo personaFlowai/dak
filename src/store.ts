@@ -8,6 +8,7 @@ import type {
 } from "./types";
 import { DakError, ROLES, type Participant, type Role, type MessageExtra, type Cost } from "./types";
 import { known } from "./presence";
+import { approvedNow, prStates, type PrState } from "./verdicts";
 
 // One SQLite file shared by every CLI call and the server. WAL lets many agents
 // write at once; busy_timeout makes a writer wait for a lock instead of failing.
@@ -152,6 +153,7 @@ export function addMessage(threadId: string, input: {
   author: string; body: string; verdict?: Verdict | null; attachments?: NewAttachment[]; comments?: NewComment[];
   needs_reply?: boolean; // the sender's say; left out, needsReply() decides
   options?: string[]; choice?: string; extra?: MessageExtra;
+  prs?: number[]; // the PRs a verdict is about (a thread can carry several)
 }): Message {
   const thread = getThreadRow(threadId);
   const author = input.author.trim().toLowerCase();
@@ -167,6 +169,7 @@ export function addMessage(threadId: string, input: {
   const other = author !== thread.from && author !== thread.to && isParticipant(threadId, author);
   const settled = thread.status === "informed" || thread.status === "closed";
   const status: ThreadStatus = input.extra?.reviewing ? thread.status // "on it" is not an answer
+    : author === thread.to && othersStillWaiting(threadId, author, input) ? "waiting"
     : author === thread.to ? "answered"
     : other ? (thread.to.startsWith("group:") && !settled ? "answered" : thread.status)
     : needsReply(thread, input) ? "waiting" : thread.status;
@@ -180,11 +183,23 @@ export function addMessage(threadId: string, input: {
     const tryit = q?.extra ? JSON.parse(q.extra).tryit : undefined;
     if (tryit) extra = { ...extra, tryit_result: { result: JSON.parse(q!.options)[0] === input.choice ? "works" : "wrong", ...(tryit.ticket ? { ticket: tryit.ticket } : {}) } };
   }
-  if (input.verdict === "approve") {
-    const row = store().query(`SELECT a.meta FROM attachments a JOIN messages m ON m.id = a.message_id
-      WHERE m.thread_id = ? AND a.type = 'pr' ORDER BY a.message_id DESC LIMIT 1`).get(threadId) as { meta: string } | null;
-    const meta = row ? JSON.parse(row.meta) : null;
-    if (meta?.head_sha) extra = { ...extra, approved: { head_sha: meta.head_sha, diff_blob: meta.diff_blob } };
+  // A verdict names the PRs it is about. On a thread carrying several, an approval must name
+  // them: "Approve" on one PR read as approving all sixteen is the mistake this refuses.
+  if (input.verdict) {
+    const prs = prStates(getThread(threadId).messages, []);
+    const named = [...new Set(input.prs ?? [])];
+    const missing = named.filter((n) => !prs.some((p) => p.number === n));
+    if (missing.length) throw new DakError("no_such_pr", `This thread carries no ${missing.map((n) => `#${n}`).join(", ")}. It has ${prs.map((p) => p.key).join(", ") || "no PR"}.`);
+    if (input.verdict === "approve" && !named.length && prs.length > 1) {
+      throw new DakError("pick_pr", `This thread has ${prs.length} PRs (${prs.map((p) => p.key).join(", ")}). Name the ones you approve (dak reply --on 5002, or several: --on 5001,5002).`);
+    }
+    if (named.length) extra = { ...extra, prs: named };
+    if (input.verdict === "approve") {
+      // Exactly what was approved (head and diff), per PR, so a later push can be told apart.
+      const targets = named.length ? prs.filter((p) => named.includes(p.number!)) : prs;
+      const heads = Object.fromEntries(targets.filter((p) => p.head_sha && p.diff_blob).map((p) => [p.key, { head_sha: p.head_sha!, diff_blob: p.diff_blob! }]));
+      if (Object.keys(heads).length) extra = { ...extra, approved_heads: heads, ...(targets.length === 1 && heads[targets[0].key] ? { approved: heads[targets[0].key] } : {}) };
+    }
   }
   const s = store();
   const id = s.transaction(() => {
@@ -193,6 +208,13 @@ export function addMessage(threadId: string, input: {
     return mid;
   })();
   return getMessage(id);
+}
+
+// A verdict on some of a thread's PRs leaves it waiting while another PR has no verdict yet from
+// the reader: approving #2450 must not take #2451 off their list.
+function othersStillWaiting(threadId: string, reader: string, input: { verdict?: Verdict | null; prs?: number[] }): boolean {
+  if (!input.verdict || !input.prs?.length) return false;
+  return prStates(getThread(threadId).messages, [reader]).some((p) => p.verdict === null && !input.prs!.includes(p.number!));
 }
 
 // Does a message from the sender need the reader to answer? The sender can say so (--fyi).
@@ -207,14 +229,7 @@ function needsReply(thread: Thread, input: { verdict?: Verdict | null; attachmen
 
 // The reader's last verdict was an approval, and nothing new to review has come since.
 function approvedSince(threadId: string, reader: string): boolean {
-  const rows = store().query(`SELECT m.author, m.verdict, (SELECT count(*) FROM attachments a WHERE a.message_id = m.id) AS atts
-    FROM messages m WHERE m.thread_id = ? ORDER BY m.id`).all(threadId) as { author: string; verdict: string | null; atts: number }[];
-  let approved = false;
-  for (const r of rows) {
-    if (r.author === reader && r.verdict) approved = r.verdict === "approve";
-    else if (r.author !== reader && r.atts > 0) approved = false;
-  }
-  return approved;
+  return approvedNow(getThread(threadId).messages, reader);
 }
 
 // Threads written before updates stopped counting as asks: an approved thread whose
@@ -354,11 +369,16 @@ export interface ReadMark { reader: string; up_to: number; seen_at: string | nul
 
 // Who has read how far, so a sender can tell "not opened yet" from "read, no answer".
 // A reader's own messages count as read, so only readers other than the author show.
-export function getThread(id: string): { thread: Thread; messages: Message[]; reads: ReadMark[]; participants: Participant[] } {
+export function getThread(id: string): { thread: Thread; messages: Message[]; reads: ReadMark[]; participants: Participant[]; prs: PrState[] } {
   const thread = getThreadRow(id);
   const rows = store().query("SELECT * FROM messages WHERE thread_id = ? ORDER BY id").all(id) as any[];
   const reads = store().query("SELECT reader, last_seen AS up_to, seen_at FROM reads WHERE thread_id = ? ORDER BY reader").all(id) as ReadMark[];
-  return { thread, messages: hydrate(rows), reads, participants: participantsOf(id) };
+  const participants = participantsOf(id);
+  const messages = hydrate(rows);
+  // Each PR on the thread with its own verdict, from the addressee or anyone added as approver:
+  // what an agent reads to know which PRs are approved.
+  const deciders = [thread.to, ...participants.filter((p) => p.role === "approver").map((p) => p.name)];
+  return { thread, messages, reads, participants, prs: prStates(messages, deciders) };
 }
 
 // The newest thread carrying PR #n, for a stacked PR's link to the one below it.
@@ -507,15 +527,10 @@ function reviewTypeOf(threadId: string, kind: string, reader: string): ReviewTyp
       (SELECT group_concat(a.type) FROM attachments a WHERE a.message_id = m.id) AS atts
     FROM messages m WHERE m.thread_id = ? ORDER BY m.id`).all(threadId) as { id: number; author: string; verdict: string | null; options: string | null; atts: string | null }[];
   const last = [...msgs].reverse().find((m) => m.author !== reader);
-  // A PR waiting for its review is a PR, whatever buttons came with it.
-  if (kind === "pr") {
-    // After an approval, only a new version is a PR to review again; anything else is a question.
-    let approved = false, newVersion = false;
-    for (const m of msgs) {
-      if (m.author === reader && m.verdict) { approved = m.verdict === "approve"; newVersion = false; }
-      else if (approved && m.author !== reader && (m.atts ?? "").includes("pr")) newVersion = true;
-    }
-    return approved && !newVersion ? "decision" : "pr";
+  // A PR waiting for its review is a PR, whatever buttons came with it, and however the thread began.
+  if (kind === "pr" || msgs.some((m) => m.author !== reader && (m.atts ?? "").includes("pr"))) {
+    // Once every PR on it is approved, only a new version is a PR to review again; anything else is a question.
+    return approvedSince(threadId, reader) ? "decision" : "pr";
   }
   if (last?.options) return "decision"; // buttons are a choice
   if (kind === "doc" || /link|file/.test(last?.atts ?? "")) return "brief";

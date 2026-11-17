@@ -14,6 +14,7 @@ import pkg from "../package.json";
 import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
 import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, draftChapters } from "./pr";
 import { DakError, type Message, type Verdict } from "./types";
+import { approvedSummary, verdictLabel } from "./verdicts";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
 import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
@@ -36,6 +37,8 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak inbox --for <reader> [--unread] [--peek]   threads, or with --unread the new messages
   dak wait <thread> --for <name> [--timeout 15m] wait for a reply, print it, exit
   dak reply <thread> --from <name> [message] [--verdict approve|changes|question] [--doc f] [--file f]
+                    [--on 2450]...                         the PRs the verdict is about; required to approve
+                                                           when the thread carries more than one PR
                     [--pr n | --base ref] [--chapters f]   a new version of the PR, on the same thread
                     [--option text]... [--choice text]     buttons to answer with; the button picked
                     [--done]                               the work is finished: the topic leaves the reader's list
@@ -232,8 +235,16 @@ function attachmentsFrom(values: any): NewAttachment[] {
   return list;
 }
 
+// --on 2450 --on "#2451", or --on 2450,2451: the PRs a verdict is about.
+function prNumbers(list?: string[]): number[] | undefined {
+  const ns = (list ?? []).flatMap((x) => x.split(",")).map((x) => x.trim().replace(/^#/, "")).filter(Boolean);
+  const bad = ns.find((x) => !/^\d+$/.test(x));
+  if (bad) throw new DakError("bad_pr", `--on takes PR numbers: "${bad}" is not one.`);
+  return ns.length ? ns.map(Number) : undefined;
+}
+
 function describe(m: Message): string {
-  const v = m.verdict ? ` [${{ approve: "approved", changes: "changes requested", question: "question" }[m.verdict]}]` : "";
+  const v = m.verdict ? ` [${verdictLabel(m)}]` : "";
   const lines = [`#${m.id} ${m.author}${v} · ${m.created_at}`];
   if (m.body.trim()) lines.push("  " + m.body.trim().replace(/\n/g, "\n  "));
   if (m.options?.length) lines.push(`  options: ${m.options.map((o) => `[${o}]`).join(" ")}`);
@@ -255,7 +266,7 @@ const OPTIONS = {
   to: { type: "string" }, from: { type: "string" }, for: { type: "string" }, subject: { type: "string" },
   pr: { type: "string" }, repo: { type: "string" }, base: { type: "string" }, diff: { type: "string" },
   chapters: { type: "string" }, doc: { type: "string", multiple: true }, file: { type: "string", multiple: true },
-  link: { type: "string", multiple: true }, verdict: { type: "string" }, timeout: { type: "string" },
+  link: { type: "string", multiple: true }, verdict: { type: "string" }, on: { type: "string", multiple: true }, timeout: { type: "string" },
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
   force: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
@@ -408,7 +419,7 @@ export async function main(argv: string[]): Promise<number> {
       // --done: the work is finished (merged, shipped). The note is an update, and the topic
       // leaves the reader's conversation; anything later that asks something brings it back.
       const m = body.trim() || !values.done
-        ? addMessage(id, { author: values.from, body, verdict: verdict ?? null, attachments: atts, options: values.option, choice: values.choice, extra,
+        ? addMessage(id, { author: values.from, body, verdict: verdict ?? null, prs: prNumbers(values.on), attachments: atts, options: values.option, choice: values.choice, extra,
             ...(values.fyi || values.done || (values["head-only"] && !values.ready) ? { needs_reply: false } : {}) })
         : null;
       if (values.done) setStatus(id, "closed");
@@ -450,7 +461,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "show": {
       const t = getThread(positionals[0] ?? "");
-      out(json, t, () => `${t.thread.subject}\n${t.thread.from} → ${t.thread.to} · ${t.thread.status}\n${readLine(t)}\n\n${t.messages.map(describe).join("\n\n")}`);
+      out(json, t, () => `${t.thread.subject}\n${t.thread.from} → ${t.thread.to} · ${t.thread.status}\n${readLine(t)}${approvedSummary(t.prs) ? `\n${approvedSummary(t.prs)}` : ""}\n\n${t.messages.map(describe).join("\n\n")}`);
       return 0;
     }
     case "skill": {

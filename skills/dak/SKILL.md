@@ -144,6 +144,8 @@ Exit code 2 means nothing yet. Carry on with other work and wait again later; do
 | `question` | Answer first, then wait again. Change nothing until answered. |
 | none | A plain message: read it and answer if it asks something. If it has a `choice`, the reader clicked that button. |
 
+**A thread can carry several PRs.** Each PR number is its own PR: replying with `--pr 2451` on a thread that has #2450 adds a second PR, and `--pr 2450` again is #2450's next version. A verdict names the PRs it is about (`"prs": [2450]` on the message, "approved #2450" in your hook), and covers only those. Read what is approved from `dak show <thread> --json`: `prs` lists each PR with its own `verdict`, `by` and `at`. **Merge only PRs whose own verdict is `approve`**; never read one approval as approving the thread. A new version of a PR clears its approval and no other PR's. To give a verdict yourself on such a thread: `dak reply <thread> --from <you> --verdict approve --on 2450`. Approving without `--on` is refused when the thread has more than one PR.
+
 Each comment has an anchor: `{kind: "code", file, side, start_line, end_line}` or `{kind: "doc", quote, ...}`. `side: "old"` is a line the PR removed.
 
 - Answer: `dak reply <thread> --from <you> "Fixed in 4e1c2a0: the check now runs before the write" --json`

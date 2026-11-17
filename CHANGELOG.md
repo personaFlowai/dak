@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+- **A topic can carry several PRs, each approved on its own.** PRs are told apart by number: the same number again is that PR's next version, a different number is another PR on the topic. Before, every PR on a topic counted as a version of one PR, and one Approve passed for all of them; the merge queue then showed every PR on the thread as "Approved by you".
+- The review pane shows a strip of the topic's PRs with each one's verdict ("3 of 16 approved"). Approve says which PR it approves ("Approve #2450"), and **Approve all** in ⋯ asks twice and names exactly the PRs it approves.
+- A verdict records the PRs it is about (`prs` on the message; `dak reply --verdict approve --on 2450`). Approving a thread with several PRs without naming them is refused. `dak show --json` lists `prs` with each one's verdict; the agent's hook says "approved #2450" and how many stand approved.
+- The merge queue reads each row's own PR: its approval, the head it approved, and its size.
+- The topic stays waiting on you until every PR on it has your verdict.
+- Older approvals that named no PR, on a thread that already carried several, now approve none of them: Dak cannot tell which one was looked at. Approve each again.
+- **Tabs no longer pile up.** Opening a topic uses one preview tab (italic), replaced by the next topic you open, as in Xcode. A tab stays once you reply, comment, approve, say you're reviewing, or double-click it.
+
 ## 0.8.1
 
 - Enter sends a message, a comment or a question; Shift+Enter starts a new line. ⌘Enter still works. On the phone, Return stays a new line and the Send button sends.

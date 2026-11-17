@@ -55,17 +55,27 @@ export function sideBody(): string {
 
 /* ---------- tabs ---------- */
 
+/* A preview tab, as in Xcode and VS Code: opening a topic puts it in the one preview tab,
+   replacing whatever was previewed there, so browsing does not pile up tabs. A tab stays once you
+   act on it (reply, comment, approve, "I'm reviewing") or double-click it. */
 const MAX_TABS = 8;
 export function addTab(id: string) {
   if (S.tabs.includes(id)) return;
-  S.tabs = [...S.tabs, id];
+  const at = S.preview ? S.tabs.indexOf(S.preview) : -1;
+  S.tabs = at >= 0 ? S.tabs.map((t, i) => (i === at ? id : t)) : [...S.tabs, id];
+  S.preview = id;
   // Over the limit, the oldest tab you are not on goes.
-  while (S.tabs.length > MAX_TABS) S.tabs.splice(S.tabs.findIndex((t) => t !== S.cur), 1);
-  local.set("tabs", S.tabs);
+  while (S.tabs.length > MAX_TABS) S.tabs.splice(S.tabs.findIndex((t) => t !== S.cur && t !== id), 1);
+  local.set("tabs", S.tabs); local.set("previewTab", S.preview);
+}
+export function keepTab(id: string | null) {
+  if (!id || S.preview !== id) return;
+  S.preview = null; local.set("previewTab", null);
 }
 export function closeTab(id: string): string | null {
   const i = S.tabs.indexOf(id);
   S.tabs = S.tabs.filter((t) => t !== id);
+  if (S.preview === id) { S.preview = null; local.set("previewTab", null); }
   local.set("tabs", S.tabs);
   return S.tabs[Math.min(i, S.tabs.length - 1)] ?? null;
 }
@@ -77,7 +87,8 @@ export function tabsView(): string {
     const on = S.view === "thread" && S.cur === t.id;
     const yours = t.to === me && t.status === "waiting";
     const who = peerOf(t);
-    return `<div class="tab ${on ? "on" : ""}" role="tab" aria-selected="${on}"><button class="tab-go" data-tab="${t.id}" title="${esc(`${isPair(who) ? peerName(who) : name(who)}: ${t.subject}`)}">
+    const preview = S.preview === t.id;
+    return `<div class="tab ${on ? "on" : ""} ${preview ? "preview" : ""}" role="tab" aria-selected="${on}"><button class="tab-go" data-tab="${t.id}" title="${esc(`${isPair(who) ? peerName(who) : name(who)}: ${t.subject}`)}${preview ? " (preview: the next topic you open takes this tab; double-click to keep it)" : ""}">
       ${yours ? `<span class="dot" title="Waiting on you"></span>` : ""}<span class="tl">${esc(t.subject)}</span></button>
       <button class="tab-x" data-tab-close="${t.id}" aria-label="Close tab">${I.close}</button></div>`;
   }).join("");

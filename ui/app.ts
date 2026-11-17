@@ -2,12 +2,12 @@
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
-import { addTab, closeTab, railView, sideBody, tabsView, phoneListHead } from "./shell";
+import { addTab, closeTab, keepTab, railView, sideBody, tabsView, phoneListHead } from "./shell";
 import { closePeek, openPeek, peekBackStep, peekView, showSpot, wordAt } from "./peek";
 import { topicRows } from "./topics";
 import qrcode from "qrcode-generator";
 import {
-  S, me, esc, $, name, mark, when, standing, approvedNow, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
+  S, me, esc, $, name, mark, when, standing, approvedNow, prsHere, prOfAtt, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
   setViewed, viewed, chapterFiles, keepUnsent, helperLabel, agentOf, type Summary, type AgentRow,
   fullWhen, sizeLabel, opensInPane, onPhone,
 } from "./state";
@@ -20,6 +20,7 @@ import { draftKey, forgetConvo } from "./convo";
 import { isArchived, peers } from "./convo";
 import { peerOf, peerName, isPair, topicFor, loadConvo, onThread, openTopics } from "./convo";
 import type { Message, Participant, Thread, Verdict } from "../src/types";
+import { prKey } from "../src/verdicts";
 
 const native = document.documentElement.classList.contains("native");
 
@@ -206,7 +207,7 @@ let listShows: string | null = null; // the topic the topics list last scrolled 
 function renderMain() {
   const main = $("#main")!;
   const finding = document.activeElement?.id === "topic-find" ? ($<HTMLInputElement>("#topic-find")!.selectionStart ?? 0) : -1;
-  const keep = { topics: $("#tlist")?.scrollTop ?? 0, phonePr: $(".phone-pr")?.scrollTop ?? 0, reading: $("#reading")?.scrollTop ?? 0, msgs: $("#msgs")?.scrollTop, body: $(".pane-body")?.scrollTop ?? 0,
+  const keep = { strip: $(".prstrip")?.scrollLeft ?? 0, topics: $("#tlist")?.scrollTop ?? 0, phonePr: $(".phone-pr")?.scrollTop ?? 0, reading: $("#reading")?.scrollTop ?? 0, msgs: $("#msgs")?.scrollTop, body: $(".pane-body")?.scrollTop ?? 0,
     // Beside mode: each column keeps its place while you stay on the same chapter.
     chapter: $(".chapter.beside")?.dataset.key, code: $("#code-scroll")?.scrollTop ?? 0, notes: $(".notes-col > header")?.scrollTop ?? 0 };
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
@@ -218,6 +219,9 @@ function renderMain() {
   else if (!S.data) main.innerHTML = toolbar("Dak") + `<div class="blank"><p>Choose a thread to read it.</p></div>`;
   else main.innerHTML = threadView();
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
+  // The PR strip keeps its sideways place, and the open PR's chip in view.
+  const strip = $(".prstrip"); if (strip) { strip.scrollLeft = keep.strip; const on = strip.querySelector<HTMLElement>(".prchip.on");
+    if (on && (on.offsetLeft < strip.scrollLeft || on.offsetLeft + on.offsetWidth > strip.scrollLeft + strip.clientWidth)) strip.scrollLeft = on.offsetLeft - 80; }
   const tl = $("#tlist"); if (tl) tl.scrollTop = keep.topics;
   // The peek floats over whatever PR is open; it goes when you leave the PR.
   if (S.peek && (S.view !== "thread" || findAtt(S.att)?.type !== "pr" || onPhone())) closePeek();
@@ -260,10 +264,16 @@ function threadView(): string {
   // Approve belongs to the thread, so it stays when the PR or doc beside the chat is closed.
   // The addressee approves, and so does anyone added as the approver.
   const approver = t.to === me || !!(S.data as any).participants?.some((p: Participant) => p.name === me && p.role === "approver");
-  const canApprove = (t.kind === "pr" || t.kind === "doc") && approver && t.status !== "closed";
+  // A thread that began as a note and then carried PRs is approved like a PR thread.
+  const canApprove = (t.kind === "pr" || t.kind === "doc" || prsHere().length > 0) && approver && t.status !== "closed";
   const approved = canApprove && approvedNow(S.data!.messages, me);
-  // Approved already: the status beside it says so, so the button goes.
-  const approveBtn = approved ? "" : canApprove ? `<button class="btn primary" id="approve" ${S.sending ? "disabled" : ""} title="Approve now; anything you have typed or commented goes with it">${I.check} Approve</button>` : "";
+  // Several PRs on the topic: Approve is for the PR that is open, by number, and Approve all
+  // (in ⋯, asked twice) names every one. One Approve never covers PRs you have not opened.
+  const prs = prsHere(), multi = prs.length > 1, cur = prOfAtt(a);
+  const todo = prs.filter((p) => p.verdict !== "approve");
+  const approveBtn = !canApprove || approved ? ""
+    : multi ? (cur && cur.verdict !== "approve" ? `<button class="btn primary" id="approve" data-on-pr="${cur.number}" ${S.sending ? "disabled" : ""} title="Approve ${cur.key} only; anything you have typed or commented goes with it">${I.check} Approve ${cur.key}</button>` : "")
+    : `<button class="btn primary" id="approve" ${S.sending ? "disabled" : ""} title="Approve now; anything you have typed or commented goes with it">${I.check} Approve</button>`;
   const archived = S.peer ? isArchived(S.peer) : false;
   // "I'm reviewing": tells the sender you are on it; the PR stays waiting on you until your verdict.
   const onIt = S.threads.find((x) => x.id === t.id)?.reviewing_since;
@@ -278,6 +288,7 @@ function threadView(): string {
   // A phone's bar has room for Approve and ⋯ only; I'm reviewing moves into the menu there.
   const phone = onPhone();
   const menu = [
+    canApprove && multi && todo.length ? `<button class="mi ${S.confirmAll ? "warn" : ""}" data-approve-all>${I.check}${S.confirmAll ? `Tap again to approve ${todo.length} PRs` : `Approve all ${todo.length}${todo.length < prs.length ? " left" : ""}`}</button>` : "",
     phone && reviewingBtn && !onIt ? `<button class="mi" data-reviewing="${t.id}">${I.person}I'm reviewing</button>` : "",
     S.peer && !isPair(S.peer) && canReply(t) ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
     S.peer && !isPair(S.peer) ? `<button class="mi" data-${S.pins[S.peer] ? "unpin" : "pin"}="${esc(S.peer)}">${I.pin}${S.pins[S.peer] ? `Unpin ${esc(name(S.peer))}` : `Pin ${esc(name(S.peer))} to the top`}</button>` : "",
@@ -475,7 +486,7 @@ function reviewBody(a: any): string {
 // What is open beside the chat, its versions, and a way to close it so the chat takes the room.
 function paneHead(a: any): string {
   const same = S.data!.messages.flatMap((m) => m.attachments.map((x) => ({ x, m })))
-    .filter(({ x }) => x.type === a.type && (a.type === "pr" || x.name === a.name));
+    .filter(({ x }) => x.type === a.type && (a.type === "pr" ? ((x.meta as any).number ?? null) === (a.meta.number ?? null) : x.name === a.name));
   const i = same.findIndex(({ x }) => x.id === a.id);
   const title = a.type === "pr" ? (a.meta.title ? `${a.name} · ${a.meta.title}` : a.name) : a.name;
   const versions = same.length > 1 ? `<label class="popup"><select id="version" aria-label="Version">${same.map(({ x, m }, n) => `<option value="${x.id}" ${x.id === a.id ? "selected" : ""}>Version ${n + 1} of ${same.length} · ${when(m.created_at)}</option>`).join("")}</select></label>${i < same.length - 1 ? `<button class="link" data-att="${same[same.length - 1].x.id}">Newest</button>` : ""}` : "";
@@ -488,8 +499,21 @@ function paneHead(a: any): string {
   const st = a.type === "pr" ? a.meta.stacked_on : null;
   const stack = st ? (st.thread ? `<button class="stack" data-topic="${esc(st.thread)}" title="Open the PR this one is stacked on">Stacked on ${st.number ? `#${st.number}` : esc(st.branch)}</button>`
     : st.url ? `<a class="stack" href="${esc(st.url)}" target="_blank" rel="noopener">Stacked on #${st.number}</a>` : `<span class="stack">Stacked on ${esc(st.branch)}</span>`) : "";
-  return `${a.type === "pr" && S.find.open ? findBar(hits()) : ""}<div class="pane-head"><span class="ptitle" title="${esc(title)}">${esc(title)}</span>${stack}${versions}${splitBtn}${findBtn}${focusBtn}
+  return `${a.type === "pr" && S.find.open ? findBar(hits()) : ""}${a.type === "pr" ? prStrip(a) : ""}<div class="pane-head"><span class="ptitle" title="${esc(title)}">${esc(title)}</span>${stack}${versions}${splitBtn}${findBtn}${focusBtn}
     <button class="icon-btn" data-close-pane title="Close (Esc)" aria-label="Close">${I.close}</button></div>`;
+}
+
+// A topic carrying several PRs: each one, with its own verdict, one tap to open it.
+function prStrip(a: any): string {
+  const prs = prsHere();
+  if (prs.length < 2) return "";
+  const word: Record<string, [string, string]> = { approve: ["Approved", "done"], changes: ["Changes", "warn"], question: ["Question", ""] };
+  const ok = prs.filter((p) => p.verdict === "approve").length;
+  return `<div class="prstrip" role="tablist" aria-label="PRs on this topic"><span class="prcount">${ok} of ${prs.length} approved</span>${prs.map((p) => {
+    const [w, cls] = p.verdict ? word[p.verdict] : ["", ""];
+    const on = prKey(a.meta.number) === p.key;
+    return `<button class="prchip ${on ? "on" : ""}" role="tab" aria-selected="${on}" data-att="${p.att}" title="${esc(p.title ?? p.key)}"><b>${p.key}</b>${w ? `<span class="st ${cls}">${w}</span>` : ""}</button>`;
+  }).join("")}</div>`;
 }
 
 function mediaView(a: any): string {
@@ -761,7 +785,7 @@ async function sendNewTopic() {
   } catch (e: any) { S.sending = false; S.sendError = e.message ?? "Could not send."; renderMain(); }
 }
 
-async function send(force?: Verdict) {
+async function send(force?: Verdict, prs?: number[]) {
   if (!S.data || S.sending) return;
   if (S.newTopic && !force) return sendNewTopic();
   const t = S.data.thread;
@@ -773,8 +797,11 @@ async function send(force?: Verdict) {
   try {
     const r = await api<any>(`/threads/${t.id}/messages`, { method: "POST", body: {
       author: me, body, verdict: v, github: !!S.github[t.id] && !!prLink(),
+      // On a topic with several PRs, a verdict is about the PR that is open unless named.
+      prs: v ? prs ?? (prsHere().length > 1 && prOfAtt(findAtt(S.att))?.number ? [prOfAtt(findAtt(S.att))!.number!] : undefined) : undefined,
       comments: ds.map((d) => ({ attachment_id: d.attachment_id, anchor: d.anchor, body: d.body })), attachments: S.newAtts } });
-    saveDrafts(t.id, []); delete S.message[t.id]; delete S.verdict[t.id]; keepUnsent(); S.newAtts = [];
+    saveDrafts(t.id, []); delete S.message[t.id]; delete S.verdict[t.id]; keepUnsent(); S.newAtts = []; S.confirmAll = false;
+    keepTab(t.id); // you acted on it: it stays a tab
     S.sel = null; S.editing = null; S.sending = false;
     await openThread(t.id, true);
     S.sendNote = r.github?.url ? `Posted on GitHub too${r.github.note ? `. ${r.github.note}` : ""}` : "";
@@ -789,7 +816,7 @@ async function choose(topic: string, mid: number, i: number) {
   const choice = m?.options?.[i];
   if (!choice || S.sending) return;
   S.sending = true; renderMain();
-  try { await api(`/threads/${topic}/messages`, { method: "POST", body: { author: me, body: "", choice } }); }
+  try { await api(`/threads/${topic}/messages`, { method: "POST", body: { author: me, body: "", choice } }); keepTab(topic); }
   catch (e: any) { S.sendError = e.message; }
   S.sending = false;
   await openThread(topic, topic === S.cur);
@@ -947,6 +974,11 @@ document.addEventListener("drop", (e) => {
 });
 window.addEventListener("resize", () => layoutMargin());
 // The ⋯ menu closes on a click anywhere else.
+// Double-click a preview tab to keep it.
+document.addEventListener("dblclick", (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab;
+  if (id && S.preview === id) { keepTab(id); $("#tabs")!.innerHTML = tabsView(); }
+});
 document.addEventListener("click", (e) => { if (S.moreOpen && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; renderMain(); } }, true);
 document.addEventListener("load", (e) => { if ((e.target as HTMLElement).closest?.(".docbody")) layoutMargin(); }, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.add("cmd"); });
@@ -957,7 +989,13 @@ document.addEventListener("click", async (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>("button, [data-thread]");
   if (!b) return;
   const d = b.dataset;
-  if (d.more !== undefined) { S.moreOpen = !S.moreOpen; return renderMain(); }
+  if (d.approveAll !== undefined) {
+    // Asked twice: the first tap names the PRs, the second approves exactly those.
+    if (!S.confirmAll) { S.confirmAll = true; S.moreOpen = true; return renderMain(); }
+    S.moreOpen = false;
+    return send("approve", prsHere().filter((p) => p.verdict !== "approve" && p.number).map((p) => p.number!));
+  }
+  if (d.more !== undefined) { S.moreOpen = !S.moreOpen; S.confirmAll = false; return renderMain(); }
   if (S.moreOpen) S.moreOpen = false; // any other click closes the ⋯ menu (and still does what it does)
   if (d.docActive !== undefined) return setDocActive(Number(d.docActive));
   // The rail: Inbox shows the agents (or, already there, nothing changes); Between agents lists their threads.
@@ -972,6 +1010,7 @@ document.addEventListener("click", async (e) => {
   }
   if (d.sideBack !== undefined) { S.sideLevel = S.peer && isPair(S.peer) ? "pairs" : "agents"; return onPhone() ? render() : renderSide(); }
   if (d.tab) { S.sideLevel = "topics"; return openThread(d.tab); }
+  if (d.reviewing) keepTab(d.reviewing);
   if (d.tabClose) {
     const next = closeTab(d.tabClose);
     if (d.tabClose === S.cur && S.view === "thread") { if (next) return openThread(next); S.view = "waiting"; return render(); }
@@ -1158,7 +1197,7 @@ document.addEventListener("click", async (e) => {
   if (d.prompt) return ask(d.prompt);
   if (d.clearContext !== undefined) { S.askContext = null; return renderMain(); }
   if (b.id === "send") return send();
-  if (b.id === "approve") return send("approve");
+  if (b.id === "approve") return send("approve", b.dataset.onPr ? [Number(b.dataset.onPr)] : undefined);
   if (b.id === "askgo") { const q = $<HTMLTextAreaElement>("#askq")?.value.trim() ?? ""; if (q || S.askContext) return ask(q); }
 });
 
@@ -1193,6 +1232,7 @@ function commentOnSelection() {
 }
 
 function saveComment() {
+  keepTab(S.cur); // a comment on a topic keeps its tab
   const text = $<HTMLTextAreaElement>("#edit")?.value.trim();
   if (!S.editing || !S.cur) return;
   if (!text) { $<HTMLTextAreaElement>("#edit")?.focus(); return; }

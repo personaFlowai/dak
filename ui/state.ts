@@ -4,6 +4,7 @@ import { blocks, type Block } from "./md";
 import { parseDiff, hunkStart, type DiffFile } from "../src/diff";
 import type { Anchor, Attachment, Chapter, Message, Participant, Thread, Verdict } from "../src/types";
 import { TOOLS } from "./icons";
+import { approvedNow, prKey, prStates, type PrState } from "../src/verdicts";
 
 export type Pr = Extract<Attachment, { type: "pr" }>;
 export type Doc = Extract<Attachment, { type: "doc" }>;
@@ -53,8 +54,10 @@ export const S = {
   topicFind: "", // the sidebar's topic search
   pins: {} as Record<string, string>, // agents pinned to the top of the list, and when
   moreOpen: false, // the ⋯ menu in a thread's toolbar
+  confirmAll: false, // "Approve all" tapped once: the next tap approves the PRs it named
   sideLevel: "agents" as import("./shell").SideLevel, // the sidebar: agents, one agent's topics, or agents' own threads
   tabs: local.get<string[]>("tabs", []), // threads open as tabs along the top, oldest first
+  preview: local.get<string | null>("previewTab", null), // the one tab the next opened topic replaces
   docActive: null as number | null, // the doc paragraph whose comments are lit up
   peek: null as import("./peek").Peek | null, // a definition opened with ⌘-click over the code
   peekBack: [] as import("./peek").Peek[], // where the peek has been, for its Back
@@ -169,20 +172,24 @@ export const fullWhen = (iso: string) => new Date(iso).toLocaleString([], { week
 
 // Your last verdict on a thread was an approval and nothing new to review came after it.
 // Mirrors approvedSince() in the store, which decides whether an update needs an answer.
-export function approvedNow(messages: Message[], reader: string): boolean {
-  let ok = false;
-  for (const m of messages) {
-    if (m.author === reader && m.verdict) ok = m.verdict === "approve";
-    else if (m.author !== reader && m.attachments.length) ok = false;
-  }
-  return ok;
-}
+export { approvedNow };
+
+// The PRs on the open thread, each with its own verdict (from the server, by the same rule).
+export const prsHere = (): PrState[] => (S.data as any)?.prs ?? [];
+// The PR a pane attachment is a version of.
+export const prOfAtt = (a: Attachment | null): PrState | null =>
+  a?.type === "pr" ? prsHere().find((p) => p.key === prKey(a.meta.number)) ?? null : null;
 
 // One label for where a thread stands, from your side, for the toolbar and the topic dividers.
 export function standing(t: Thread, messages: Message[]): { label: string; cls: string } {
   const other = t.to === me ? t.from : t.to;
   if (t.status === "closed") return { label: "Closed", cls: "" };
-  if (t.status === "waiting") return t.to === me ? { label: "Waiting on you", cls: "you" } : { label: `Waiting on ${name(other)}`, cls: "" };
+  // Several PRs: say how many are approved, since approving one does not approve the topic.
+  const prs = prStates(messages, [t.to]);
+  const ok = prs.filter((p) => p.verdict === "approve").length;
+  const some = prs.length > 1 && ok > 0 && ok < prs.length ? ` · ${ok} of ${prs.length} approved` : "";
+  if (t.status === "waiting") return t.to === me ? { label: `Waiting on you${some}`, cls: "you" } : { label: `Waiting on ${name(other)}${some}`, cls: "" };
+  if (some) return { label: `${ok} of ${prs.length} approved`, cls: "" };
   if (approvedNow(messages, t.to)) return { label: t.to === me ? "Approved" : `${name(other)} approved`, cls: "done" };
   if (t.status === "informed") return { label: "No reply needed", cls: "" };
   if (t.to !== me) return { label: `${name(other)} answered`, cls: "done" };

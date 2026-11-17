@@ -189,7 +189,8 @@ export function applyReview(author: string, threadId: string, meta: PrMeta, r: R
   } catch { /* chapters are extra; the findings still post */ }
   const verdict = (["approve", "changes", "question"].includes(String(r.verdict)) ? r.verdict : null) as Verdict | null;
   const body = [String(r.summary ?? "").trim(), loose.length ? `Not tied to a line in the diff:\n${loose.join("\n")}` : ""].filter(Boolean).join("\n\n") + chaptersNote;
-  return addMessage(threadId, { author, body: body || "Reviewed.", verdict, comments });
+  // The verdict is about the PR it read, not every PR on the thread.
+  return addMessage(threadId, { author, body: body || "Reviewed.", verdict, comments, ...(pr.meta.number ? { prs: [pr.meta.number] } : {}) });
 }
 
 function post(author: string, threadId: string, body: string, failed: boolean) {

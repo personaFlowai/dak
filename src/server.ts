@@ -292,13 +292,16 @@ async function api(req: Request, url: URL): Promise<Response> {
       const verdict = b.verdict as Verdict | undefined;
       if (verdict && !["approve", "changes", "question"].includes(verdict)) throw new DakError("bad_verdict", "A verdict is approve, changes or question.");
       const comments: NewComment[] = Array.isArray(b.comments) ? b.comments : [];
-      const message = addMessage(id, { author: b.author ?? b.from ?? "", body: b.body ?? "", verdict: verdict ?? null, comments, attachments: httpAttachments(b.attachments), options: optionsOf(b),
+      const prs = Array.isArray(b.prs) ? b.prs.map(Number).filter((n: number) => Number.isInteger(n) && n > 0) : undefined;
+      const message = addMessage(id, { author: b.author ?? b.from ?? "", body: b.body ?? "", verdict: verdict ?? null, prs, comments, attachments: httpAttachments(b.attachments), options: optionsOf(b),
         ...(b.choice ? { choice: choiceOn(id, String(b.choice)) } : {}), ...(typeof b.needs_reply === "boolean" ? { needs_reply: b.needs_reply } : {}), extra: { cost: costOf(b) } });
       if (b.done === true) setStatus(id, "closed"); // the sender says the work is finished
       // Posting to GitHub happens after the reply is saved: a GitHub failure never loses the review.
       let github: { url?: string; event?: string; note?: string; error?: string } | undefined;
       if (b.github) {
-        const prAtt = getThread(id).messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop();
+        const all = getThread(id).messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr");
+        // The PR the verdict names (its newest version), else the thread's newest PR.
+        const prAtt = (prs?.length === 1 ? all.filter((a) => (a.meta as PrMeta).number === prs[0]) : all).pop();
         if (!prAtt) github = { error: "This thread has no PR to post to." };
         else {
           const forPr = comments.filter((c) => !c.attachment_id || c.attachment_id === prAtt.id);

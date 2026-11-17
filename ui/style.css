@@ -1243,3 +1243,24 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 /* Waiting on you and the queue fit the phone's width: titles shorten, they do not push the page wide. */
 .queue-page { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 760px) { .qrow { grid-template-columns: 22px minmax(0, 1fr); } }
+
+/* ---------- several PRs on one topic ---------- */
+/* One chip per PR, its own verdict beside its number; the open one is filled. Scrolls sideways
+   rather than wrapping, so sixteen PRs take one line. */
+.prstrip{position:relative;display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;flex:none}
+.prstrip::-webkit-scrollbar{display:none}
+.prcount{font-size:12px;color:var(--text3);white-space:nowrap;margin-right:4px}
+.prchip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--line);background:var(--win);color:var(--text);font-size:12.5px;white-space:nowrap;cursor:pointer}
+.prchip b{font-weight:600;font-variant-numeric:tabular-nums}
+.prchip:hover{border-color:var(--text3)}
+.prchip.on{background:var(--text);border-color:var(--text);color:var(--win)}
+.prchip .st{font-size:11.5px;color:var(--text3)}
+.prchip .st.done{color:var(--add)}
+.prchip .st.warn{color:var(--accent-text)}
+.prchip.on .st{color:inherit;opacity:.8}
+.menu .mi.warn{color:var(--accent-text);font-weight:600}
+.app.phone .prstrip{padding:8px 16px}
+.app.phone .prchip{height:32px;border-radius:16px;font-size:14px}
+
+/* The preview tab: italic, as in Xcode and VS Code, so you can tell it will be replaced. */
+.tab.preview .tl { font-style: italic; }

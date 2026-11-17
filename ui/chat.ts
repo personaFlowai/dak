@@ -106,10 +106,13 @@ function chip(a: Attachment, topic: Topic): string {
 
 const size = (n: number) => n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
-// "version 2" when a thread carries more than one PR: the newest is what opens first.
+// "version 2" when the same PR (same number) was sent more than once. A different number is
+// a different PR on the topic, not a version of the first.
 function prVersion(id: string, topic: Topic): number | null {
-  const prs = topic.messages.flatMap((m) => m.attachments).filter((x) => x.type === "pr");
-  return prs.length > 1 ? prs.findIndex((x) => x.id === id) + 1 : null;
+  const all = topic.messages.flatMap((m) => m.attachments).filter((x) => x.type === "pr");
+  const me = all.find((x) => x.id === id);
+  const same = all.filter((x) => x.type === "pr" && me?.type === "pr" && (x.meta.number ?? null) === (me.meta.number ?? null));
+  return same.length > 1 ? same.findIndex((x) => x.id === id) + 1 : null;
 }
 
 export function composer(t: Thread, docked = false): string {

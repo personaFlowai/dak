@@ -1100,3 +1100,98 @@ describe("pins", () => {
     expect(Object.keys(await (await http("/v1/pins")).json())).toEqual(["mitra"]);
   });
 });
+
+describe("several PRs on one thread", () => {
+  // A stand-in for gh: `gh pr view N` and `gh pr diff N` answer for any number, and FAKE_GH_V
+  // makes a new head, as a push would.
+  const bin = join(home, "fakebin");
+  beforeAll(() => {
+    Bun.spawnSync(["mkdir", "-p", bin]);
+    writeFileSync(join(bin, "gh"), `#!/bin/sh
+n="$3"
+if [ "$1 $2" = "pr view" ]; then echo "{\\"number\\":$n,\\"title\\":\\"PR $n\\",\\"url\\":\\"https://example.test/pull/$n\\",\\"headRefOid\\":\\"head$n$FAKE_GH_V\\",\\"baseRefOid\\":\\"base\\",\\"baseRefName\\":\\"main\\"}"; exit 0; fi
+if [ "$1 $2" = "pr diff" ]; then printf 'diff --git a/f%s.ts b/f%s.ts\\n--- a/f%s.ts\\n+++ b/f%s.ts\\n@@ -1 +1 @@\\n-a\\n+b%s\\n' "$n" "$n" "$n" "$n" "$FAKE_GH_V"; exit 0; fi
+exit 1
+`);
+    Bun.spawnSync(["chmod", "+x", join(bin, "gh")]);
+  });
+  const gh = (v: string, ...args: string[]) => {
+    const p = Bun.spawnSync(["bun", CLI, ...args], { env: { ...process.env, DAK_HOME: home, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_V: v }, cwd: repo, stdout: "pipe", stderr: "pipe" });
+    return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString(), json: () => JSON.parse(p.stdout.toString()) };
+  };
+  const threeOnOne = () => {
+    const { thread } = gh("", "send", "--to", "sam", "--from", "atlas", "--pr", "5001", "--subject", "Attendance", "--json").json();
+    gh("", "reply", thread.id, "--from", "atlas", "--pr", "5002");
+    gh("", "reply", thread.id, "--from", "atlas", "--pr", "5003");
+    return thread.id as string;
+  };
+  const prsOf = (id: string) => dak("show", id, "--json").json().prs.map((p: any) => [p.number, p.versions, p.verdict]);
+
+  test("each number is its own PR, not a new version of the first", () => {
+    const id = threeOnOne();
+    expect(prsOf(id)).toEqual([[5001, 1, null], [5002, 1, null], [5003, 1, null]]);
+  });
+
+  test("approving the whole thread is refused when it carries several PRs; approving one approves only that one", async () => {
+    const id = threeOnOne();
+    const all = dak("reply", id, "--from", "sam", "--verdict", "approve", "Go.");
+    expect(all.code).not.toBe(0);
+    expect(all.err).toContain("This thread has 3 PRs");
+    expect(prsOf(id).map((p: any) => p[2])).toEqual([null, null, null]);
+
+    expect(dak("reply", id, "--from", "sam", "--verdict", "approve", "--on", "5002", "This one.").code).toBe(0);
+    expect(prsOf(id)).toEqual([[5001, 1, null], [5002, 1, "approve"], [5003, 1, null]]);
+    // The thread is still waiting on sam: two PRs have no verdict.
+    expect(dak("show", id, "--json").json().thread.status).toBe("waiting");
+    const reviews = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    expect(reviews.find((r) => r.thread_id === id)?.type).toBe("pr");
+    // Verdicts on the other two answer it.
+    dak("reply", id, "--from", "sam", "--verdict", "changes", "--on", "5001", "Rename it.");
+    expect(dak("show", id, "--json").json().thread.status).toBe("waiting");
+    dak("reply", id, "--from", "sam", "--verdict", "approve", "--on", "5003", "Fine.");
+    expect(dak("show", id, "--json").json().thread.status).toBe("answered");
+    // The agent's note names the PR, and what stands approved.
+    const note = dak("wait", id, "--for", "atlas", "--timeout", "2s").out;
+    expect(note).toContain("approved #5002");
+    // A PR not on the thread is refused, not silently ignored.
+    expect(dak("reply", id, "--from", "sam", "--verdict", "approve", "--on", "9999").err).toContain("carries no #9999");
+  });
+
+  test("a new version of one PR clears only its own approval", () => {
+    const id = threeOnOne();
+    dak("reply", id, "--from", "sam", "--verdict", "approve", "--on", "5001,5002", "Both.");
+    expect(prsOf(id).map((p: any) => p[2])).toEqual(["approve", "approve", null]);
+    gh("v2", "reply", id, "--from", "atlas", "--pr", "5001", "Pushed a fix.");
+    expect(prsOf(id)).toEqual([[5001, 2, null], [5002, 1, "approve"], [5003, 1, null]]);
+  });
+
+  test("the merge queue reads each row's own PR: only the approved one says approved", () => {
+    const id = threeOnOne();
+    dak("reply", id, "--from", "sam", "--verdict", "approve", "--on", "5002", "This one.");
+    for (const n of ["5001", "5002", "5003"]) dak("queue", "set", n, "--state", "approved", "--title", `P${n}`, "--thread", id);
+    const rows = dak("queue", "--json").json().filter((r: any) => [5001, 5002, 5003].includes(r.pr));
+    expect(rows.map((r: any) => [r.pr, !!r.approval])).toEqual([[5001, false], [5002, true], [5003, false]]);
+    // What it approved is #5002's head, not the thread's newest PR's.
+    expect(rows.find((r: any) => r.pr === 5002).approval.head_sha).toBe("head5002");
+  });
+
+  test("one PR on a thread approves as before, with no number needed", () => {
+    const { thread } = gh("", "send", "--to", "sam", "--from", "atlas", "--pr", "5101", "--subject", "Solo", "--json").json();
+    expect(dak("reply", thread.id, "--from", "sam", "--verdict", "approve", "Go.").code).toBe(0);
+    expect(prsOf(thread.id)).toEqual([[5101, 1, "approve"]]);
+  });
+});
+
+describe("reading older verdicts", () => {
+  test("an approval that named no PR, on a thread already carrying several, approves none of them", async () => {
+    const { prStates } = await import("../src/verdicts");
+    const pr = (id: string, n: number) => ({ id, type: "pr", name: `PR #${n}`, meta: { number: n, title: `P${n}`, head_sha: `h${n}`, diff_blob: `d${n}` } });
+    const msg = (id: number, author: string, extra: any) => ({ id, thread_id: "t", author, body: "", verdict: null, created_at: `2026-11-17T00:00:0${id}Z`, attachments: [], comments: [], ...extra });
+    const one = [msg(1, "atlas", { attachments: [pr("a1", 1)] }), msg(2, "sam", { verdict: "approve" })];
+    expect(prStates(one as any, ["sam"]).map((p) => p.verdict)).toEqual(["approve"]); // one PR: as before
+    const two = [msg(1, "atlas", { attachments: [pr("a1", 1), pr("a2", 2)] }), msg(2, "sam", { verdict: "approve" })];
+    expect(prStates(two as any, ["sam"]).map((p) => p.verdict)).toEqual([null, null]);
+    const changes = [...two.slice(0, 1), msg(2, "sam", { verdict: "changes" })];
+    expect(prStates(changes as any, ["sam"]).map((p) => p.verdict)).toEqual(["changes", "changes"]); // asking for changes still covers all
+  });
+});

@@ -1,6 +1,7 @@
 import { touch, whoami } from "./presence";
 import { loadConfig } from "./config";
-import { getThreadRow, takeUnread } from "./store";
+import { getThread, getThreadRow, takeUnread } from "./store";
+import { approvedSummary, verdictLabel } from "./verdicts";
 import type { Message } from "./types";
 
 // Push for Claude Code. Installed as a hook, this runs at the edges of every turn:
@@ -64,8 +65,10 @@ export function brief(name: string, msgs: Message[]): string {
   const lines = [`New Dak message${msgs.length > 1 ? "s" : ""} for you (${name}):`];
   for (const m of msgs) {
     const t = getThreadRow(m.thread_id);
-    const v = m.verdict ? ` [${{ approve: "approved", changes: "changes requested", question: "question" }[m.verdict]}]` : "";
+    const v = m.verdict ? ` [${verdictLabel(m)}]` : "";
     lines.push("", `Thread ${t.id} "${t.subject}", from ${m.author}${v}:`, m.body.trim() || (m.choice ? "" : "(no text)"));
+    // On a thread carrying several PRs, a verdict covers only the PRs it names: say which stand approved.
+    if (m.verdict) { const sum = approvedSummary(getThread(t.id).prs); if (sum) lines.push(`  ${sum}. Merge only those.`); }
     if (m.choice) lines.push(`  Picked: ${m.choice}`);
     if (m.tryit_result) lines.push(m.tryit_result.result === "works"
       ? `  It works: that is the Checking. Post your production proof on ${m.tryit_result.ticket ?? "the ticket"} and move it to Done.`
