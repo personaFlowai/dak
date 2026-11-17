@@ -51,6 +51,7 @@ export const S = {
   att: null as string | null,
   chapter: -1, // -1 is the PR's overview
   topicFind: "", // the topics column's search
+  docActive: null as number | null, // the doc paragraph whose comments are lit up
   peek: null as import("./peek").Peek | null, // a definition opened with ⌘-click over the code
   peekBack: [] as import("./peek").Peek[], // where the peek has been, for its Back
   topicsOpen: local.get("topicsOpen", true), // the topics column beside a conversation, on the Mac

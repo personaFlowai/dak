@@ -11,7 +11,7 @@ import {
   fullWhen, sizeLabel, opensInPane, onPhone,
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
-import { docView, markQuotes, readSelection, pending, clearPending } from "./doc";
+import { docView, markQuotes, readSelection, pending, clearPending, layoutMargin, setDocActive } from "./doc";
 import { chatPane, currentVerdict, composer, askPane, canReply, attachBar } from "./chat";
 import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
@@ -137,7 +137,7 @@ const SCROLLERS = ["#reading", "#code-scroll", ".notes-col > header", ".pane-bod
 const placeKey = (att: string) => `place:${att}`;
 
 function useAtt(id: string | null) {
-  S.att = id;
+  S.att = id; S.docActive = null;
   const p = id ? local.get<{ chapter?: number; scroll?: Record<string, number> } | null>(placeKey(id), null) : null;
   S.chapter = p?.chapter ?? -1;
   S.restore = p?.scroll ?? null;
@@ -224,6 +224,7 @@ function renderMain() {
   if (S.restore) { for (const [sel, top] of Object.entries(S.restore)) { const el = $(sel); if (el) el.scrollTop = top; } S.restore = null; }
   else savePlace();
   markQuotes();
+  layoutMargin();
   tintHits();
   const ed = $<HTMLTextAreaElement>("#edit"); if (ed && document.activeElement !== ed) ed.focus();
   postControls();
@@ -892,6 +893,17 @@ document.addEventListener("click", (e) => {
   e.preventDefault(); e.stopPropagation(); getSelection()?.removeAllRanges();
   openPeek(w, renderMain);
 }, true);
+// A doc: clicking commented words, or a comment's card, lights the two up together.
+document.addEventListener("click", (e) => {
+  const t = e.target as HTMLElement;
+  if (t.closest("button, a, textarea, input") || !getSelection()?.isCollapsed) return;
+  const hl = t.closest<HTMLElement>(".docbody mark.hl, .docbody .blk.has");
+  const card = t.closest<HTMLElement>(".margin .tcard");
+  if (hl) setDocActive(Number(hl.dataset.docActive ?? hl.dataset.i));
+  else if (card) setDocActive(Number(card.dataset.docCard));
+});
+window.addEventListener("resize", () => layoutMargin());
+document.addEventListener("load", (e) => { if ((e.target as HTMLElement).closest?.(".docbody")) layoutMargin(); }, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.add("cmd"); });
 document.addEventListener("keyup", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.remove("cmd"); });
 window.addEventListener("blur", () => document.body.classList.remove("cmd"));
@@ -900,6 +912,7 @@ document.addEventListener("click", async (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>("button, [data-thread]");
   if (!b) return;
   const d = b.dataset;
+  if (d.docActive !== undefined) return setDocActive(Number(d.docActive));
   if (d.peekClose !== undefined) { closePeek(); return renderMain(); }
   if (d.peekBack !== undefined) { peekBackStep(); return renderMain(); }
   if (d.peekDef !== undefined && S.peek) { S.peek = { ...S.peek, def: Number(d.peekDef) }; return renderMain(); }
@@ -1067,6 +1080,7 @@ document.addEventListener("click", async (e) => {
   if (d.block) {
     const a = findAtt(S.att); if (a?.type !== "doc") return;
     const blk = S.docs.get(a.meta.blob)![Number(d.block)];
+    S.docActive = blk.index;
     S.editing = { key: `${a.id}|b${blk.index}`, att: a.id, label: blk.text.slice(0, 90) || `Paragraph ${blk.index + 1}`,
       anchor: { kind: "doc", version: a.meta.version, block_index: blk.index, block_hash: blk.hash, quote: blk.text.slice(0, 160) } };
     return renderMain();
@@ -1106,6 +1120,7 @@ function commentOnSelection() {
   const a = findAtt(pending.att);
   if (a?.type !== "doc") return;
   const blk = S.docs.get(a.meta.blob)![pending.block];
+  S.docActive = blk.index;
   S.editing = { key: `${a.id}|b${blk.index}|${pending.text}`, att: a.id, label: pending.text,
     anchor: { kind: "doc", version: a.meta.version, block_index: blk.index, block_hash: blk.hash, quote: pending.text, exact: true } };
   clearPending();

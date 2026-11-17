@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.1
+- Doc comments, Notion style: each paragraph's comments are one card level with it, instead of a stack at the top. Commented words are highlighted, a paragraph with comments is tinted and carries a bubble with its count, and clicking words, bubble or card lights the pair up and lines the card up with its words. Reply on a card; a new comment opens beside its paragraph.
+
 ## 0.6.0
 - ⌘-click a name in a PR to see where it is defined and who uses it, in a peek over the code. It searches the PR's files and the repo at the PR's head (the working tree when that commit is not fetched). A place in the PR's diff scrolls the PR there; anything else opens in the peek. ⌘-click inside the peek to go further; Back or ⌘[ returns; Esc closes. Mac only: the phone link never reads files outside the PR.
 
