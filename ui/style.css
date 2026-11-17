@@ -1036,16 +1036,16 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 /* ================= the frame (Mac): rail, tabs, sidebar and main as cards on the window ================= */
 :root { --window: #e6e8e9; --side-card: #f7f7f8; --places-w: 52px; --tabs-h: 40px; }
 @media (prefers-color-scheme: dark) { :root { --window: #0e0f0f; --side-card: #191a1a; } }
-.tabs, .rail { display: none; }
+#tabs, #rail { display: none; } /* by id: the PR has its own .rail, its chapter list */
 @media (min-width: 761px) {
   body { background: var(--window); }
   .app:not(.phone) { grid-template-columns: var(--places-w) var(--side-w) minmax(0, 1fr); grid-template-rows: var(--tabs-h) minmax(0, 1fr);
     grid-template-areas: "tabs tabs tabs" "rail side main"; column-gap: 8px; padding: 0 8px 8px 0; background: var(--window); }
   .app:not(.phone).side-closed { grid-template-columns: var(--places-w) 0 minmax(0, 1fr); column-gap: 0; }
   .app:not(.phone).side-closed .main { margin-left: 0; }
-  .app:not(.phone) > .tabs { grid-area: tabs; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 calc(var(--places-w) + 4px); min-width: 0; overflow: hidden; }
-  .native .app:not(.phone) > .tabs { padding-left: 86px; }
-  .app:not(.phone) > .rail { grid-area: rail; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0 6px; }
+  .app:not(.phone) > #tabs { grid-area: tabs; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 calc(var(--places-w) + 4px); min-width: 0; overflow: hidden; }
+  .native .app:not(.phone) > #tabs { padding-left: 86px; }
+  .app:not(.phone) > #rail { grid-area: rail; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0 6px; }
   .app:not(.phone) > .side { grid-area: side; background: var(--side-card); border: 0; border-radius: 12px; box-shadow: 0 0 0 .5px var(--line); }
   .app:not(.phone) > .main { grid-area: main; background: var(--win); border-radius: 12px; box-shadow: 0 0 0 .5px var(--line), 0 10px 30px -22px rgba(0,0,0,.35); overflow: hidden; }
   .app:not(.phone).side-closed > .side { box-shadow: none; }
@@ -1093,7 +1093,7 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
   .app:not(.phone) .chat { background: var(--win); }
   .app:not(.phone) .composer { border-radius: 14px; }
 }
-@media (min-width: 761px) { .native.fullscreen .app:not(.phone) > .tabs { padding-left: calc(var(--places-w) + 4px); } }
+@media (min-width: 761px) { .native.fullscreen .app:not(.phone) > #tabs { padding-left: calc(var(--places-w) + 4px); } }
 /* The sidebar's find box: no browser frame (WebKit drew a light one in dark mode). */
 .side-find input { -webkit-appearance: none; appearance: none; border: 0; outline: none; background: var(--hover); color: var(--text); box-shadow: none; }
 .side-find input:focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
@@ -1116,3 +1116,32 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 .more-wrap .mi { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 10px; border-radius: 6px; font-size: 13px; color: var(--text); text-align: left; text-decoration: none; }
 .more-wrap .mi:hover { background: var(--hover); text-decoration: none; }
 .more-wrap .mi svg { width: 15px; height: 15px; color: var(--text2); }
+
+/* ================= colour: a calmer, deeper palette ================= */
+/* Light: a soft grey window, white cards, ink text, petrol for what you act on. */
+:root {
+  --window: #e8e9eb; --side-card: #f5f6f7; --win: #ffffff; --panel: #f8f9fa;
+  --text: #17181b; --text2: #45474d; --text3: #7b7e86; --text4: #aeb1b8;
+  --line: rgba(20,24,30,.1); --line2: rgba(20,24,30,.06); --hover: rgba(20,24,30,.045); --press: rgba(20,24,30,.08); --sel: rgba(20,24,30,.07);
+  --accent: #1d6f8c; --accent-hover: #175c75; --accent-text: #17627e; --accent-tint: rgba(29,111,140,.09); --accent-tint2: rgba(29,111,140,.17);
+}
+/* Dark: near-black window, charcoal cards a step apart, warm-neutral greys, a brighter petrol. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --window: #0b0b0c; --side-card: #151517; --win: #19191b; --panel: #1d1d20;
+    --text: #ececef; --text2: #b3b4ba; --text3: #82848c; --text4: #55575e;
+    --line: rgba(255,255,255,.085); --line2: rgba(255,255,255,.05); --hover: rgba(255,255,255,.055); --press: rgba(255,255,255,.09); --sel: rgba(255,255,255,.08);
+    --accent: #2f8fb0; --accent-hover: #3aa0c2; --accent-text: #7cc4dc; --accent-tint: rgba(64,165,200,.14); --accent-tint2: rgba(64,165,200,.25);
+    --add-bg: rgba(99,208,138,.08); --add-ln: rgba(99,208,138,.15); --del-bg: rgba(255,128,118,.075); --del-ln: rgba(255,128,118,.14);
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 30px -14px rgba(0,0,0,.7);
+  }
+}
+@media (min-width: 761px) {
+  .app:not(.phone) > .main { box-shadow: 0 0 0 .5px var(--line), 0 14px 40px -26px rgba(0,0,0,.5); }
+  .app:not(.phone) .chat { background: var(--win); border-right-color: var(--line2); }
+  .app:not(.phone) .toolbar { background: transparent; border-bottom-color: var(--line2); }
+  .app:not(.phone) .composer { background: var(--panel); box-shadow: 0 0 0 .5px var(--line); }
+  .ri b { background: var(--text4); color: var(--win); }
+}
+.att-chip.img { padding-left: 3px; }
+.att-chip img { height: 30px; max-width: 56px; object-fit: cover; border-radius: 5px; margin-right: 6px; vertical-align: middle; }

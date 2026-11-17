@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.2
+- A calmer, deeper colour theme: near-black window and charcoal cards in dark mode, a soft grey window and white cards in light mode, quieter lines, softer secondary greys, a clearer petrol.
+- Paste a photo or a file into the reply (⌘V), or drop it on the reply box: it is attached, with a thumbnail for images. Pasted text stays text.
+- Fixed: 0.7.0 hid a PR's chapter list (it shared a name with the new rail), squeezing the overview.
+
 ## 0.7.1
 - A thread's bar keeps only what you act on: I'm reviewing and Approve. Where the topic stands (Waiting on you, You're reviewing, picked up) is on the line under the agent's name; Done, Archive and Open on GitHub are in the ⋯ menu.
 - Waiting on you, the merge queue, settings and a new message take the whole window: the agents list belongs to Inbox, so it no longer shows beside them.

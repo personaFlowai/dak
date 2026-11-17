@@ -855,15 +855,7 @@ document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "topic-jump") return openThread(el.value);
   if (el.dataset.hideTests !== undefined) { S.hideTests = el.checked; local.set("hideTests", S.hideTests); return; }
-  if (el.id === "att-file") {
-    // Files ride along as base64; the server stores them as blobs like any other attachment.
-    for (const f of [...((el as HTMLInputElement).files ?? [])]) {
-      if (f.size > 25 * 1024 * 1024) { toast(`${f.name} is over 25 MB`, S.cur ?? ""); continue; }
-      const b64 = await new Promise<string>((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] ?? ""); r.readAsDataURL(f); });
-      S.newAtts.push({ type: "file", name: f.name, mime: f.type || "application/octet-stream", base64: b64 });
-    }
-    return renderMain();
-  }
+  if (el.id === "att-file") return addFiles([...((el as HTMLInputElement).files ?? [])]);
   // A row's priority, set by you: it wins over the order an agent set.
   if (el.dataset.tierPr || el.dataset.tierReview) {
     const path = el.dataset.tierPr ? `/queue/${el.dataset.tierPr}/priority` : `/reviews/${el.dataset.tierReview}/priority`;
@@ -924,6 +916,33 @@ document.addEventListener("click", (e) => {
   const card = t.closest<HTMLElement>(".margin .tcard");
   if (hl) setDocActive(Number(hl.dataset.docActive ?? hl.dataset.i));
   else if (card) setDocActive(Number(card.dataset.docCard));
+});
+// Files ride along as base64; the server stores them as blobs like any other attachment.
+async function addFiles(files: File[]) {
+  for (const f of files) {
+    if (f.size > 25 * 1024 * 1024) { toast(`${f.name} is over 25 MB`, S.cur ?? ""); continue; }
+    const b64 = await new Promise<string>((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] ?? ""); r.readAsDataURL(f); });
+    // A pasted screenshot arrives as "image.png": give it a name that tells two apart.
+    const nm = /^image\.(png|jpe?g|gif|webp|heic)$/i.test(f.name) ? `Screenshot ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}.${f.name.split(".").pop()}` : f.name;
+    S.newAtts.push({ type: "file", name: nm, mime: f.type || "application/octet-stream", base64: b64 });
+  }
+  renderMain();
+  $<HTMLTextAreaElement>("#message")?.focus();
+}
+// Paste a photo or a file into the reply (or a new message) and it is attached; pasted text stays text.
+document.addEventListener("paste", (e) => {
+  const where = (e.target as HTMLElement).closest?.("#composer, .composer, .newmsg, .dock");
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (!where || !files.length) return;
+  e.preventDefault();
+  addFiles(files);
+});
+// Or drop it on the reply box.
+document.addEventListener("dragover", (e) => { if ((e.target as HTMLElement).closest?.("#composer, .composer, .newmsg") && e.dataTransfer?.types.includes("Files")) e.preventDefault(); });
+document.addEventListener("drop", (e) => {
+  if (!(e.target as HTMLElement).closest?.("#composer, .composer, .newmsg") || !e.dataTransfer?.files.length) return;
+  e.preventDefault();
+  addFiles([...e.dataTransfer.files]);
 });
 window.addEventListener("resize", () => layoutMargin());
 // The ⋯ menu closes on a click anywhere else.

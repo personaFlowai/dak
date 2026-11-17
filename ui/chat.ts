@@ -172,7 +172,7 @@ export function askPane(t: Thread): string {
 
 // Attachments on a new message or reply: files and links, each removable before sending.
 export function attachBar(): string {
-  const list = S.newAtts.map((a, i) => `<span class="att-chip">${esc(a.name)}<button type="button" class="x" data-remove-att="${i}" aria-label="Remove">×</button></span>`).join("");
+  const list = S.newAtts.map((a, i) => `<span class="att-chip ${(a as any).mime?.startsWith("image/") ? "img" : ""}">${(a as any).mime?.startsWith("image/") ? `<img src="data:${esc((a as any).mime)};base64,${(a as any).base64}" alt="">` : ""}${esc(a.name)}<button type="button" class="x" data-remove-att="${i}" aria-label="Remove">×</button></span>`).join("");
   return `<div class="attach">${list}
     <label class="chip-f" title="Attach a file">＋ File<input type="file" id="att-file" hidden multiple></label>
     ${S.linkOpen ? `<span class="link-in"><input class="input" id="att-link" placeholder="https://linear.app/…" autocomplete="off"><button type="button" class="btn" data-add-link>Add</button></span>`
