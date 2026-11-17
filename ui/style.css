@@ -494,7 +494,7 @@ html.native .main { background: var(--win); }
 .topic .tl b { font-weight: 500; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic .ts { flex: none; }
 .topic:hover { background: var(--hover); }
-.topic.on { box-shadow: inset 2px 0 0 var(--accent); border-radius: 0 7px 7px 0; }
+.topic.on { background: var(--sel); border-radius: 7px; }
 .topic.on .tl b { color: var(--text); font-weight: 600; }
 .topic.folded { opacity: .75; }
 .msgs > .topic:not(:first-child) { margin-top: 10px; border-top: 1px solid var(--line2); border-radius: 0; padding-top: 12px; }
@@ -586,7 +586,7 @@ html.native .main { background: var(--win); }
 .find-results { position: absolute; z-index: 30; top: 100%; left: 8px; right: 8px; max-height: 50vh; overflow-y: auto; padding: 4px; border-radius: 10px; background: var(--win); box-shadow: 0 0 0 .5px var(--line), var(--shadow); display: grid; }
 .hit { display: grid; grid-template-columns: minmax(120px, 30%) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 6px; text-align: left; font-size: 12.5px; }
 .hit:hover, .hit.on { background: var(--hover); }
-.hit.on { box-shadow: inset 2px 0 0 var(--accent); }
+.hit.on { background: var(--sel); }
 .hit .where { color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
 .hit .snip { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
 .hit .snip.a { color: var(--add); } .hit .snip.d { color: var(--del); }
@@ -666,7 +666,7 @@ table.diff { font-size: 12.5px; }
 .pal-group { padding: 8px 10px 4px; font-size: 11.5px; font-weight: 600; color: var(--text3); }
 .pal-hit { display: grid; gap: 2px; text-align: left; padding: 7px 10px; border-radius: 8px; }
 .pal-hit:hover, .pal-hit.on { background: var(--hover); }
-.pal-hit.on { box-shadow: inset 2px 0 0 var(--accent); }
+.pal-hit.on { background: var(--sel); }
 .pal-hit .t { display: flex; gap: 10px; align-items: baseline; }
 .pal-hit .t b { flex: 1; min-width: 0; font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pal-hit .t time { font-size: 11.5px; color: var(--text3); flex: none; }
@@ -960,7 +960,7 @@ html { touch-action: manipulation; }
 .tg.fold[aria-expanded="true"] svg { transform: rotate(90deg); }
 .trow { display: grid; gap: 2px; width: 100%; padding: 7px 8px; border-radius: 7px; text-align: left; color: var(--text); }
 .trow:hover { background: var(--hover); }
-.trow.on { background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); }
+.trow.on { background: var(--sel); }
 .trow .l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .trow .n { flex: none; font: 11px var(--mono); color: var(--text3); }
 .trow .s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
@@ -1145,3 +1145,6 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 }
 .att-chip.img { padding-left: 3px; }
 .att-chip img { height: 30px; max-width: 56px; object-fit: cover; border-radius: 5px; margin-right: 6px; vertical-align: middle; }
+/* Selection is a quiet fill, as in a Mac source list: no coloured bar at the edge. */
+.trow.on .s { font-weight: 600; }
+.topic.on { background: var(--sel); }

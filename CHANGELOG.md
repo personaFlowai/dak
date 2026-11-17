@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.3
+- Selection is a quiet fill, as in a Mac source list: the coloured bar at the left edge of a selected topic, search hit and topic divider is gone; a selected topic's title goes bold.
+
 ## 0.7.2
 - A calmer, deeper colour theme: near-black window and charcoal cards in dark mode, a soft grey window and white cards in light mode, quieter lines, softer secondary greys, a clearer petrol.
 - Paste a photo or a file into the reply (⌘V), or drop it on the reply box: it is attached, with a thumbnail for images. Pasted text stays text.
