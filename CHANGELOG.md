@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+- The reply button says Send (or Approve) and never runs off a narrow conversation column; the verdict menu names the verdict.
+- A Markdown file in a PR stays inside the pane: a long code block scrolls in place instead of pushing the file header and Reviewed off screen.
+- Settings, Reviewing: "Fold test files". .test, .spec and __tests__ files open folded in every PR, marked Test; Show opens one.
+- Opening a topic from the merge queue or Waiting on you goes to that topic, even with all topics in one timeline; the topic you are on is highlighted and labelled.
+- Moving between topics keeps the side pane closed if you closed it.
+
 ## 0.4.0
 From a day of Atlas coordinating ten engineers:
 - `dak route set <person> --from-group <group> --via <agent>`: a group's PRs and briefs to the person go to the agent first, with a note. Replies, notes and questions are not routed.

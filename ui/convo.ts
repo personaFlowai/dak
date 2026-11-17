@@ -152,7 +152,7 @@ export function timeline(render: (m: Message, topic: Topic) => string): string {
       const kind = t.thread.kind === "pr" ? I.pr : t.thread.kind === "doc" ? I.doc : I.chat;
       const st = standing(t.thread, t.messages);
       out.push(`<div class="topic ${id === S.cur ? "on" : ""} ${folded ? "folded" : ""}">
-        <button class="tbtn" data-topic="${id}" title="${id === S.cur ? "You are replying on this" : "Reply on this"}"><span class="tl">${kind}<b>${esc(topicLabel(t))}</b></span><span class="ts ${st.cls}">${esc(closed ? "Done" : st.label)}</span></button>
+        <button class="tbtn" data-topic="${id}" title="${id === S.cur ? "You are replying on this" : "Reply on this"}"><span class="tl">${kind}<b>${esc(topicLabel(t))}</b></span>${id === S.cur && S.allTopics ? `<span class="here">You're on this one</span>` : ""}<span class="ts ${st.cls}">${esc(closed ? "Done" : st.label)}</span></button>
         ${isPair(S.peer) ? "" : `<button class="done-btn" data-done="${id}" data-on="${closed ? "0" : "1"}" title="${closed ? "Bring this topic back" : "Mark this topic done: it leaves the conversation"}">${closed ? "Reopen" : `${I.check} Done`}</button>`}</div>`);
     }
     last = id;

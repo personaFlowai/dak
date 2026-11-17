@@ -42,11 +42,17 @@ async function openThread(id: string, keep = false) {
   const data = await api<{ thread: Thread; messages: Message[]; participants?: Participant[] }>(`/threads/${id}${mine && looking() ? `?read_as=${encodeURIComponent(me)}` : ""}`);
   const changed = S.cur !== id;
   const peer = peerOf({ ...data.thread, participants: data.participants?.map((p) => p.name) });
-  S.scrollTo = peer !== S.peer || S.view !== "thread" ? "end" : changed ? id : S.scrollTo;
+  const sameConvo = peer === S.peer && S.view === "thread";
+  // Opening a topic shows that topic. With every topic in one timeline, the end is the newest
+  // topic, not the one you clicked (from the merge queue, say): go to the one you asked for.
+  S.scrollTo = !sameConvo ? (S.allTopics ? id : "end") : changed ? id : S.scrollTo;
   if (peer !== S.peer || changed) { S.newTopic = false; S.newSubject = ""; }
+  // Moving between topics of the same conversation keeps the side pane as you left it: closed
+  // stays closed. Coming from elsewhere (the queue, a list) opens what you clicked.
+  const keepClosed = sameConvo && changed && S.paneClosed;
   S.cur = id; S.data = data; S.view = "thread"; S.peer = peer; S.phoneList = false;
   if (changed || !keep) {
-    S.paneClosed = false; useAtt(defaultAtt()); S.sel = null; S.editing = null; S.askContext = null; S.sendError = ""; S.sendNote = ""; S.pane = "chat";
+    S.paneClosed = keepClosed; useAtt(keepClosed ? null : defaultAtt()); S.sel = null; S.editing = null; S.askContext = null; S.sendError = ""; S.sendNote = ""; S.pane = "chat";
     clearPending();
   } else if (!findAtt(S.att) && !S.paneClosed) useAtt(defaultAtt());
   local.set("last", id);
@@ -613,6 +619,8 @@ function settingsView(): string {
   if (!s) return `<div class="blank"><p>Loading settings</p></div>`;
   const helperMark = (id: string) => TOOLS[id === "claude" ? "claude-code" : id]?.mark ?? "";
   return `<div class="pane-body"><div class="settings">
+    <section><h2>Reviewing</h2>
+      <label class="option"><input type="checkbox" data-hide-tests ${S.hideTests ? "checked" : ""}><span class="nm"><b>Fold test files</b><span>Files named like <code>.test.ts</code>, <code>.spec.ts</code> or under <code>__tests__</code> open folded to their header in every PR. Show opens one.</span></span></label></section>
     <section><h2>Helper</h2><p class="lead">Answers your questions about code and documents in the Ask pane. It reads and never edits, and nothing it says is posted to a thread.</p>
       <div class="options">${s.helpers.map((h: any) => `<label class="option ${h.installed ? "" : "off"}"><input type="radio" name="helper" value="${h.id}" ${s.helper === h.id ? "checked" : ""} ${h.installed ? "" : "disabled"}>
         <span class="mark md">${helperMark(h.id)}</span><span class="nm"><b>${esc(h.label)}</b><span>${h.installed ? (h.id === "claude" ? "claude -p with read-only tools" : h.id === "codex" ? "codex exec in a read-only sandbox" : "cursor-agent -p") : "Not installed"}</span></span>${h.installed ? modelControl(h.id, s.models?.[h.id] ?? "") : ""}</label>`).join("")}</div></section>
@@ -804,6 +812,7 @@ document.addEventListener("input", (e) => {
 document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "topic-jump") return openThread(el.value);
+  if (el.dataset.hideTests !== undefined) { S.hideTests = el.checked; local.set("hideTests", S.hideTests); return; }
   if (el.id === "att-file") {
     // Files ride along as base64; the server stores them as blobs like any other attachment.
     for (const f of [...((el as HTMLInputElement).files ?? [])]) {

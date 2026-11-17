@@ -1,5 +1,5 @@
 import { local } from "./api";
-import { esc, S, me, name, chaptersOf, reviewed, viewed, chapterFiles, drafts, findAtt, when, mark, helperMark, plain, onPhone, type Pr, type Sel } from "./state";
+import { esc, S, me, name, chaptersOf, reviewed, viewed, chapterFiles, drafts, findAtt, when, mark, helperMark, plain, onPhone, type Pr, type Sel, isTestFile } from "./state";
 import { phoneGuide, phoneSheet, phoneTabs } from "./pr-phone";
 import { hunkStart, type DiffFile, type Hunk } from "../src/diff";
 import type { Anchor, Chapter } from "../src/types";
@@ -151,7 +151,9 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
   const hunks = df ? df.hunks.filter((h) => starts.includes(hunkStart(df, h))) : [];
   const seen = viewed(a.id).has(path);
   // A reviewed file folds to its header; Show opens it again, to read or comment, without unticking it.
-  const foldable = seen;
+  // With "Fold test files" on, a test file starts folded like a reviewed one.
+  const testFolded = S.hideTests && isTestFile(path);
+  const foldable = seen || testFolded;
   const folded = foldable && !S.unfold.has(`${a.id}:${path}`);
   const slash = path.lastIndexOf("/");
   const file = path.slice(slash + 1), dir = slash >= 0 ? path.slice(0, slash + 1) : "";
@@ -166,6 +168,7 @@ function fileSection(a: Pr, df: DiffFile | undefined, path: string, starts: numb
   const rows = folded || preview ? "" : mode === "full" ? fullRows(a, df, path, full!) : split ? splitRows(a, path, hunks, full) : diffRows(a, path, hunks, full);
   return `<section class="fcard ${seen ? "viewed" : ""}" data-file="${esc(path)}">
     <header class="fhead">${fileIcon(path)}<span class="fname" title="${esc(path)}"><b>${esc(file)}</b><span class="dir">${esc(dir)}</span></span>
+      ${testFolded ? `<span class="testtag" title="Folded by your setting: Fold test files">Test</span>` : ""}
       ${talk ? `<span class="talk" title="${talk} comment${talk === 1 ? "" : "s"}">${I.chat}${talk}</span>` : ""}
       ${pf ? `<span class="n"><span class="a">+${pf.additions}</span> <span class="d">−${pf.deletions}</span></span>` : ""}
       ${foldable ? `<button class="link" data-unfold="${esc(path)}">${folded ? "Show" : "Hide"}</button>` : ""}

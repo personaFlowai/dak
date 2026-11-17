@@ -50,6 +50,7 @@ export const S = {
   data: null as { thread: Thread; messages: Message[] } | null,
   att: null as string | null,
   chapter: -1, // -1 is the PR's overview
+  hideTests: local.get("hideTests", false), // test files fold to their header in a PR; Show opens one
   split: local.get("split", false), // diffs side by side: removed on the left, added on the right
   restore: null as null | Record<string, number>,
   find: { open: false, q: "", i: 0, list: false }, // find in the open PR
@@ -231,3 +232,6 @@ export function helperLabel(): string {
   const s = S.settings;
   return s?.helpers?.find((h: any) => h.id === s.helper)?.label ?? "the helper";
 }
+
+// A test file, by its name: foo.test.ts, foo.spec.tsx, foo.dom.test.tsx, or anything under __tests__.
+export const isTestFile = (path: string) => /\.(test|spec)\.[a-z0-9]+$/i.test(path) || /(^|\/)__tests__\//.test(path);

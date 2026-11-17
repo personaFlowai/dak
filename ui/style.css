@@ -927,3 +927,20 @@ html { touch-action: manipulation; }
 .qmoved b { font-weight: 600; color: var(--text); }
 .qmoved.bad b, .qmoved.bad { color: var(--danger-text); }
 .rtype.t-tryit { color: var(--accent-text); border-color: var(--accent-tint2); }
+
+/* The reply row in a narrow conversation column: the verdict menu already names the verdict, so
+   the button only says Send (or Approve), and the menu gives way before the button does. */
+.composer .row > .popup { flex: 0 1 auto; min-width: 0; }
+.composer .row > .popup select { max-width: 100%; text-overflow: ellipsis; }
+.composer .row > #send { flex: none; }
+.composer .row > .check { flex: none; }
+
+/* A file card is a grid item: without min-width 0 it grows to its widest line (a long code block
+   in a Markdown preview) and pushes its own header, with Reviewed, off the side of the pane. */
+.fcards > .fcard { min-width: 0; max-width: 100%; }
+.mdpreview { width: auto; max-width: min(760px, 100%); overflow-wrap: anywhere; }
+.mdpreview pre, .mdpreview table { max-width: 100%; overflow-x: auto; }
+/* With every topic in one timeline, the one you are replying on must be obvious at a glance. */
+.topic.on { background: var(--accent-tint); }
+.topic .here { flex: none; font-size: 11px; font-weight: 600; color: var(--accent-text); }
+.fhead .testtag { flex: none; font-size: 10.5px; font-weight: 600; color: var(--text3); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; text-transform: uppercase; letter-spacing: .03em; }
