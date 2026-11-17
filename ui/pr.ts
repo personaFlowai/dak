@@ -285,7 +285,7 @@ function notesAt(a: Pr, path: string, side: "old" | "new", line: number) {
       const other = S.data!.thread.from === me ? S.data!.thread.to : S.data!.thread.from;
       out += note(`<div class="card editing"><div class="who"><b>Comment</b><span>${esc(selLabel(s))}</span></div>
         <textarea id="edit" rows="3" aria-label="Comment on ${esc(selLabel(s))}" placeholder="What should ${esc(name(other))} know about this?"></textarea>
-        <div class="btns"><button class="btn" data-cancel>Cancel</button><button class="btn primary" data-save title="⌘↩">Add comment</button></div></div>`);
+        <div class="btns"><button class="btn" data-cancel>Cancel</button><button class="btn primary" data-save title="↩ (Shift↩ for a new line)">Add comment</button></div></div>`);
     } else {
       out += note(`<div class="selbar"><span>${esc(selLabel(s))}</span><button class="btn" data-comment>${I.chat} Comment</button><button class="btn" data-ask-sel>${helperMark()} Ask</button><button class="link" data-clear>Clear</button></div>`);
     }

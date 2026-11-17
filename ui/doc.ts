@@ -38,7 +38,7 @@ export function docView(a: Doc): string {
 
   const cards = [...threads.entries()].sort((x, y) => x[0] - y[0]).map(([i, entries]) => {
     const ed = i === editing ? `<div class="entry editing">${quote(S.editing!.anchor, S.editing!.label)}<textarea id="edit" rows="3" aria-label="Comment" placeholder="${entries.length ? "Reply" : "Your comment"}"></textarea>
-      <div class="btns"><button class="btn" data-cancel>Cancel</button><button class="btn primary" data-save title="⌘↩">${entries.length ? "Reply" : "Add comment"}</button></div></div>`
+      <div class="btns"><button class="btn" data-cancel>Cancel</button><button class="btn primary" data-save title="↩ (Shift↩ for a new line)">${entries.length ? "Reply" : "Add comment"}</button></div></div>`
       : i >= 0 ? `<button class="link reply-here" data-block="${i}">Reply</button>` : "";
     return `<div class="tcard ${i === active ? "active" : ""} ${i < 0 ? "earlier" : ""}" data-doc-card="${i}">${i < 0 ? `<div class="earlier-h">From an earlier version</div>` : ""}${entries.map((e) => e.html).join("")}${ed}</div>`;
   });

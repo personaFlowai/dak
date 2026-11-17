@@ -129,7 +129,7 @@ export function composer(t: Thread, docked = false): string {
       <button type="button" class="dock-open" data-dock="open">${typed ? esc(typed.split("\n")[0].slice(0, 80)) : `Reply to ${esc(name(other))}`}</button>
       ${n ? `<span class="aside">${n} comment${n === 1 ? "" : "s"}</span>` : ""}
       ${opts.length ? `<label class="popup ${v ? `v-${v}` : ""}"><select id="verdict" aria-label="Verdict">${opts.map(([k, l]) => `<option value="${k}" ${(v ?? "") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
-      <button type="button" class="btn primary" id="send" ${S.sending ? "disabled" : ""} title="Send (⌘↩)">${S.sending ? "Sending" : v === "approve" ? "Approve" : "Send"}</button></div>`;
+      <button type="button" class="btn primary" id="send" ${S.sending ? "disabled" : ""} title="Send (↩, Shift↩ for a new line)">${S.sending ? "Sending" : v === "approve" ? "Approve" : "Send"}</button></div>`;
   }
   return `<form class="composer ${docked ? "docked" : ""}" id="composer" onsubmit="return false">
     ${docked ? `<div class="dock-top"><span>Reply to ${esc(name(other))}</span><button type="button" class="link" data-dock="close">Hide</button></div>` : ""}
@@ -140,7 +140,7 @@ export function composer(t: Thread, docked = false): string {
       ${opts.length ? `<label class="popup ${v ? `v-${v}` : ""}" title="What your reply says about the work"><select id="verdict" aria-label="Verdict">${opts.map(([k, l]) => `<option value="${k}" ${(v ?? "") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
       ${gh ? `<label class="check" title="Also post this review and its line comments on GitHub"><input type="checkbox" id="github" ${S.github[t.id] ? "checked" : ""}> GitHub</label>` : ""}
       <span class="aside">${S.sendError ? `<span class="err">${esc(S.sendError)}</span>` : S.sendNote ? esc(S.sendNote) : n ? `${n} comment${n === 1 ? "" : "s"} attached` : ""}</span>
-      <button type="button" class="btn primary" id="send" ${S.sending ? "disabled" : ""} title="Send (⌘↩)">${S.sending ? "Sending" : v === "approve" ? "Approve" : "Send"}</button>
+      <button type="button" class="btn primary" id="send" ${S.sending ? "disabled" : ""} title="Send (↩, Shift↩ for a new line)">${S.sending ? "Sending" : v === "approve" ? "Approve" : "Send"}</button>
     </div></form>`;
 }
 
@@ -165,7 +165,7 @@ export function askPane(t: Thread): string {
     <form class="composer" onsubmit="return false">
       ${S.askContext ? `<div class="ctxbar"><code>${esc(S.askContext.label)}</code><button type="button" class="link" data-clear-context>Remove</button></div>` : ""}
       <textarea id="askq" rows="2" placeholder="Ask about ${S.askContext ? "the selection" : "this"}"></textarea>
-      <div class="row"><span class="aside">Private to you</span><button type="button" class="btn primary" id="askgo" title="Ask (⌘↩)">Ask</button></div>
+      <div class="row"><span class="aside">Private to you</span><button type="button" class="btn primary" id="askgo" title="Ask (↩, Shift↩ for a new line)">Ask</button></div>
     </form></div>`;
 }
 

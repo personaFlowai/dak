@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- Enter sends a message, a comment or a question; Shift+Enter starts a new line. ⌘Enter still works. On the phone, Return stays a new line and the Send button sends.
+
 ## 0.8.0
 - The phone matches the Mac's redesign. Places are a tab bar along the bottom (Inbox, For you, Queue, Agents, Search) with counts. The Inbox is a large title over grouped cards, Pinned then Others. An agent opens its topics one screen in (Waiting on you, In progress, Done, with search), and a topic opens on its own, as on the Mac. The thread bar keeps Approve and ⋯; I'm reviewing, Pin, Archive and GitHub are in ⋯, and where the topic stands is under the name.
 - The phone's All topics timeline and topic arrows are gone: the topics list replaces them.

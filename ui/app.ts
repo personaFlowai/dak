@@ -1286,7 +1286,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.target as HTMLElement)?.id === "att-link") { e.preventDefault(); return addLink(); }
   const id = document.activeElement?.id ?? "";
   const typing = /^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement?.tagName ?? "");
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+  // Enter sends from a writing box, Shift+Enter starts a new line. On the phone the keyboard
+  // has no Shift+Enter, so Return stays a new line there and the Send button sends.
+  const box = id === "message" || id === "askq" || id === "c-body" || id === "edit";
+  const plainEnter = e.key === "Enter" && box && !e.shiftKey && !e.altKey && !e.isComposing && !onPhone();
+  if (plainEnter || (e.metaKey || e.ctrlKey) && e.key === "Enter") {
     e.preventDefault();
     if (id === "edit") saveComment();
     else if (id === "askq") { const q = $<HTMLTextAreaElement>("#askq")!.value.trim(); if (q || S.askContext) ask(q); }
