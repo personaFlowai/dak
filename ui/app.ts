@@ -48,7 +48,10 @@ async function openThread(id: string, keep = false) {
   const sameConvo = peer === S.peer && S.view === "thread";
   // Opening a topic shows that topic. With every topic in one timeline, the end is the newest
   // topic, not the one you clicked (from the merge queue, say): go to the one you asked for.
-  S.scrollTo = !sameConvo ? (S.allTopics ? id : "end") : changed ? id : S.scrollTo;
+  // On the Mac a conversation shows one topic, so opening one goes to its latest message. Only
+  // the phone's all-topics timeline scrolls to the opened topic's divider instead.
+  const timeline = S.allTopics && onPhone();
+  S.scrollTo = changed || !sameConvo ? (timeline ? id : "end") : S.scrollTo;
   if (peer !== S.peer || changed) { S.newTopic = false; S.newSubject = ""; }
   // Moving between topics of the same conversation keeps the side pane as you left it: closed
   // stays closed. Coming from elsewhere (the queue, a list) opens what you clicked.
@@ -233,6 +236,8 @@ function renderMain() {
     const divider = to && to !== "end" ? m.querySelector<HTMLElement>(`[data-topic="${to}"]`) : null;
     if (divider) m.scrollTop = divider.offsetTop - m.offsetTop - 8;
     else m.scrollTop = S.pane === "ask" || to === "end" || keep.msgs === undefined ? m.scrollHeight : keep.msgs;
+    // Pictures that load after this would push the latest message down: stay at the end if we were.
+    if (to === "end") m.querySelectorAll("img").forEach((img) => { if (!img.complete) img.addEventListener("load", () => { if (m.scrollHeight - m.scrollTop - m.clientHeight < 400) m.scrollTop = m.scrollHeight; }, { once: true }); });
   }
   const pb = $(".pane-body"); if (pb && !r) pb.scrollTop = keep.body;
   const pp = $(".phone-pr"); if (pp) pp.scrollTop = keep.phonePr; // closing a file sheet leaves the page where it was
