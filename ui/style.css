@@ -972,3 +972,6 @@ html { touch-action: manipulation; }
 .trow time { flex: none; margin-left: auto; }
 .tnone { padding: 14px 8px; font-size: 12.5px; color: var(--text3); }
 @media (max-width: 1100px) { .with-topics { grid-template-columns: 210px minmax(0, 1fr); } }
+/* A settings row that is only a switch and its words: no tool mark, no control on the right. */
+.option.toggle-row { grid-template-columns: auto minmax(0, 1fr); }
+.option.toggle-row .nm > span { white-space: normal; line-height: 1.45; }

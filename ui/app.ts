@@ -633,7 +633,7 @@ function settingsView(): string {
   const helperMark = (id: string) => TOOLS[id === "claude" ? "claude-code" : id]?.mark ?? "";
   return `<div class="pane-body"><div class="settings">
     <section><h2>Reviewing</h2>
-      <label class="option"><input type="checkbox" data-hide-tests ${S.hideTests ? "checked" : ""}><span class="nm"><b>Fold test files</b><span>Files named like <code>.test.ts</code>, <code>.spec.ts</code> or under <code>__tests__</code> open folded to their header in every PR. Show opens one.</span></span></label></section>
+      <label class="option toggle-row"><input type="checkbox" data-hide-tests ${S.hideTests ? "checked" : ""}><span class="nm"><b>Fold test files</b><span>Files named like <code>.test.ts</code>, <code>.spec.ts</code> or under <code>__tests__</code> open folded to their header in every PR. Show opens one.</span></span></label></section>
     <section><h2>Helper</h2><p class="lead">Answers your questions about code and documents in the Ask pane. It reads and never edits, and nothing it says is posted to a thread.</p>
       <div class="options">${s.helpers.map((h: any) => `<label class="option ${h.installed ? "" : "off"}"><input type="radio" name="helper" value="${h.id}" ${s.helper === h.id ? "checked" : ""} ${h.installed ? "" : "disabled"}>
         <span class="mark md">${helperMark(h.id)}</span><span class="nm"><b>${esc(h.label)}</b><span>${h.installed ? (h.id === "claude" ? "claude -p with read-only tools" : h.id === "codex" ? "codex exec in a read-only sandbox" : "cursor-agent -p") : "Not installed"}</span></span>${h.installed ? modelControl(h.id, s.models?.[h.id] ?? "") : ""}</label>`).join("")}</div></section>

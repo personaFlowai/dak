@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.1
+- Settings, Reviewing: the Fold test files row was cut to "Fo..."; it now reads in full.
+
 ## 0.5.0
 - Topics in a list beside the conversation, like a chat history: grouped Waiting on you, In progress and Done (folded), with search by words, PR number or ticket. One click shows that topic alone, highlighted in the list; one opened from the merge queue is selected and scrolled into view. It replaces the previous and next arrows and the All topics timeline on the Mac (the phone keeps them).
 - The list hides with the toolbar button or T, and while a review is expanded.
