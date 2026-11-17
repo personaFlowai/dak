@@ -785,6 +785,12 @@ async function sendNewTopic() {
   } catch (e: any) { S.sending = false; S.sendError = e.message ?? "Could not send."; renderMain(); }
 }
 
+function verdictPrs(): number[] | undefined {
+  const all = prsHere();
+  const p = all.length > 1 ? prOfAtt(findAtt(S.att)) : all[0];
+  return p?.number ? [p.number] : undefined;
+}
+
 async function send(force?: Verdict, prs?: number[]) {
   if (!S.data || S.sending) return;
   if (S.newTopic && !force) return sendNewTopic();
@@ -798,7 +804,9 @@ async function send(force?: Verdict, prs?: number[]) {
     const r = await api<any>(`/threads/${t.id}/messages`, { method: "POST", body: {
       author: me, body, verdict: v, github: !!S.github[t.id] && !!prLink(),
       // On a topic with several PRs, a verdict is about the PR that is open unless named.
-      prs: v ? prs ?? (prsHere().length > 1 && prOfAtt(findAtt(S.att))?.number ? [prOfAtt(findAtt(S.att))!.number!] : undefined) : undefined,
+      // A verdict always names its PR when it has a number, so the agent's note says "approved #2462",
+      // not just "approved". Several PRs: the one open. One: that one.
+      prs: v ? prs ?? verdictPrs() : undefined,
       comments: ds.map((d) => ({ attachment_id: d.attachment_id, anchor: d.anchor, body: d.body })), attachments: S.newAtts } });
     saveDrafts(t.id, []); delete S.message[t.id]; delete S.verdict[t.id]; keepUnsent(); S.newAtts = []; S.confirmAll = false;
     keepTab(t.id); // you acted on it: it stays a tab

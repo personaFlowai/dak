@@ -27,7 +27,9 @@ export const canReply = (t: Thread) => t.to === me || t.from === me
   || !!S.convo.find((x) => x.thread.id === t.id)?.participants?.some((p) => p.name === me);
 
 function message(m: Message, topic: Topic): string {
-  const v = m.verdict ? `<span class="verdict ${m.verdict}">${{ approve: "Approved", changes: "Changes requested", question: "Question" }[m.verdict]}</span>` : "";
+  // The PRs a verdict is about, by number: "Approved #2462".
+  const on = m.prs?.length ? ` ${m.prs.map((n) => `#${n}`).join(", ")}` : "";
+  const v = m.verdict ? `<span class="verdict ${m.verdict}">${{ approve: "Approved", changes: "Changes requested", question: "Question" }[m.verdict]}${on}</span>` : "";
   const refs = m.comments.map((c) => `<li><code>${esc(anchorLabel(c.anchor))}</code> ${esc(c.body)}</li>`).join("");
   const chips = m.attachments.map((a) => chip(a, topic)).join("");
   const media = m.attachments.filter((a) => a.type === "file" && /^(image|video)\//.test((a.meta as any).mime)).map((a) => {

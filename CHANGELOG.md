@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Every approval or change request from the app names its PR, even on a topic with one PR: the conversation says "Approved #2462" and the agent's note says "approved #2462", not just "approved".
+
 ## 0.9.0
 
 - **A topic can carry several PRs, each approved on its own.** PRs are told apart by number: the same number again is that PR's next version, a different number is another PR on the topic. Before, every PR on a topic counted as a version of one PR, and one Approve passed for all of them; the merge queue then showed every PR on the thread as "Approved by you".
