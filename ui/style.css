@@ -1148,3 +1148,11 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 /* Selection is a quiet fill, as in a Mac source list: no coloured bar at the edge. */
 .trow.on .s { font-weight: 600; }
 .topic.on { background: var(--sel); }
+/* The traffic lights live in the tab row now, so a collapsed sidebar no longer pushes the toolbar right. */
+@media (min-width: 761px) { .native .app:not(.phone).side-closed .toolbar { padding-left: 12px; } }
+/* The conversation's tabs and the review pane's header are one band: same height, same line. */
+@media (min-width: 761px) {
+  .app:not(.phone) .chat > .tabs { height: 40px; padding: 0 12px; align-items: stretch; box-shadow: inset 0 -1px 0 var(--line2); }
+  .app:not(.phone) .chat > .tabs button { padding: 0 10px; }
+  .app:not(.phone) .pane-head { box-sizing: border-box; height: 40px; min-height: 40px; padding-top: 0; padding-bottom: 0; border-bottom: 1px solid var(--line2); }
+}

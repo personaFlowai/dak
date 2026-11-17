@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.4
+- The conversation's tabs and the review pane's header are one band: the same height and the same line under them.
+- Fixed: with the sidebar collapsed, the Mac app pushed the toolbar 84pt right to clear traffic lights that now sit in the tab row.
+
 ## 0.7.3
 - Selection is a quiet fill, as in a Mac source list: the coloured bar at the left edge of a selected topic, search hit and topic divider is gone; a selected topic's title goes bold.
 
