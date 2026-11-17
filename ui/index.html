@@ -27,7 +27,9 @@ FORM: brief-pinned (native macOS, petrol accent); no roll.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
 -->
 <div id="app" class="app">
-  <aside class="side" id="side" aria-label="Mailboxes and threads"></aside>
+  <div class="tabs" id="tabs" role="tablist" aria-label="Open threads"></div>
+  <nav class="rail" id="rail" aria-label="Places"></nav>
+  <aside class="side" id="side" aria-label="Agents and topics"></aside>
   <main class="main" id="main"></main>
 </div>
 <div id="selpop" hidden><button class="btn primary" data-selcomment>Comment</button><button class="btn" data-selask>Ask</button></div>

@@ -23,7 +23,7 @@ Dak (डाक, "the post") gives every agent on your machine (Claude Code, Curs
 
 ## What it does
 
-- **One conversation per agent, with its topics listed.** Every PR, doc or question an agent sends is a topic. The topics sit in a list beside the conversation, like a chat history: grouped Waiting on you, In progress and Done, searchable by words, PR or ticket. One click shows that topic alone. Archive a quiet agent, and read what agents say to each other under "Between agents".
+- **One conversation per agent, with its topics listed.** Every PR, doc or question an agent sends is a topic. The sidebar drills in: tap an agent and it lists that agent's topics like a chat history (Waiting on you, In progress, Done), searchable by words, PR or ticket; Back returns to the agents. What you open becomes a tab along the top, and a rail on the left holds Waiting on you, the merge queue, agents' own threads, search and settings. Archive a quiet agent, and read what agents say to each other under "Between agents".
 - **PRs explained in chapters.** The agent that wrote the change explains it: why each part exists, the risk and how it is proven, what to check. You read the notes beside the code, comment on any line, and approve or ask for changes in one place. ⌘F finds anything in the diff.
 - **⌘-click to follow the code.** ⌘-click a name in a PR and its definition opens in a peek over the code, found in the PR's files and across the repo at the PR's head, with every place that uses it. Follow one, ⌘-click again inside the peek, and Back returns. A text search, not a language server: a name defined twice gives a short list to pick from.
 - **Docs to comment on.** A brief arrives as a document; select words or a paragraph and comment there.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+- A new frame on the Mac. Panes are rounded cards on the window. A thin rail on the left holds the places: Inbox, Waiting on you, Merge queue, Between agents, Search, New message, Settings. Tabs along the top hold the threads you have open (up to 8), with a dot on one waiting on you.
+- The sidebar drills in: the agents, then one agent's topics with "‹ Agents" to go back. Three columns, so the review pane keeps its width; the separate topics column from 0.5.0 is gone.
+- Reading-first type: bigger titles and roomier text in PR overviews, chapters, docs and the conversation.
+- The window drags, and the traffic lights sit, in the 40pt tab row. The phone is unchanged.
+
 ## 0.6.1
 - Doc comments, Notion style: each paragraph's comments are one card level with it, instead of a stack at the top. Commented words are highlighted, a paragraph with comments is tinted and carries a bubble with its count, and clicking words, bubble or card lights the pair up and lines the card up with its words. Reply on a card; a new comment opens beside its paragraph.
 

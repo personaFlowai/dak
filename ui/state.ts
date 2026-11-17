@@ -50,7 +50,9 @@ export const S = {
   data: null as { thread: Thread; messages: Message[] } | null,
   att: null as string | null,
   chapter: -1, // -1 is the PR's overview
-  topicFind: "", // the topics column's search
+  topicFind: "", // the sidebar's topic search
+  sideLevel: "agents" as import("./shell").SideLevel, // the sidebar: agents, one agent's topics, or agents' own threads
+  tabs: local.get<string[]>("tabs", []), // threads open as tabs along the top, oldest first
   docActive: null as number | null, // the doc paragraph whose comments are lit up
   peek: null as import("./peek").Peek | null, // a definition opened with ⌘-click over the code
   peekBack: [] as import("./peek").Peek[], // where the peek has been, for its Back

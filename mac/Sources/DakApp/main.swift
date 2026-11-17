@@ -29,7 +29,7 @@ struct Settings {
     var base: URL { URL(string: "http://127.0.0.1:\(port)/")! }
 }
 
-let TOOLBAR_HEIGHT: CGFloat = 52
+let TOOLBAR_HEIGHT: CGFloat = 40 // the tab row along the top: traffic lights centred in it, its empty parts drag the window
 
 final class DakWebView: WKWebView {
     var controlRects: [CGRect] = []   // page coordinates, top-left origin

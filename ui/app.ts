@@ -2,8 +2,9 @@
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
+import { addTab, closeTab, railView, sideBody, tabsView } from "./shell";
 import { closePeek, openPeek, peekBackStep, peekView, showSpot, wordAt } from "./peek";
-import { topicRows, topicsColumn } from "./topics";
+import { topicRows } from "./topics";
 import qrcode from "qrcode-generator";
 import {
   S, me, esc, $, name, mark, when, standing, approvedNow, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
@@ -52,6 +53,10 @@ async function openThread(id: string, keep = false) {
   // Moving between topics of the same conversation keeps the side pane as you left it: closed
   // stays closed. Coming from elsewhere (the queue, a list) opens what you clicked.
   const keepClosed = sameConvo && changed && S.paneClosed;
+  // Opening a conversation from anywhere else drills the sidebar into its topics, and the
+  // thread becomes a tab.
+  if (!sameConvo) S.sideLevel = "topics";
+  addTab(id);
   S.cur = id; S.data = data; S.view = "thread"; S.peer = peer; S.phoneList = false;
   if (changed || !keep) {
     S.paneClosed = keepClosed; useAtt(keepClosed ? null : defaultAtt()); S.sel = null; S.editing = null; S.askContext = null; S.sendError = ""; S.sendNote = ""; S.pane = "chat";
@@ -167,14 +172,23 @@ function renderSide() {
   const review = S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "");
   $("#app")!.classList.toggle("phone", onPhone());
   $("#app")!.classList.toggle("side-closed", onPhone() ? !S.phoneList : S.focus && review ? !S.focusSide : !S.sideOpen);
-  $("#side")!.innerHTML = `
+  if (onPhone()) {
+    // The phone keeps its list screen: places at the top, then every conversation.
+    $("#side")!.innerHTML = `
     <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
     <button class="row-btn queue-entry" data-waiting aria-current="${S.view === "waiting"}">${I.check}<span class="lbl">Waiting on you</span>${S.reviews.length ? `<span class="count you">${S.reviews.length}</span>` : ""}</button>
     <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.queue.some((r) => r.state !== "deployed" && !r.hold) ? `<span class="count">${S.queue.filter((r) => r.state !== "deployed" && !r.hold).length}</span>` : ""}</button>
     <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
-    <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>
-    <div class="side-foot" ${(window as any).DAK?.phone ? "hidden" : ""}><button class="row-btn" data-settings aria-current="${S.view === "settings"}">${I.gear}<span class="lbl">Settings</span></button></div>
-    <div class="splitter" data-split="side" title="Drag to resize"></div>`;
+    <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>`;
+  } else {
+    $("#rail")!.innerHTML = railView();
+    $("#tabs")!.innerHTML = tabsView();
+    const keepList = $("#tlist")?.scrollTop ?? $(".side .list")?.scrollTop ?? 0;
+    const finding = document.activeElement?.id === "topic-find" ? ($<HTMLInputElement>("#topic-find")!.selectionStart ?? 0) : -1;
+    $("#side")!.innerHTML = sideBody() + `<div class="splitter" data-split="side" title="Drag to resize"></div>`;
+    const l = $("#tlist") ?? $(".side .list"); if (l) l.scrollTop = keepList;
+    if (finding >= 0) { const f = $<HTMLInputElement>("#topic-find"); f?.focus(); f?.setSelectionRange(finding, finding); }
+  }
   postControls();
 }
 
@@ -257,16 +271,12 @@ function threadView(): string {
   const reviewingBtn = readable && t.to === me && t.status === "waiting"
     ? onIt ? `<span class="status reviewing" title="Since ${esc(fullWhen(onIt))}">You're reviewing</span>`
       : `<button class="btn" data-reviewing="${t.id}" title="Tell ${esc(name(t.from))} you are reviewing this">I'm reviewing</button>` : "";
-  const topicsBtn = onPhone() || S.focus ? "" : `<button class="icon-btn ${S.topicsOpen ? "on" : ""}" data-toggle-topics title="${S.topicsOpen ? "Hide" : "Show"} topics (T)" aria-label="${S.topicsOpen ? "Hide" : "Show"} the topics list" aria-pressed="${S.topicsOpen}">${I.list}</button>`;
-  const right = `${topicsBtn}${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
+  const right = `${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
     : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${onPhone() ? topicMenu(t.subject) : esc(t.subject)}${roles()}`, right);
-  // On the Mac the agent's topics sit in a column beside the conversation; expanding a review
-  // (focus) hides it, so reading keeps the whole width.
-  const col = !onPhone() && !S.focus && S.topicsOpen ? topicsColumn() : "";
-  const withTopics = (body: string) => col ? `<div class="with-topics">${col}${body}</div>` : body;
+  const withTopics = (body: string) => body; // the agent's topics are in the sidebar now
   if (!review) return head + withTopics(`<div class="solo-wrap">${chatPane(t, false)}</div>`);
   // Focus: chapters and code only; the reply floats at the bottom until you open it.
   if (S.focus || onPhone()) return head + `<div class="focus-wrap"><div class="pane-body review">${reviewBody(a!)}</div>
@@ -913,6 +923,21 @@ document.addEventListener("click", async (e) => {
   if (!b) return;
   const d = b.dataset;
   if (d.docActive !== undefined) return setDocActive(Number(d.docActive));
+  // The rail: Inbox shows the agents (or, already there, nothing changes); Between agents lists their threads.
+  if (d.rail) {
+    S.sideLevel = d.rail === "pairs" ? "pairs" : "agents";
+    if (!S.sideOpen) { S.sideOpen = true; local.set("sideOpen", true); }
+    const level = S.sideLevel;
+    if (S.view !== "thread" && S.cur) { await openThread(S.cur); S.sideLevel = level; }
+    return render();
+  }
+  if (d.sideBack !== undefined) { S.sideLevel = S.peer && isPair(S.peer) ? "pairs" : "agents"; return renderSide(); }
+  if (d.tab) { S.sideLevel = "topics"; return openThread(d.tab); }
+  if (d.tabClose) {
+    const next = closeTab(d.tabClose);
+    if (d.tabClose === S.cur && S.view === "thread") { if (next) return openThread(next); S.view = "waiting"; return render(); }
+    return renderSide();
+  }
   if (d.peekClose !== undefined) { closePeek(); return renderMain(); }
   if (d.peekBack !== undefined) { peekBackStep(); return renderMain(); }
   if (d.peekDef !== undefined && S.peek) { S.peek = { ...S.peek, def: Number(d.peekDef) }; return renderMain(); }
@@ -993,7 +1018,6 @@ document.addEventListener("click", async (e) => {
   if (d.connect) { S.settings = await api(`/connect/${d.tool ?? "claude"}`, { method: d.connect === "on" ? "POST" : "DELETE" }); return renderMain(); }
   if (d.choose !== undefined && d.mid) return choose(d.in!, Number(d.mid), Number(d.choose));
   if (d.done) return markDone(d.done, d.on !== "0");
-  if (d.toggleTopics !== undefined) { S.topicsOpen = !S.topicsOpen; local.set("topicsOpen", S.topicsOpen); return renderMain(); }
   if (d.showDone !== undefined) { S.showDone = !S.showDone; return renderMain(); }
   if (d.archive) return archive(d.archive, true);
   if (d.unarchive) return archive(d.unarchive, false);
@@ -1029,7 +1053,7 @@ document.addEventListener("click", async (e) => {
   if (d.findClose !== undefined) { S.find.open = false; return renderMain(); }
   if (d.findStep) return goToHit(S.find.i + Number(d.findStep));
   if (d.hit !== undefined) return goToHit(Number(d.hit));
-  if (d.peer) return openPeer(d.peer);
+  if (d.peer) { S.sideLevel = "topics"; return openPeer(d.peer); }
   if (d.thread) return openThread(d.thread);
   if (d.topic) {
     // A folded topic opens in place; any other divider moves your reply to that topic.
@@ -1265,7 +1289,6 @@ document.addEventListener("keydown", (e) => {
     const open = openTopics(); const i = open.findIndex((t) => t.id === S.cur); const t = open[i + (k === "[" ? -1 : 1)];
     if (t) { e.preventDefault(); return openThread(t.id); }
   }
-  if (k === "t" && S.view === "thread" && !S.focus && !onPhone()) { e.preventDefault(); S.topicsOpen = !S.topicsOpen; local.set("topicsOpen", S.topicsOpen); return renderMain(); }
   if (k === "f" && S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "")) { e.preventDefault(); S.focus = !S.focus; S.dockOpen = false; local.set("focus", S.focus); return render(); }
   if (k === "a" && S.view === "thread") { e.preventDefault(); return openAsk(); }
   if (k === "r" && S.focus) { e.preventDefault(); S.dockOpen = true; renderMain(); $<HTMLTextAreaElement>("#message")?.focus(); return; }
@@ -1319,12 +1342,12 @@ document.addEventListener("dblclick", (e) => {
 
 const askLogin = () => (window as any).webkit?.messageHandlers?.dak?.postMessage({ loginState: true });
 
-// The Mac shell drags the window from the empty parts of the toolbar and sidebar top.
+// The Mac shell drags the window from the empty parts of the tab row along the top.
 // It needs to know where the controls are, so clicks on them still land.
 function postControls() {
   const h = (window as any).webkit?.messageHandlers?.dak;
   if (!h) return;
-  const rects = [...document.querySelectorAll(".toolbar button, .toolbar a, .side-top button")].map((el) => {
+  const rects = [...document.querySelectorAll(".toolbar button, .toolbar a, .side-top button, #tabs button")].map((el) => {
     const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height];
   });
   h.postMessage({ controls: rects, unread: S.counts.to });
