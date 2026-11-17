@@ -77,7 +77,6 @@ export const S = {
     tier: string; rank: number | null; why: string | null; rank_by: string | null; type: string; blocks: string | null; hold: Hold | null }[], // everything waiting on you, in priority order
   heldReviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; type: string; hold: Hold }[], // being reworked or parked: not counted
   reviewFilter: local.get("reviewFilter", "") as string, // the merge queue's "Waiting on you": all, or one type
-  allTopics: local.get("allTopics", false), // the conversation shows every topic at once, not just the one you are on
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
   newAtts: [] as { type: "file" | "link"; name: string; mime?: string; base64?: string; url?: string }[], // attached to the message being written
   linkOpen: false,

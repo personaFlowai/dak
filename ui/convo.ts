@@ -2,7 +2,7 @@
    thread, so a reply reaches the agent on the right piece of work with its anchors.
    On screen, all threads with one agent read as one timeline, split into topics. */
 import { api } from "./api";
-import { S, me, esc, name, mark, when, agentOf, standing, looking, sizeLabel, onPhone, type Summary } from "./state";
+import { S, me, esc, name, mark, when, agentOf, standing, looking, type Summary } from "./state";
 import { I } from "./icons";
 
 // Where typed text is kept: per topic, or per agent while starting a new one.
@@ -145,15 +145,13 @@ export function topicLabel(t: Topic): string {
 /* The merged timeline. A divider opens each run of messages from one topic; a closed
    topic you are not on folds to its divider. */
 export function timeline(render: (m: Message, topic: Topic) => string): string {
-  // On the Mac the topics column picks the topic, so the conversation is always that one topic.
-  const all = S.allTopics && onPhone();
-  const shown = all ? S.convo : S.convo.filter((t) => t.thread.id === S.cur);
+  // The topics list picks the topic, on the Mac and the phone, so the conversation is that one topic.
+  const shown = S.convo.filter((t) => t.thread.id === S.cur);
   const items = shown.flatMap((t) => t.messages.map((m) => ({ m, t })))
     .sort((a, b) => a.m.created_at.localeCompare(b.m.created_at) || a.m.id - b.m.id);
   const one = shown.length === 1;
   let last = "";
   const out: string[] = [];
-  if (S.olderTopics && all) out.push(`<button class="older" data-more-topics>Show ${S.olderTopics} earlier topic${S.olderTopics === 1 ? "" : "s"}</button>`);
   // Done topics leave the conversation; the one you are on stays, so you can still read it.
   const done = shown.filter((t) => t.thread.status === "closed" && t.thread.id !== S.cur);
   const hidden = new Set(S.showDone ? [] : done.map((t) => t.thread.id));
@@ -166,7 +164,7 @@ export function timeline(render: (m: Message, topic: Topic) => string): string {
       const kind = t.thread.kind === "pr" ? I.pr : t.thread.kind === "doc" ? I.doc : I.chat;
       const st = standing(t.thread, t.messages);
       out.push(`<div class="topic ${id === S.cur ? "on" : ""} ${folded ? "folded" : ""}">
-        <button class="tbtn" data-topic="${id}" title="${id === S.cur ? "You are replying on this" : "Reply on this"}"><span class="tl">${kind}<b>${esc(topicLabel(t))}</b></span>${id === S.cur && all ? `<span class="here">You're on this one</span>` : ""}<span class="ts ${st.cls}">${esc(closed ? "Done" : st.label)}</span></button>
+        <button class="tbtn" data-topic="${id}" title="${id === S.cur ? "You are replying on this" : "Reply on this"}"><span class="tl">${kind}<b>${esc(topicLabel(t))}</b></span><span class="ts ${st.cls}">${esc(closed ? "Done" : st.label)}</span></button>
         ${isPair(S.peer) ? "" : `<button class="done-btn" data-done="${id}" data-on="${closed ? "0" : "1"}" title="${closed ? "Bring this topic back" : "Mark this topic done: it leaves the conversation"}">${closed ? "Reopen" : `${I.check} Done`}</button>`}</div>`);
     }
     last = id;
@@ -177,45 +175,11 @@ export function timeline(render: (m: Message, topic: Topic) => string): string {
   return out.join("");
 }
 
-// The topic line in the toolbar: a menu of this agent's open topics, so you can move between
-// them from any view, focus included, without leaving it.
 // This agent's open topics in one order everywhere: waiting on you first, then newest.
 export function openTopics(): Summary[] {
   const waiting = (t: Summary) => t.to === me && t.status === "waiting";
   return everyThread().filter((t) => peerOf(t) === S.peer && (t.status !== "closed" || t.id === S.cur))
     .sort((a, b) => Number(waiting(b)) - Number(waiting(a)) || b.updated_at.localeCompare(a.updated_at));
-}
-const labelOf = (t: Summary) => { const c = S.convo.find((x) => x.thread.id === t.id); return c ? topicLabel(c) : t.subject; };
-
-export function topicMenu(subject: string): string {
-  const open = openTopics();
-  if (open.length < 2) return esc(subject);
-  return `<span class="topic-link" title="Switch topic"><b>${esc(subject)}</b>${I.next}
-    <select id="topic-jump" aria-label="Switch topic">${open.map((t) =>
-      `<option value="${t.id}" ${t.id === S.cur ? "selected" : ""}>${t.to === me && t.status === "waiting" ? "● " : ""}${esc(labelOf(t).slice(0, 70))}</option>`).join("")}</select></span>`;
-}
-
-/* The bar above the conversation: which topic you are reading, how big it is, where it
-   stands, and the way to the next one. With thirty topics open, the conversation shows one
-   at a time; "All topics" puts them back in a single timeline. */
-export function topicBar(): string {
-  const open = openTopics();
-  const cur = S.convo.find((t) => t.thread.id === S.cur);
-  if (!cur || isPair(S.peer) || (open.length < 2 && !S.allTopics)) return "";
-  const i = open.findIndex((t) => t.id === S.cur);
-  const pr = cur.messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop() as any;
-  const size = pr ? sizeLabel({ files: pr.meta.files.length, additions: pr.meta.files.reduce((n: number, f: any) => n + f.additions, 0), deletions: pr.meta.files.reduce((n: number, f: any) => n + f.deletions, 0) }) : "";
-  const st = standing(cur.thread, cur.messages);
-  const reviewing = S.threads.find((t) => t.id === S.cur)?.reviewing_since;
-  const num = pr?.meta.number ? `<span class="tnum">#${pr.meta.number}</span>` : "";
-  const kind = cur.thread.kind === "pr" ? I.pr : cur.thread.kind === "doc" ? I.doc : I.chat;
-  const step = (d: number) => { const t = open[i + d]; return `<button class="icon-btn" ${t ? `data-topic="${t.id}"` : "disabled"} title="${d < 0 ? "Previous" : "Next"} topic${t ? `: ${esc(labelOf(t))}` : ""} (${d < 0 ? "[" : "]"})" aria-label="${d < 0 ? "Previous" : "Next"} topic">${d < 0 ? I.prev : I.next}</button>`; };
-  return `<div class="topic-bar">
-    <span class="tkind">${kind}</span>
-    <div class="tmain"><div class="ttitle">${num}<b title="${esc(cur.thread.subject)}">${esc(cur.thread.subject)}</b></div>
-      <div class="tsub"><span class="ts ${reviewing ? "you" : st.cls}">${reviewing ? "You're reviewing" : esc(cur.thread.status === "closed" ? "Done" : st.label)}</span>${size ? ` · ${size}` : ""}${i >= 0 ? ` · topic ${i + 1} of ${open.length}` : ""}</div></div>
-    ${step(-1)}${step(1)}
-    <button class="link tall" data-all-topics aria-pressed="${S.allTopics}" title="${S.allTopics ? "Show only this topic" : "Show every topic in one timeline"}">${S.allTopics ? "Just this topic" : "All topics"}</button></div>`;
 }
 
 // Which topic your reply goes on: a quiet label, defaulting to the topic you are on. Clicking it

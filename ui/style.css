@@ -1172,3 +1172,74 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 .row-wrap .pin svg { width: 14px; height: 14px; }
 .row-wrap .pin.on { color: var(--accent-text); }
 .row-wrap .arch { background: var(--side-card, var(--side)); }
+
+/* ================= the frame (phone): the Mac's frame, one screen at a time ================= */
+/* The list screen is the Mac's sidebar (agents, then one agent's topics) as grouped cards on the
+   window grey; the rail is a tab bar along the bottom; a thread fills the screen. */
+.app.phone { background: var(--window); grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+.app.phone > .side, .app.phone > .main { grid-row: 1; grid-column: 1; }
+.app.phone > .side { background: var(--window); }
+.app.phone > .main { background: var(--win); }
+.app.phone.tabbar > #rail { grid-row: 2; display: flex; align-items: flex-start; padding: 5px 6px calc(2px + env(safe-area-inset-bottom));
+  background: var(--side-card); box-shadow: 0 -.5px 0 var(--line); }
+.app.phone #rail .ri { flex: 1; width: auto; height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border-radius: 10px; color: var(--text3); background: none; box-shadow: none; }
+.app.phone #rail .ri svg { width: 24px; height: 24px; }
+.app.phone #rail .rl { font-size: 10.5px; font-weight: 500; letter-spacing: .01em; }
+.app.phone #rail .ri.on { color: var(--accent-text); }
+.app.phone #rail .ri:active { background: var(--hover); }
+.app.phone #rail .ri b { top: 2px; right: calc(50% - 24px); }
+/* A large title, as on iPhone, with New message beside it. */
+.phead { flex: none; display: flex; align-items: flex-end; justify-content: space-between; padding: 14px 12px 4px 18px; }
+.phead h1 { margin: 0; font-size: 30px; line-height: 1.1; font-weight: 700; letter-spacing: -.02em; }
+.phead .icon-btn { width: 40px; height: 40px; color: var(--accent-text); }
+.phead .icon-btn svg { width: 22px; height: 22px; }
+.app.phone .phead + .side-head { display: none; }
+/* Grouped cards: each run of rows sits on one white card, its group's name above it. */
+.app.phone .side .list, .app.phone .side .tlist { border-top: 0; padding: 4px 14px 24px; }
+.app.phone .side .side-head.sub { padding: 18px 6px 7px; font-size: 13px; color: var(--text3); font-weight: 500; }
+.app.phone .side .side-head.sub:first-child { padding-top: 8px; }
+.app.phone .side .row-wrap { background: var(--win); margin: 0; }
+.app.phone .side .row-wrap + .row-wrap { margin: 0; box-shadow: inset 0 .5px 0 var(--line); }
+.app.phone .side .list > .row-wrap:first-child, .app.phone .side .side-head + .row-wrap { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+.app.phone .side .row-wrap:last-child, .app.phone .side .row-wrap:has(+ .side-head), .app.phone .side .row-wrap:has(+ :not(.row-wrap)) { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+.app.phone .side .item { padding: 11px 14px 12px; border-radius: inherit; gap: 2px; }
+.app.phone .side .item .top { font-size: 13px; }
+.app.phone .side .item .subj { font-size: 15px; line-height: 1.35; }
+.app.phone .side .item .sub { font-size: 12.5px; }
+.app.phone .side .item:active { background: var(--press); }
+.app.phone .side .item[aria-current="true"] { background: none; }
+.app.phone .side .row-wrap .pin, .app.phone .side .row-wrap .arch { display: none; } /* pin and archive are in a thread's ⋯ on the phone */
+/* One agent's topics. */
+.app.phone .side-head.drill { padding: 8px 8px 0; }
+.app.phone .side .back { height: 40px; font-size: 16px; padding: 0 10px 0 4px; }
+.app.phone .side .back svg { width: 20px; height: 20px; }
+.app.phone .crumb { padding: 4px 18px 10px; gap: 12px; }
+.app.phone .crumb b { font-size: 24px; line-height: 1.15; font-weight: 700; letter-spacing: -.015em; }
+.app.phone .crumb span { font-size: 13px; }
+.app.phone .side-find { padding: 0 14px 6px; }
+.app.phone .side-find input { height: 38px; border-radius: 10px; padding: 0 12px; background: var(--press); }
+.app.phone .tgroup { padding-top: 10px; }
+.app.phone .tg { padding: 8px 6px 7px; font-size: 13px; font-weight: 500; }
+.app.phone .tgroup .trow { background: var(--win); border-radius: 0; padding: 11px 14px 12px; margin: 0; }
+.app.phone .tgroup .trow + .trow { box-shadow: inset 0 .5px 0 var(--line); }
+.app.phone .tgroup .tg + .trow { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+.app.phone .tgroup .trow:last-child { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+.app.phone .trow .l1 .s { font-size: 15px; }
+.app.phone .trow .l2 { font-size: 12.5px; }
+.app.phone .trow.on { background: var(--win); }
+.app.phone .trow:active { background: var(--press); }
+/* The thread bar: back, the agent and where the topic stands, then what you act on and ⋯. */
+.app.phone .toolbar { background: var(--win); border-bottom-color: var(--line2); gap: 6px; }
+.app.phone .toolbar .navbtns [data-nav-fwd] { display: none; }
+.app.phone .toolbar .title b { font-size: 15px; }
+.app.phone .toolbar .title span { font-size: 12px; }
+.app.phone .more-wrap .menu { min-width: 230px; }
+.app.phone .more-wrap .mi { height: 42px; font-size: 15px; }
+/* A tab's page is where you start, so it has no Back; touch leaves no hover behind. */
+.app.phone.tabbar .toolbar .navbtns { display: none; }
+.app.phone.tabbar .toolbar { padding-left: 16px; }
+.app.phone .side .back:hover { background: none; }
+/* Waiting on you and the queue fit the phone's width: titles shorten, they do not push the page wide. */
+.queue-page { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 760px) { .qrow { grid-template-columns: 22px minmax(0, 1fr); } }

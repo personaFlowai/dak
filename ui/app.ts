@@ -2,7 +2,7 @@
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
-import { addTab, closeTab, railView, sideBody, tabsView } from "./shell";
+import { addTab, closeTab, railView, sideBody, tabsView, phoneListHead } from "./shell";
 import { closePeek, openPeek, peekBackStep, peekView, showSpot, wordAt } from "./peek";
 import { topicRows } from "./topics";
 import qrcode from "qrcode-generator";
@@ -17,8 +17,8 @@ import { chatPane, currentVerdict, composer, askPane, canReply, attachBar } from
 import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
 import { draftKey, forgetConvo } from "./convo";
-import { archivedList, isArchived, peers } from "./convo";
-import { peerList, pairList, peerOf, peerName, isPair, topicFor, loadConvo, topicMenu, onThread, openTopics } from "./convo";
+import { isArchived, peers } from "./convo";
+import { peerOf, peerName, isPair, topicFor, loadConvo, onThread, openTopics } from "./convo";
 import type { Message, Participant, Thread, Verdict } from "../src/types";
 
 const native = document.documentElement.classList.contains("native");
@@ -47,12 +47,8 @@ async function openThread(id: string, keep = false) {
   const changed = S.cur !== id;
   const peer = peerOf({ ...data.thread, participants: data.participants?.map((p) => p.name) });
   const sameConvo = peer === S.peer && S.view === "thread";
-  // Opening a topic shows that topic. With every topic in one timeline, the end is the newest
-  // topic, not the one you clicked (from the merge queue, say): go to the one you asked for.
-  // On the Mac a conversation shows one topic, so opening one goes to its latest message. Only
-  // the phone's all-topics timeline scrolls to the opened topic's divider instead.
-  const timeline = S.allTopics && onPhone();
-  S.scrollTo = changed || !sameConvo ? (timeline ? id : "end") : S.scrollTo;
+  // A conversation shows one topic, so opening one goes to its latest message.
+  S.scrollTo = changed || !sameConvo ? "end" : S.scrollTo;
   if (peer !== S.peer || changed) { S.newTopic = false; S.newSubject = ""; }
   // Moving between topics of the same conversation keeps the side pane as you left it: closed
   // stays closed. Coming from elsewhere (the queue, a list) opens what you clicked.
@@ -178,13 +174,14 @@ function renderSide() {
   $("#app")!.classList.toggle("place", ["waiting", "queue", "settings", "compose"].includes(S.view));
   $("#app")!.classList.toggle("side-closed", onPhone() ? !S.phoneList : S.focus && review ? !S.focusSide : !S.sideOpen);
   if (onPhone()) {
-    // The phone keeps its list screen: places at the top, then every conversation.
-    $("#side")!.innerHTML = `
-    <div class="side-top"><span class="grow"></span><button class="icon-btn" data-search-open title="Search everything (⌘K)" aria-label="Search">${I.search}</button><button class="icon-btn" data-compose title="New message (N)" aria-label="New message">${I.compose}</button></div>
-    <button class="row-btn queue-entry" data-waiting aria-current="${S.view === "waiting"}">${I.check}<span class="lbl">Waiting on you</span>${S.reviews.length ? `<span class="count you">${S.reviews.length}</span>` : ""}</button>
-    <button class="row-btn queue-entry" data-queue aria-current="${S.view === "queue"}">${I.pr}<span class="lbl">Merge queue</span>${S.queue.some((r) => r.state !== "deployed" && !r.hold) ? `<span class="count">${S.queue.filter((r) => r.state !== "deployed" && !r.hold).length}</span>` : ""}</button>
-    <div class="side-head">Inbox${S.counts.to ? `<span class="count">${S.counts.to}</span>` : ""}</div>
-    <div class="list" role="list" aria-label="Agents">${peerList()}${pairList()}${archivedList()}</div>`;
+    // The phone is the Mac's frame folded into one screen at a time: the list screen is the
+    // sidebar (agents, then one agent's topics), and the rail is a tab bar along the bottom,
+    // shown on the list and on the places it leads to, not over a thread you are reading.
+    $("#app")!.classList.toggle("tabbar", S.phoneList || ["waiting", "queue"].includes(S.view));
+    $("#rail")!.innerHTML = railView();
+    const keepList = $("#tlist")?.scrollTop ?? $(".side .list")?.scrollTop ?? 0;
+    $("#side")!.innerHTML = phoneListHead() + sideBody();
+    const l = $("#tlist") ?? $(".side .list"); if (l) l.scrollTop = keepList;
   } else {
     $("#rail")!.innerHTML = railView();
     $("#tabs")!.innerHTML = tabsView();
@@ -268,9 +265,6 @@ function threadView(): string {
   // Approved already: the status beside it says so, so the button goes.
   const approveBtn = approved ? "" : canApprove ? `<button class="btn primary" id="approve" ${S.sending ? "disabled" : ""} title="Approve now; anything you have typed or commented goes with it">${I.check} Approve</button>` : "";
   const archived = S.peer ? isArchived(S.peer) : false;
-  const archBtn = S.peer ? `<button class="icon-btn" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}" title="${archived ? "Move back to the Inbox" : "Archive this conversation (E)"}" aria-label="${archived ? "Unarchive" : "Archive"}">${archived ? I.lineUp : I.archive}</button>` : "";
-  const doneBtn = S.peer && !isPair(S.peer) && canReply(t)
-    ? `<button class="btn" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}" title="${t.status === "closed" ? "Bring this topic back" : "This topic is finished: take it out of the conversation"}">${t.status === "closed" ? "Reopen" : `${I.check} Done`}</button>` : "";
   // "I'm reviewing": tells the sender you are on it; the PR stays waiting on you until your verdict.
   const onIt = S.threads.find((x) => x.id === t.id)?.reviewing_since;
   // Anything waiting on you with something to read: a PR or a doc, however the thread began.
@@ -281,21 +275,22 @@ function threadView(): string {
   // On the Mac the bar keeps only what you act on (I'm reviewing, Approve); where the topic
   // stands goes on the line under the name, and Done, Archive and GitHub go in the ⋯ menu.
   const statusWords = onIt ? { label: "You're reviewing", cls: "reviewing" } : st;
+  // A phone's bar has room for Approve and ⋯ only; I'm reviewing moves into the menu there.
+  const phone = onPhone();
   const menu = [
+    phone && reviewingBtn && !onIt ? `<button class="mi" data-reviewing="${t.id}">${I.person}I'm reviewing</button>` : "",
     S.peer && !isPair(S.peer) && canReply(t) ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
     S.peer && !isPair(S.peer) ? `<button class="mi" data-${S.pins[S.peer] ? "unpin" : "pin"}="${esc(S.peer)}">${I.pin}${S.pins[S.peer] ? `Unpin ${esc(name(S.peer))}` : `Pin ${esc(name(S.peer))} to the top`}</button>` : "",
     S.peer ? `<button class="mi" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}">${archived ? `${I.lineUp}Back to the Inbox` : `${I.archive}Archive conversation`}</button>` : "",
     gh ? `<a class="mi" href="${esc(gh)}" target="_blank" rel="noopener">${I.github}Open on GitHub</a>` : "",
   ].filter(Boolean).join("");
   const more = menu ? `<div class="more-wrap"><button class="icon-btn" data-more aria-expanded="${S.moreOpen}" aria-haspopup="menu" title="More" aria-label="More">${I.more}</button>${S.moreOpen ? `<div class="menu" role="menu">${menu}</div>` : ""}</div>` : "";
-  const right = onPhone()
-    ? `${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`
-    : `${onIt ? "" : reviewingBtn}${approveBtn}${more}`;
-  const standing = !onPhone() && statusWords ? ` · <span class="tstand ${statusWords.cls}">${esc(statusWords.label)}</span>` : "";
+  const right = `${onIt || phone ? "" : reviewingBtn}${approveBtn}${more}`;
+  const standing = statusWords ? ` · <span class="tstand ${statusWords.cls}">${esc(statusWords.label)}</span>` : "";
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
-    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${onPhone() ? topicMenu(t.subject) : esc(t.subject)}${standing}${roles()}`, right);
+    : toolbar(esc(name(other)), `${about && !phone ? `${esc(about)} · ` : ""}${esc(t.subject)}${standing}${phone ? "" : roles()}`, right);
   const withTopics = (body: string) => body; // the agent's topics are in the sidebar now
   if (!review) return head + withTopics(`<div class="solo-wrap">${chatPane(t, false)}</div>`);
   // Focus: chapters and code only; the reply floats at the bottom until you open it.
@@ -860,7 +855,6 @@ document.addEventListener("input", (e) => {
 
 document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement;
-  if (el.id === "topic-jump") return openThread(el.value);
   if (el.dataset.hideTests !== undefined) { S.hideTests = el.checked; local.set("hideTests", S.hideTests); return; }
   if (el.id === "att-file") return addFiles([...((el as HTMLInputElement).files ?? [])]);
   // A row's priority, set by you: it wins over the order an agent set.
@@ -969,12 +963,14 @@ document.addEventListener("click", async (e) => {
   // The rail: Inbox shows the agents (or, already there, nothing changes); Between agents lists their threads.
   if (d.rail) {
     S.sideLevel = d.rail === "pairs" ? "pairs" : "agents";
+    // On the phone a tab goes to the list screen, at the top of its drill, as iPhone tabs do.
+    if (onPhone()) { S.phoneList = true; S.topicFind = ""; return render(); }
     if (!S.sideOpen) { S.sideOpen = true; local.set("sideOpen", true); }
     const level = S.sideLevel;
     if (S.view !== "thread" && S.cur) { await openThread(S.cur); S.sideLevel = level; }
     return render();
   }
-  if (d.sideBack !== undefined) { S.sideLevel = S.peer && isPair(S.peer) ? "pairs" : "agents"; return renderSide(); }
+  if (d.sideBack !== undefined) { S.sideLevel = S.peer && isPair(S.peer) ? "pairs" : "agents"; return onPhone() ? render() : renderSide(); }
   if (d.tab) { S.sideLevel = "topics"; return openThread(d.tab); }
   if (d.tabClose) {
     const next = closeTab(d.tabClose);
@@ -1026,7 +1022,6 @@ document.addEventListener("click", async (e) => {
   if (d.queue !== undefined) { S.view = "queue"; S.phoneList = false; return render(); }
   if (d.waiting !== undefined) { S.view = "waiting"; S.phoneList = false; return render(); }
   if (d.reviewFilter !== undefined) { S.reviewFilter = d.reviewFilter; local.set("reviewFilter", S.reviewFilter); return renderMain(); }
-  if (d.allTopics !== undefined) { S.allTopics = !S.allTopics; local.set("allTopics", S.allTopics); S.scrollTo = "end"; return renderMain(); }
   if (d.reviewing) {
     // "I'm on it": the sender hears through Dak, and the PR stays waiting on you.
     await api(`/threads/${d.reviewing}/reviewing`, { method: "POST", body: { author: me } });
@@ -1097,15 +1092,16 @@ document.addEventListener("click", async (e) => {
   if (d.findClose !== undefined) { S.find.open = false; return renderMain(); }
   if (d.findStep) return goToHit(S.find.i + Number(d.findStep));
   if (d.hit !== undefined) return goToHit(Number(d.hit));
+  // On the phone an agent opens its topics, one screen in; on the Mac its latest topic opens beside them.
+  if (d.peer && onPhone()) { S.peer = d.peer; S.sideLevel = "topics"; S.topicFind = ""; S.phoneList = true; render(); $("#tlist")?.scrollTo({ top: 0 }); return; }
   if (d.peer) { S.sideLevel = "topics"; return openPeer(d.peer); }
   if (d.thread) return openThread(d.thread);
   if (d.topic) {
     // A folded topic opens in place; any other divider moves your reply to that topic.
     const t = S.convo.find((x) => x.thread.id === d.topic);
-    if (t?.thread.status === "closed" && d.topic !== S.cur && !S.openTopics.has(d.topic)) { S.openTopics.add(d.topic); return renderMain(); }
+    if (!b.classList.contains("trow") && t?.thread.status === "closed" && d.topic !== S.cur && !S.openTopics.has(d.topic)) { S.openTopics.add(d.topic); return renderMain(); }
     return openThread(d.topic);
   }
-  if (d.moreTopics !== undefined) { S.topicCap += 20; await loadConvo(); return renderMain(); }
   if (d.att && d.in && d.in !== S.cur) { const att = d.att; await openThread(d.in); useAtt(att); await prepare(); return renderMain(); }
   if (d.pane) { S.pane = d.pane as any; if (S.focus || onPhone()) S.dockOpen = d.pane === "ask"; return renderMain(); }
   if (d.closePane !== undefined) { S.att = null; S.paneClosed = true; S.focus = false; S.dockOpen = false; local.set("focus", false); S.sel = null; S.editing = null; return render(); }
@@ -1444,10 +1440,10 @@ addEventListener("focus", () => { if (S.view === "thread" && S.cur) { forgetConv
 /* Back and forward. Every place you go (a conversation, a PR's chapter or tab, a file, the
    queues, settings) is a history entry, so the ‹ › buttons, ⌘[ ⌘] and the browser's own back
    (or a swipe on a phone) walk the same list. Restoring a place never adds a new one. */
-type Place = { view: string; cur: string | null; att: string | null; chapter: number; phoneList: boolean; phoneTab: string; phoneFile: string | null; phoneFileChapter: number };
+type Place = { view: string; cur: string | null; att: string | null; chapter: number; phoneList: boolean; phoneTab: string; phoneFile: string | null; phoneFileChapter: number; sideLevel: string; peer: string | null };
 let phonePageTop = 0; // where the phone PR page was when a file opened over it
-const place = (): Place => ({ view: S.view, cur: S.cur, att: S.att, chapter: S.chapter, phoneList: S.phoneList, phoneTab: S.phoneTab, phoneFile: S.phoneFile, phoneFileChapter: S.phoneFileChapter });
-const navKey = (p: Place | null) => p ? [p.view, p.view === "thread" ? `${p.cur}|${p.att}|${p.chapter}|${p.phoneTab}|${p.phoneFile}` : "", p.phoneList].join("~") : "";
+const place = (): Place => ({ view: S.view, cur: S.cur, att: S.att, chapter: S.chapter, phoneList: S.phoneList, phoneTab: S.phoneTab, phoneFile: S.phoneFile, phoneFileChapter: S.phoneFileChapter, sideLevel: S.sideLevel, peer: S.peer });
+const navKey = (p: Place | null) => p ? [p.view, p.view === "thread" ? `${p.cur}|${p.att}|${p.chapter}|${p.phoneTab}|${p.phoneFile}` : "", p.phoneList, p.phoneList && onPhone() ? `${p.sideLevel}|${p.peer}` : ""].join("~") : "";
 let restoring = false;
 const nav = { idx: 0, max: 0 };
 function remember() {
@@ -1470,6 +1466,7 @@ addEventListener("popstate", async (e: PopStateEvent) => {
   try {
     if (p.view === "thread" && p.cur && p.cur !== S.cur) await openThread(p.cur, true);
     Object.assign(S, { view: p.view, att: p.att, chapter: p.chapter, phoneList: p.phoneList, phoneTab: p.phoneTab, phoneFile: p.phoneFile, phoneFileChapter: p.phoneFileChapter });
+    if (onPhone() && p.phoneList && p.sideLevel) Object.assign(S, { sideLevel: p.sideLevel, peer: p.peer ?? S.peer });
     if (p.view !== "thread") S.compose = null;
     await prepare(); render();
   } finally { restoring = false; updateNavButtons(); }

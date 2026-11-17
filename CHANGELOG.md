@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+- The phone matches the Mac's redesign. Places are a tab bar along the bottom (Inbox, For you, Queue, Agents, Search) with counts. The Inbox is a large title over grouped cards, Pinned then Others. An agent opens its topics one screen in (Waiting on you, In progress, Done, with search), and a topic opens on its own, as on the Mac. The thread bar keeps Approve and ⋯; I'm reviewing, Pin, Archive and GitHub are in ⋯, and where the topic stands is under the name.
+- The phone's All topics timeline and topic arrows are gone: the topics list replaces them.
+- Fixed: Waiting on you and the queue ran off the side of a phone screen.
+- Fixed: a Done topic in the sidebar's list unfolded in place instead of opening.
+
 ## 0.7.9
 - Pin agents: the pin beside a hovered agent, or Pin in the ⋯ menu, keeps it in a Pinned group at the top of the agents list, in the order you pinned them. Pins are kept by Dak, so the phone shows them too.
 

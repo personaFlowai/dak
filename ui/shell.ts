@@ -1,7 +1,7 @@
 /* The window's frame on the Mac: a thin rail of places on the left, tabs along the top for what
    you have open, and a sidebar that drills in (agents, then one agent's topics, with Back).
    Three columns, so the review pane keeps its width. The phone keeps its own two screens. */
-import { S, esc, name, mark, me, agentOf } from "./state";
+import { S, esc, name, mark, me, agentOf, onPhone } from "./state";
 import { local } from "./api";
 import { everyThread, isPair, peerList, archivedList, pairList, peerName, peerOf } from "./convo";
 import { topicRows } from "./topics";
@@ -9,19 +9,31 @@ import { I } from "./icons";
 
 export type SideLevel = "agents" | "topics" | "pairs";
 
+/* The places. On the Mac, a rail down the left; on the phone, the tab bar along the bottom,
+   each with a short name under its icon, as iPhone apps do. */
 export function railView(): string {
+  const phone = onPhone();
   const queueN = S.queue.filter((r) => r.state !== "deployed" && !r.hold).length;
-  const item = (attr: string, icon: string, label: string, on: boolean, n = 0, you = false) =>
-    `<button class="ri ${on ? "on" : ""}" ${attr} title="${label}" aria-label="${label}${n ? `, ${n}` : ""}">${icon}${n ? `<b class="${you ? "you" : ""}">${n}</b>` : ""}</button>`;
-  const inThread = S.view === "thread";
-  return `${item(`data-rail="agents"`, I.tray, "Inbox", inThread && S.sideLevel !== "pairs" || S.view === "welcome")}
-    ${item("data-waiting", I.check, "Waiting on you", S.view === "waiting", S.reviews.length, true)}
-    ${item("data-queue", I.pr, "Merge queue", S.view === "queue", queueN)}
-    ${item(`data-rail="pairs"`, I.chat, "Between agents", S.sideLevel === "pairs")}
-    ${item("data-search-open", I.search, "Search everything (⌘K)", false)}
-    ${item("data-compose", I.compose, "New message (N)", S.view === "compose")}
+  const item = (attr: string, icon: string, label: string, short: string, on: boolean, n = 0, you = false) =>
+    `<button class="ri ${on ? "on" : ""}" ${attr} title="${label}" aria-label="${label}${n ? `, ${n}` : ""}" ${on ? `aria-current="page"` : ""}>${icon}${n ? `<b class="${you ? "you" : ""}">${n}</b>` : ""}${phone ? `<span class="rl">${short}</span>` : ""}</button>`;
+  // The phone's Inbox and Between agents are its list screen; the Mac's are the sidebar beside a thread.
+  const listing = phone ? S.phoneList : S.view === "thread";
+  const inbox = listing && S.sideLevel !== "pairs" || S.view === "welcome";
+  const pairs = phone ? S.phoneList && S.sideLevel === "pairs" : S.sideLevel === "pairs";
+  return `${item(`data-rail="agents"`, I.tray, "Inbox", "Inbox", inbox)}
+    ${item("data-waiting", I.check, "Waiting on you", "For you", !(phone && S.phoneList) && S.view === "waiting", S.reviews.length, true)}
+    ${item("data-queue", I.pr, "Merge queue", "Queue", !(phone && S.phoneList) && S.view === "queue", queueN)}
+    ${item(`data-rail="pairs"`, I.chat, "Between agents", "Agents", pairs)}
+    ${item("data-search-open", I.search, "Search everything (⌘K)", "Search", false)}
+    ${phone ? "" : `${item("data-compose", I.compose, "New message (N)", "New", S.view === "compose")}
     <span class="grow"></span>
-    ${(window as any).DAK?.phone ? "" : item("data-settings", I.gear, "Settings", S.view === "settings")}`;
+    ${(window as any).DAK?.phone ? "" : item("data-settings", I.gear, "Settings", "Settings", S.view === "settings")}`}`;
+}
+
+export function phoneListHead(): string {
+  if (S.sideLevel === "topics" && S.peer) return "";
+  const title = S.sideLevel === "pairs" ? "Between agents" : "Inbox";
+  return `<div class="phead"><h1>${title}</h1><button class="icon-btn" data-compose title="New message" aria-label="New message">${I.compose}</button></div>`;
 }
 
 export function sideBody(): string {
