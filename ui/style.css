@@ -1094,3 +1094,25 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
   .app:not(.phone) .composer { border-radius: 14px; }
 }
 @media (min-width: 761px) { .native.fullscreen .app:not(.phone) > .tabs { padding-left: calc(var(--places-w) + 4px); } }
+/* The sidebar's find box: no browser frame (WebKit drew a light one in dark mode). */
+.side-find input { -webkit-appearance: none; appearance: none; border: 0; outline: none; background: var(--hover); color: var(--text); box-shadow: none; }
+.side-find input:focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.side-find input::-webkit-search-decoration { -webkit-appearance: none; }
+/* A place from the rail (Waiting on you, the queue, settings) takes the whole window: the
+   agents list belongs to Inbox, so it is not shown beside them. */
+@media (min-width: 761px) {
+  .app:not(.phone).place { grid-template-columns: var(--places-w) 0 minmax(0, 1fr); column-gap: 0; }
+  .app:not(.phone).place > .side { visibility: hidden; box-shadow: none; }
+}
+@media (min-width: 761px) { .app:not(.phone) .side .list { border-top: 0; } }
+/* The thread bar keeps what you act on; the rest is in ⋯. */
+.toolbar .title .tstand { color: var(--text3); }
+.toolbar .title .tstand.you { color: var(--accent-text); font-weight: 600; }
+.toolbar .title .tstand.reviewing { color: var(--accent-text); }
+.toolbar .title .tstand.done { color: var(--add); }
+.more-wrap { position: relative; }
+.more-wrap .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; min-width: 210px; padding: 5px; border-radius: 10px; background: var(--win);
+  box-shadow: 0 0 0 .5px var(--line), 0 14px 34px -14px rgba(0,0,0,.45); display: grid; }
+.more-wrap .mi { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 10px; border-radius: 6px; font-size: 13px; color: var(--text); text-align: left; text-decoration: none; }
+.more-wrap .mi:hover { background: var(--hover); text-decoration: none; }
+.more-wrap .mi svg { width: 15px; height: 15px; color: var(--text2); }

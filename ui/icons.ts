@@ -36,12 +36,13 @@ import archive from "@phosphor-icons/core/assets/regular/archive.svg" with { typ
 import columns from "@phosphor-icons/core/assets/regular/columns.svg" with { type: "text" };
 import lineUp from "@phosphor-icons/core/assets/regular/arrow-line-up.svg" with { type: "text" };
 import list from "@phosphor-icons/core/assets/regular/list-bullets.svg" with { type: "text" };
+import more from "@phosphor-icons/core/assets/regular/dots-three.svg" with { type: "text" };
 import { siClaude, siCursor, siLinear, siNotion, siFigma } from "simple-icons";
 
 const FILE_ICONS: Record<string, string> = { ts: fileTs, mts: fileTs, tsx: fileTsx, jsx: fileTsx, md: fileMd, js: fileJs, mjs: fileJs, css: fileCss, sql: fileSql };
 export const fileIcon = (path: string) => FILE_ICONS[path.split(".").pop()?.toLowerCase() ?? ""] ?? fileCode;
 
-export const I = { list, archive, columns, expand, collapse, lineUp, tray, sent, compose, gear, sidebar, sparkle, chat, external, check, next, prev, pr, doc, close, search, github, terminal, up, person, plug, warning };
+export const I = { more, list, archive, columns, expand, collapse, lineUp, tray, sent, compose, gear, sidebar, sparkle, chat, external, check, next, prev, pr, doc, close, search, github, terminal, up, person, plug, warning };
 
 const brand = (path: string) => `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${path}"/></svg>`;
 

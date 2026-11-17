@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+- A thread's bar keeps only what you act on: I'm reviewing and Approve. Where the topic stands (Waiting on you, You're reviewing, picked up) is on the line under the agent's name; Done, Archive and Open on GitHub are in the ⋯ menu.
+- Waiting on you, the merge queue, settings and a new message take the whole window: the agents list belongs to Inbox, so it no longer shows beside them.
+- The sidebar's find box lost the light frame WebKit drew around it in dark mode, and the line under the sidebar's heading.
+
 ## 0.7.0
 - A new frame on the Mac. Panes are rounded cards on the window. A thin rail on the left holds the places: Inbox, Waiting on you, Merge queue, Between agents, Search, New message, Settings. Tabs along the top hold the threads you have open (up to 8), with a dot on one waiting on you.
 - The sidebar drills in: the agents, then one agent's topics with "‹ Agents" to go back. Three columns, so the review pane keeps its width; the separate topics column from 0.5.0 is gone.

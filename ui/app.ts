@@ -171,6 +171,7 @@ function render() {
 function renderSide() {
   const review = S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "");
   $("#app")!.classList.toggle("phone", onPhone());
+  $("#app")!.classList.toggle("place", ["waiting", "queue", "settings", "compose"].includes(S.view));
   $("#app")!.classList.toggle("side-closed", onPhone() ? !S.phoneList : S.focus && review ? !S.focusSide : !S.sideOpen);
   if (onPhone()) {
     // The phone keeps its list screen: places at the top, then every conversation.
@@ -271,11 +272,23 @@ function threadView(): string {
   const reviewingBtn = readable && t.to === me && t.status === "waiting"
     ? onIt ? `<span class="status reviewing" title="Since ${esc(fullWhen(onIt))}">You're reviewing</span>`
       : `<button class="btn" data-reviewing="${t.id}" title="Tell ${esc(name(t.from))} you are reviewing this">I'm reviewing</button>` : "";
-  const right = `${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`;
+  // On the Mac the bar keeps only what you act on (I'm reviewing, Approve); where the topic
+  // stands goes on the line under the name, and Done, Archive and GitHub go in the ⋯ menu.
+  const statusWords = onIt ? { label: "You're reviewing", cls: "reviewing" } : st;
+  const menu = [
+    S.peer && !isPair(S.peer) && canReply(t) ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
+    S.peer ? `<button class="mi" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}">${archived ? `${I.lineUp}Back to the Inbox` : `${I.archive}Archive conversation`}</button>` : "",
+    gh ? `<a class="mi" href="${esc(gh)}" target="_blank" rel="noopener">${I.github}Open on GitHub</a>` : "",
+  ].filter(Boolean).join("");
+  const more = menu ? `<div class="more-wrap"><button class="icon-btn" data-more aria-expanded="${S.moreOpen}" aria-haspopup="menu" title="More" aria-label="More">${I.more}</button>${S.moreOpen ? `<div class="menu" role="menu">${menu}</div>` : ""}</div>` : "";
+  const right = onPhone()
+    ? `${archBtn}${doneBtn}${reviewingBtn}${st ? `<span class="status ${st.cls}">${esc(st.label)}</span>` : ""}${approveBtn}${gh ? `<a class="icon-btn" href="${esc(gh)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${I.github}</a>` : ""}`
+    : `${onIt ? "" : reviewingBtn}${approveBtn}${more}`;
+  const standing = !onPhone() && statusWords ? ` · <span class="tstand ${statusWords.cls}">${esc(statusWords.label)}</span>` : "";
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
-    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${onPhone() ? topicMenu(t.subject) : esc(t.subject)}${roles()}`, right);
+    : toolbar(esc(name(other)), `${about ? `${esc(about)} · ` : ""}${onPhone() ? topicMenu(t.subject) : esc(t.subject)}${standing}${roles()}`, right);
   const withTopics = (body: string) => body; // the agent's topics are in the sidebar now
   if (!review) return head + withTopics(`<div class="solo-wrap">${chatPane(t, false)}</div>`);
   // Focus: chapters and code only; the reply floats at the bottom until you open it.
@@ -913,6 +926,8 @@ document.addEventListener("click", (e) => {
   else if (card) setDocActive(Number(card.dataset.docCard));
 });
 window.addEventListener("resize", () => layoutMargin());
+// The ⋯ menu closes on a click anywhere else.
+document.addEventListener("click", (e) => { if (S.moreOpen && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; renderMain(); } }, true);
 document.addEventListener("load", (e) => { if ((e.target as HTMLElement).closest?.(".docbody")) layoutMargin(); }, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.add("cmd"); });
 document.addEventListener("keyup", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.remove("cmd"); });
@@ -922,6 +937,8 @@ document.addEventListener("click", async (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>("button, [data-thread]");
   if (!b) return;
   const d = b.dataset;
+  if (d.more !== undefined) { S.moreOpen = !S.moreOpen; return renderMain(); }
+  if (S.moreOpen) S.moreOpen = false; // any other click closes the ⋯ menu (and still does what it does)
   if (d.docActive !== undefined) return setDocActive(Number(d.docActive));
   // The rail: Inbox shows the agents (or, already there, nothing changes); Between agents lists their threads.
   if (d.rail) {
@@ -1239,6 +1256,7 @@ document.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).cl
 document.addEventListener("scroll", () => { if (pending) readSelection(); }, true);
 
 document.addEventListener("keydown", (e) => {
+  if (S.moreOpen && e.key === "Escape") { e.preventDefault(); S.moreOpen = false; return renderMain(); }
   if (S.peek && e.key === "Escape") { e.preventDefault(); closePeek(); return renderMain(); }
   if (S.peek && (e.metaKey || e.ctrlKey) && e.key === "[" && S.peekBack.length) { e.preventDefault(); peekBackStep(); return renderMain(); }
   if ((e.metaKey || e.ctrlKey) && (e.key === "[" || e.key === "]")) { e.preventDefault(); return e.key === "[" ? (nav.idx > 0 && history.back()) : (nav.idx < nav.max && history.forward()); }
