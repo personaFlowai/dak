@@ -1195,3 +1195,41 @@ describe("reading older verdicts", () => {
     expect(prStates(changes as any, ["sam"]).map((p) => p.verdict)).toEqual(["changes", "changes"]); // asking for changes still covers all
   });
 });
+
+describe("updates don't interrupt", () => {
+  const hook = (input: object) => {
+    const p = Bun.spawnSync(["bun", CLI, "hook", "claude-code"], { env: { ...process.env, DAK_HOME: home }, stdin: new TextEncoder().encode(JSON.stringify(input)), stdout: "pipe" });
+    return p.stdout.toString();
+  };
+  const cwd = "/tmp/work/quiet-agent-4f1e2d", me = "quiet-agent-4f1e2d";
+
+  test("an update waits for the next turn instead of reopening this one; a question still reopens it", () => {
+    hook({ hook_event_name: "SessionStart", cwd, session_id: "q1" });
+    const { thread } = dak("send", "--to", me, "--from", "sam", "--subject", "FYI", "--fyi", "Thanks, used it in the script.", "--json").json();
+    expect(dak("show", thread.id, "--json").json().messages[0].quiet).toBe(true);
+    // At the stop: nothing, so the turn ends.
+    expect(hook({ hook_event_name: "Stop", cwd, session_id: "q1" })).toBe("");
+    // At the next turn's start it is there, marked as an update, with no reply line.
+    const next = hook({ hook_event_name: "UserPromptSubmit", cwd, session_id: "q1" });
+    expect(next).toContain("Thanks, used it in the script.");
+    expect(next).toContain("no reply needed");
+    expect(next).not.toContain("Reply with");
+
+    // A question at the stop still blocks it, and carries any update along with it.
+    dak("reply", thread.id, "--from", "sam", "--fyi", "Also posted.");
+    dak("send", "--to", me, "--from", "sam", "--subject", "Q", "Which video goes first?");
+    const stop = JSON.parse(hook({ hook_event_name: "Stop", cwd, session_id: "q1" }));
+    expect(stop.decision).toBe("block");
+    expect(stop.reason).toContain("Which video goes first?");
+    expect(stop.reason).toContain("Also posted.");
+  });
+
+  test("the sender's text after an approval is an update; the reader's answer is not", () => {
+    const { thread } = dak("send", "--to", "sam", "--from", me, "--diff", "d2.diff", "--subject", "Quiet PR", "--json").json();
+    dak("reply", thread.id, "--from", "sam", "--verdict", "approve", "Go.");
+    const after = dak("reply", thread.id, "--from", me, "Merged.", "--json").json();
+    expect(after.quiet).toBe(true);
+    const answer = dak("reply", thread.id, "--from", "sam", "Thanks, now deploy it.", "--json").json();
+    expect(answer.quiet).toBeUndefined();
+  });
+});

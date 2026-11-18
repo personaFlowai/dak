@@ -35,20 +35,23 @@ export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "clau
   // as a follow-up message the agent then works on. Untested in a live Cursor session.
   if (tool === "cursor") {
     if (event !== "stop") { console.log(JSON.stringify({ continue: true })); return; }
-    const mail = takeUnread(name);
+    const mail = asksSomething(name) ? takeUnread(name) : [];
     console.log(JSON.stringify(mail.length ? { followup_message: brief(name, mail) } : {}));
     return;
   }
-  let msgs = takeUnread(name);
+  // At a stop, only mail that asks something reopens the turn; updates wait for the next turn's
+  // start, where they arrive as context. At the start of a turn, everything is handed over.
+  const stop = event === "Stop";
+  let msgs = !stop || asksSomething(name) ? takeUnread(name) : [];
   // Codex cannot be woken once idle, so with "keep listening" on, its Stop hook waits here
   // for mail (up to an hour, while Codex is still running) and hands it over as a reason to
   // carry on. Typing to the session or pressing Esc ends the wait, as with any running turn.
-  if (!msgs.length && tool === "codex" && event === "Stop" && loadConfig().codex_listen) {
+  if (!msgs.length && tool === "codex" && stop && loadConfig().codex_listen) {
     const until = Date.now() + LISTEN_MS;
     const parent = process.ppid;
     while (!msgs.length && Date.now() < until && alive(parent)) {
       await Bun.sleep(2000);
-      msgs = takeUnread(name);
+      if (asksSomething(name)) msgs = takeUnread(name);
     }
   }
   if (!msgs.length) return;
@@ -61,12 +64,15 @@ export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "clau
   }
 }
 
+// Is there unread mail for this agent that needs an answer (not only updates)?
+export const asksSomething = (name: string) => takeUnread(name, { peek: true }).some((m) => !m.quiet);
+
 export function brief(name: string, msgs: Message[]): string {
   const lines = [`New Dak message${msgs.length > 1 ? "s" : ""} for you (${name}):`];
   for (const m of msgs) {
     const t = getThreadRow(m.thread_id);
     const v = m.verdict ? ` [${verdictLabel(m)}]` : "";
-    lines.push("", `Thread ${t.id} "${t.subject}", from ${m.author}${v}:`, m.body.trim() || (m.choice ? "" : "(no text)"));
+    lines.push("", `Thread ${t.id} "${t.subject}", from ${m.author}${v}${m.quiet ? " (an update, no reply needed)" : ""}:`, m.body.trim() || (m.choice ? "" : "(no text)"));
     // On a thread carrying several PRs, a verdict covers only the PRs it names: say which stand approved.
     if (m.verdict) { const sum = approvedSummary(getThread(t.id).prs); if (sum) lines.push(`  ${sum}. Merge only those.`); }
     if (m.choice) lines.push(`  Picked: ${m.choice}`);
@@ -79,7 +85,8 @@ export function brief(name: string, msgs: Message[]): string {
     }
     for (const a of m.attachments) lines.push(`  (attached ${a.type}: ${a.name}; dak show ${t.id} --json)`);
   }
-  const threads = [...new Set(msgs.map((m) => m.thread_id))];
+  // Only what asks something gets a reply line: an update is read, not answered.
+  const threads = [...new Set(msgs.filter((m) => !m.quiet).map((m) => m.thread_id))];
   lines.push("", ...threads.map((id) => `Reply with: dak reply ${id} --from ${name} "<your answer>"`));
   return lines.join("\n");
 }

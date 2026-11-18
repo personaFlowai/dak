@@ -143,7 +143,9 @@ export function createThread(input: {
   const tx = s.transaction(() => {
     s.query("INSERT INTO threads VALUES (?,?,?,?,?,?,?,?)").run(id, to, from, input.subject.trim(), input.kind, input.needs_reply === false && !cleanOptions(input.options) ? "informed" : "waiting", t, t);
     for (const p of others) if (p.name !== to && p.name !== from) addParticipantRow(id, p);
-    return insertMessage(id, from, input.body, null, input.attachments, [], cleanOptions(input.options), undefined, input.extra);
+    // Sent with --fyi: an update, delivered at the reader's next turn rather than interrupting it.
+    const quiet = input.needs_reply === false && !cleanOptions(input.options);
+    return insertMessage(id, from, input.body, null, input.attachments, [], cleanOptions(input.options), undefined, quiet ? { ...input.extra, quiet: true } : input.extra);
   });
   const messageId = tx();
   return { thread: getThreadRow(id), message: getMessage(messageId) };
@@ -168,14 +170,21 @@ export function addMessage(threadId: string, input: {
   // addressee if it was waiting on them.
   const other = author !== thread.from && author !== thread.to && isParticipant(threadId, author);
   const settled = thread.status === "informed" || thread.status === "closed";
+  const asks = !other && author !== thread.to && needsReply(thread, input);
   const status: ThreadStatus = input.extra?.reviewing ? thread.status // "on it" is not an answer
     : author === thread.to && othersStillWaiting(threadId, author, input) ? "waiting"
     : author === thread.to ? "answered"
     : other ? (thread.to.startsWith("group:") && !settled ? "answered" : thread.status)
-    : needsReply(thread, input) ? "waiting" : thread.status;
+    : asks ? "waiting" : thread.status;
+  // An update needs nothing from whoever reads it: the sender said so (--fyi, --done), or it is
+  // the sender's text after an approval, or "I'm reviewing". It reaches the reader at their next
+  // turn and never interrupts one or wakes an idle session. Buttons, verdicts and new versions
+  // always ask.
+  const quiet = !input.options?.length && !input.verdict && !input.choice && !input.attachments?.length
+    && (input.needs_reply === false || !!input.extra?.reviewing || (author === thread.from && !other && !asks));
   // An approval records exactly what was approved (head and diff), so a later push can be told
   // apart: the merge queue says "head moved since your approval" and whether the changes differ.
-  let extra = input.extra;
+  let extra: MessageExtra | undefined = quiet ? { ...input.extra, quiet: true } : input.extra;
   // A pick on a "try it" note is the Checking result: record it plainly, with the ticket, so the
   // agent's hook and dak wait --json both say what to do (works: post the proof, move it to Done).
   if (input.choice) {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3
+
+- **Updates don't interrupt.** A message that needs no reply (sent with `--fyi` or `--done`, the sender's text after an approval, "I'm reviewing") no longer reopens an agent's turn at its stop or wakes an idle session. It arrives at the agent's next turn, marked "(an update, no reply needed)", with no reply line. Questions, buttons, verdicts and new versions still interrupt as before, and carry any waiting updates with them.
+
 ## 0.9.2
 
 - **Every attachment on a topic, one tap away.** A paperclip with a count in the topic's top bar opens a list of everything attached on the topic, oldest first, each with who sent it and when. A PR, doc, image or page opens beside the conversation; a link opens in the browser. No more scrolling up to find them.

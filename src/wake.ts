@@ -2,7 +2,7 @@ import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dakHome, loadConfig } from "./config";
 import { takeUnread } from "./store";
-import { brief, sessionName } from "./hook";
+import { asksSomething, brief, sessionName } from "./hook";
 import { touch } from "./presence";
 
 // Waking an idle Claude Code session. Claude Code's asyncRewake hooks run in the
@@ -31,8 +31,8 @@ export async function waitForMail(input: any, pid: number, signal: AbortSignal):
   const deadline = Date.now() + MAX_WAIT_MS;
   try {
     while (!released && !signal.aborted && Date.now() < deadline && (!pid || alive(pid))) {
-      const msgs = takeUnread(name);
-      if (msgs.length) return brief(name, msgs);
+      // Only mail that asks something wakes a session; updates wait for its next turn.
+      if (asksSomething(name)) { const msgs = takeUnread(name); if (msgs.length) return brief(name, msgs); }
       await Bun.sleep(1000);
     }
     return null;

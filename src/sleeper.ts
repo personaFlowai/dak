@@ -76,7 +76,8 @@ export function tickSleepers(run = startRun, opts: { force?: boolean } = {}) {
     .all(week) as { name: string; session_id: string; where_: string | null }[];
   for (const a of agents) {
     if (running.has(a.session_id) || !a.where_ || !existsSync(a.where_)) continue;
-    const mail = takeUnread(a.name, { peek: true }).filter((m) => Date.parse(m.created_at) > day);
+    // Updates (no reply needed) never wake a session; they wait for its next turn.
+    const mail = takeUnread(a.name, { peek: true }).filter((m) => !m.quiet && Date.parse(m.created_at) > day);
     if (!mail.length) continue;
     // Wait for the hooks first: a running session gets its mail at its next turn or wake.
     if (now - Date.parse(mail[0].created_at) < GRACE_MS) continue;

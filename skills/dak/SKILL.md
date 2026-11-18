@@ -79,7 +79,7 @@ If Dak has a runner named `codex` (`dak runner add codex`), sending a PR to it, 
 - A note: `dak send --to <reader> --from <you> --subject "<subject>" "<message>" --json`. Add `--file path` (images show inline) or `--link url` (an artifact, a page).
 - Say what you need in the message: "Approve to merge", "Pick A or B".
 - **A choice gets buttons.** `--option "Merge #2401 first" --option "Hold both"` (up to six, short). The reader answers in one click; the reply's `choice` is the exact text of the button. Use buttons whenever the answer is one of a few known options.
-- **An update gets `--fyi`.** "Merged", "tests running", "deployed" need no answer: add `--fyi` so the thread does not sit in the reader's inbox as waiting. After the reader approved, a plain text reply counts as an update anyway; a new version, a question or buttons always ask.
+- **An update gets `--fyi`.** "Merged", "tests running", "deployed" need no answer: add `--fyi` so the thread does not sit in the reader's inbox as waiting. An update never interrupts the reader or wakes an idle session: it arrives at their next turn, marked "(an update, no reply needed)", with no reply line. Do not answer one. After the reader approved, a plain text reply counts as an update anyway; a new version, a question or buttons always ask.
 - **Links to Linear, Notion, GitHub or Figma** go in with `--link <url>` and show as named cards (the issue id and title, the page name). Put the ticket and the doc you are working from on every send.
 
 ## 3. Read your inbox
