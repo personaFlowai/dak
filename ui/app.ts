@@ -2,6 +2,7 @@
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
+import { loadTeam, teamCount, teamView } from "./team";
 import { addTab, closeTab, keepTab, railView, sideBody, tabsView, phoneListHead } from "./shell";
 import { closePeek, openPeek, peekBackStep, peekView, showSpot, wordAt } from "./peek";
 import { topicRows } from "./topics";
@@ -228,6 +229,7 @@ function renderMain() {
     chapter: $(".chapter.beside")?.dataset.key, code: $("#code-scroll")?.scrollTop ?? 0, notes: $(".notes-col > header")?.scrollTop ?? 0 };
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
   else if (S.view === "settings") main.innerHTML = toolbar("Settings") + settingsView();
+  else if (S.view === "team") main.innerHTML = toolbar("Team", `${teamCount()} agent${teamCount() === 1 ? "" : "s"}`) + teamView();
   else if (S.view === "welcome") main.innerHTML = toolbar("Welcome to Dak") + welcomeView();
   else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", queueSummary()) + queueView();
   else if (S.view === "waiting") main.innerHTML = toolbar("Waiting on you", waitingSummary()) + `<div class="pane-body"><div class="queue-page">${reviewGroup()}
@@ -741,7 +743,8 @@ function settingsView(): string {
         <button class="btn ${s.cursor_connected ? "" : "primary"}" data-connect="${s.cursor_connected ? "off" : "on"}" data-tool="cursor">${s.cursor_connected ? "Disconnect" : "Connect"}</button></div>
       <div class="conn sub"><span class="nm"><b>Teach Cursor to use Dak</b><span>Cursor keeps its global rules in Settings → Rules → User Rules. Copy the instructions and paste them there. For any other agent, the same text comes from <code>dak skill --plain</code>.</span></span>
         <button class="btn" data-copy-instructions>Copy instructions</button></div>
-      ${doorView()}</section>
+      <div class="conn sub"><span class="nm"><b>Agents outside this Mac</b><span>Grok Bot, cloud agents and personal agents come in through the door, one key each. It is on the Team page.</span></span>
+        <button class="btn" data-team-open>Open Team</button></div></section>
 
     ${phoneView()}
 
@@ -761,16 +764,6 @@ function modelControl(helper: string, value: string): string {
   const def = S.settings?.default_models?.[helper];
   const known = [...new Set([def, value].filter(Boolean))] as string[];
   return `<input class="input model" data-model="${helper}" list="models-${helper}" value="${esc(value)}" placeholder="${esc(def ? `Default (${def})` : "Default model")}" aria-label="${helper} model" spellcheck="false"><datalist id="models-${helper}">${known.map((m) => `<option value="${esc(m)}">`).join("")}</datalist>`;
-}
-
-// Grok Bot's agent runs in a remote sandbox, so it reaches Dak through a tunnel,
-// with a key that only lets it send to you and read its own replies.
-function doorView(): string {
-  const d = S.door;
-  const head = `<span class="mark md"><span>G</span></span><span class="nm"><b>Grok Bot</b><span>${d?.open && d.url ? `Door open at <code>${esc(d.url)}</code>. Paste the instructions below into Grok once.` : d?.error ? esc(d.error) : "Runs in a remote sandbox. Open a door: a tunnel to Dak, with a key that only lets Grok send to you and read its own replies."}</span></span>`;
-  const btn = d?.open ? `<button class="btn" data-door="close">Close door</button>` : `<button class="btn primary" data-door="open">${d?.opening ? "Opening" : "Open door"}</button>`;
-  const steps = d?.open && d.instructions ? `<div class="door"><pre id="door-text">${esc(d.instructions)}</pre><div class="btns"><button class="btn" data-copy-door>Copy instructions</button><button class="link" data-door="rotate" title="Make a new key; the old one stops working">New key</button></div></div>` : "";
-  return `<div class="conn">${head}${btn}</div>${steps}`;
 }
 
 /* ================= sending and asking ================= */
@@ -1175,10 +1168,33 @@ document.addEventListener("click", async (e) => {
     } else S.phone = await api(`/phone${d.phone === "signout" ? "?signout=1" : ""}`, { method: "DELETE" });
     return renderMain();
   }
+  if (d.teamOpen !== undefined) {
+    S.view = "team"; S.teamEdit = null; render();
+    await Promise.all([loadTeam(), api("/door").then((x) => { S.door = x; }).catch(() => {})]);
+    return render();
+  }
+  if (d.teamEdit) { S.teamEdit = S.teamEdit === d.teamEdit ? null : d.teamEdit; return renderMain(); }
+  if (d.teamSave) {
+    const fields: Record<string, string> = {};
+    document.querySelectorAll<HTMLInputElement>("[data-team-field]").forEach((el) => { fields[el.dataset.teamField!] = el.value; });
+    await api(`/team/${encodeURIComponent(d.teamSave)}`, { method: "PUT", body: fields });
+    S.teamEdit = null; await loadTeam(); return renderMain();
+  }
+  // The door's agents: add one (it gets a key), show its setup, give it a new key, or remove it.
+  if (d.doorAdd !== undefined || d.doorShow || d.doorRotate) {
+    const agent = d.doorShow || d.doorRotate || ($<HTMLInputElement>("#door-new")?.value ?? "").trim().toLowerCase();
+    if (!agent) return;
+    try {
+      S.door = d.doorShow && S.door?.open ? await api(`/door?agent=${encodeURIComponent(agent)}`)
+        : (renderMain(), await api("/door", { method: "POST", body: { agent, rotate: !!d.doorRotate } }));
+    } catch (err: any) { S.door = { ...(S.door ?? {}), error: err.message }; }
+    await loadTeam(); return renderMain();
+  }
+  if (d.doorRevoke) { S.door = await api(`/door?revoke=${encodeURIComponent(d.doorRevoke)}`, { method: "DELETE" }); await loadTeam(); return renderMain(); }
   if (d.door) {
-    if (d.door === "close") { await api("/door?revoke=", { method: "DELETE" }); S.door = { open: false }; return renderMain(); }
+    if (d.door === "close") { S.door = await api("/door", { method: "DELETE" }); return renderMain(); }
     S.door = { ...(S.door ?? {}), opening: true }; renderMain();
-    try { S.door = await api("/door", { method: "POST", body: { agent: "grok", rotate: d.door === "rotate" } }); }
+    try { S.door = await api("/door", { method: "POST", body: { agent: S.door?.agents?.[0] ?? "grok", open: true } }); }
     catch (err: any) { S.door = { open: false, error: err.message }; }
     return renderMain();
   }
@@ -1677,7 +1693,7 @@ function listen() {
 }
 
 (async function start() {
-  await Promise.all([loadAgents(), loadSettings()]);
+  await Promise.all([loadAgents(), loadSettings(), loadTeam()]);
   await loadList();
   const mine = S.threads;
   seen = new Set(mine.map((t) => `${t.id}:${t.updated_at}`));

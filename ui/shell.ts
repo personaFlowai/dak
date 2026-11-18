@@ -24,6 +24,7 @@ export function railView(): string {
     ${item("data-waiting", I.check, "Waiting on you", "For you", !(phone && S.phoneList) && S.view === "waiting", S.reviews.length, true)}
     ${item("data-queue", I.pr, "Merge queue", "Queue", !(phone && S.phoneList) && S.view === "queue", queueN)}
     ${item(`data-rail="pairs"`, I.chat, "Between agents", "Agents", pairs)}
+    ${phone ? "" : item("data-team-open", I.team, "Team", "Team", S.view === "team")}
     ${item("data-search-open", I.search, "Search everything (⌘K)", "Search", false)}
     ${phone ? "" : `${item("data-compose", I.compose, "New message (N)", "New", S.view === "compose")}
     <span class="grow"></span>

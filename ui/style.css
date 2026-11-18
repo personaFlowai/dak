@@ -1290,3 +1290,32 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 .files-panel .fp-gone { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 2px; font-size: 12.5px; color: var(--text3); }
 .files-panel .fp-gone b { color: var(--text2); font-weight: 500; }
 .removed-att { font-size: 12.5px; color: var(--text3); padding: 4px 0; }
+
+/* ---------- the team ---------- */
+.team-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.tm { background: var(--win); border: 1px solid var(--line2); border-radius: 12px; padding: 12px 14px; }
+.tm-head { display: flex; align-items: center; gap: 10px; }
+.tm-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tm-name b { font-size: 14px; }
+.tm-name span { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-head > span { font-size: 12px; color: var(--text3); white-space: nowrap; }
+.tm-head .live { color: var(--add); }
+.tm-role { margin: 8px 0 0 44px; font-size: 13px; color: var(--text2); }
+.tm-can { margin: 4px 0 0 44px; font-size: 12.5px; color: var(--text2); }
+.tm-can b { color: var(--text3); font-weight: 500; margin-right: 4px; }
+.tm-empty { margin: 8px 0 0 44px; font-size: 12.5px; color: var(--text3); }
+.tm-form { margin: 10px 0 0 44px; display: grid; gap: 8px; }
+.tm-field { display: grid; grid-template-columns: 70px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12.5px; color: var(--text3); }
+.door-agents { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.door-agent { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 8px; background: var(--panel); font-size: 13px; }
+.door-agent .grow { flex: 1; }
+.door-add { display: flex; gap: 8px; margin-top: 10px; }
+.door-add .input { flex: 1; }
+.app.phone .tm-role, .app.phone .tm-can, .app.phone .tm-empty, .app.phone .tm-form { margin-left: 0; }
+
+/* @mentions */
+.prose .mention { color: var(--accent-text); font-weight: 500; }
+#mention-pop { position: fixed; z-index: 200; padding: 4px; border-radius: 10px; background: var(--win); box-shadow: 0 8px 28px rgba(0,0,0,.18), 0 0 0 .5px var(--line); max-height: 260px; overflow-y: auto; }
+#mention-pop button { display: flex; width: 100%; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 7px; text-align: left; font-size: 13px; }
+#mention-pop button span { color: var(--text3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#mention-pop button.on, #mention-pop button:hover { background: var(--accent-tint); }

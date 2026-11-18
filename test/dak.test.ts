@@ -1262,3 +1262,34 @@ describe("reviewing and removing", () => {
     expect((await http(`/v1/threads/${thread.id}/attachments/a_nope`, { method: "POST", body: "{}" })).status).toBe(404);
   });
 });
+
+describe("the team and @mentions", () => {
+  test("everyone who works through Dak is on the team, and the person's card wins over the guess", async () => {
+    dak("send", "--to", "sam", "--from", "builder-one", "--subject", "Hi", "hello");
+    let list = dak("team", "--all", "--json").json(); // the test runs in a temporary folder, which the plain list hides
+    expect(list.find((m: any) => m.name === "builder-one")?.kind).toBe("local");
+    expect(list[0].name).toBe("sam"); // the person first
+    dak("team", "set", "builder-one", "--display", "Builder", "--role", "Engineer", "--area", "Registers", "--cannot", "no production access");
+    list = dak("team", "--all", "--json").json();
+    expect(list.find((m: any) => m.name === "builder-one")).toMatchObject({ display: "Builder", role: "Engineer", area: "Registers", cannot: "no production access" });
+    expect(dak("team", "set", "nobody-at-all", "--role", "x").code).not.toBe(0);
+    const viaHttp = await (await http("/v1/team/builder-one", { method: "PUT", body: JSON.stringify({ can: "writes code" }) })).json();
+    expect(viaHttp.can).toBe("writes code");
+  });
+
+  test("an @mention brings a member onto the topic from that message on, not the history", () => {
+    dak("send", "--to", "sam", "--from", "builder-two", "--subject", "Seen", "hello"); // builder-two exists
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--subject", "Plan", "First, the old part.", "--json").json();
+    dak("reply", thread.id, "--from", "sam", "Second note, before anyone is mentioned.");
+    const m = dak("reply", thread.id, "--from", "sam", "@builder-two can you take the registers part? Not @types/node or x@y.com.", "--json").json();
+    expect(m.mentions).toEqual(["builder-two"]);
+    const t = dak("show", thread.id, "--json").json();
+    expect(t.participants.some((p: any) => p.name === "builder-two")).toBe(true);
+    const mail = dak("inbox", "--for", "builder-two", "--unread", "--json").json();
+    const here = mail.filter((x: any) => x.thread_id === thread.id).map((x: any) => x.body);
+    expect(here).toEqual([m.body]); // only the mention, not "First" or "Second"
+    // In the first message of a new topic, too.
+    const { thread: t2 } = dak("send", "--to", "atlas", "--from", "sam", "--subject", "Kickoff", "@builder-two and @atlas, start here.", "--json").json();
+    expect(dak("show", t2.id, "--json").json().participants.map((p: any) => p.name)).toContain("builder-two");
+  });
+});

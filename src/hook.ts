@@ -72,7 +72,7 @@ export function brief(name: string, msgs: Message[]): string {
   for (const m of msgs) {
     const t = getThreadRow(m.thread_id);
     const v = m.verdict ? ` [${verdictLabel(m)}]` : "";
-    lines.push("", `Thread ${t.id} "${t.subject}", from ${m.author}${v}${m.quiet ? " (an update, no reply needed)" : ""}:`, m.body.trim() || (m.choice ? "" : "(no text)"));
+    lines.push("", `Thread ${t.id} "${t.subject}", from ${m.author}${v}${m.mentions?.includes(name) ? " (mentions you)" : ""}${m.quiet ? " (an update, no reply needed)" : ""}:`, m.body.trim() || (m.choice ? "" : "(no text)"));
     // On a thread carrying several PRs, a verdict covers only the PRs it names: say which stand approved.
     if (m.verdict) { const sum = approvedSummary(getThread(t.id).prs); if (sum) lines.push(`  ${sum}. Merge only those.`); }
     if (m.choice) lines.push(`  Picked: ${m.choice}`);

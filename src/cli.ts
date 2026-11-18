@@ -15,6 +15,7 @@ import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
 import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, draftChapters } from "./pr";
 import { DakError, type Message, type Verdict } from "./types";
 import { approvedSummary, verdictLabel } from "./verdicts";
+import { setMember, team } from "./team";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
 import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
@@ -44,6 +45,8 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
                     [--done]                               the work is finished: the topic leaves the reader's list
                     [--fyi]                                an update that needs no answer (after an approval, text-only replies are updates anyway)
   dak show <thread>                              the whole thread
+  dak team [--json]                              everyone on the team: @name, role, area, what they can and cannot do
+                                                 (@name in any message brings them onto that topic)
   dak thread --pr <n>                            the thread carrying PR #n (prints its id)
   dak refresh <thread> [--pr n | --base ref | --diff f] [--chapters f]
                                                  the same PR at its new head (after a rebase), in place: no new version
@@ -267,7 +270,8 @@ const OPTIONS = {
   to: { type: "string" }, from: { type: "string" }, for: { type: "string" }, subject: { type: "string" },
   pr: { type: "string" }, repo: { type: "string" }, base: { type: "string" }, diff: { type: "string" },
   chapters: { type: "string" }, doc: { type: "string", multiple: true }, file: { type: "string", multiple: true },
-  link: { type: "string", multiple: true }, verdict: { type: "string" }, on: { type: "string", multiple: true }, timeout: { type: "string" },
+  link: { type: "string", multiple: true }, verdict: { type: "string" }, on: { type: "string", multiple: true },
+  display: { type: "string" }, role: { type: "string" }, area: { type: "string" }, can: { type: "string" }, cannot: { type: "string" }, timeout: { type: "string" },
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
   force: { type: "boolean" }, stop: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
@@ -425,6 +429,20 @@ export async function main(argv: string[]): Promise<number> {
         : null;
       if (values.done) setStatus(id, "closed");
       out(json, m ?? { done: id }, () => values.done ? `Marked ${id} done.` : `Replied on ${id}.`);
+      return 0;
+    }
+    case "team": {
+      // dak team                       everyone who works through Dak, with name, role and area
+      // dak team set <name> --display "Atlas" --role CTO --area "..." --can "..." --cannot "..."
+      if (positionals[0] === "set") {
+        const name = positionals[1];
+        if (!name) throw new DakError("no_member", "Whose card? dak team set <name> --role ...");
+        const m = setMember(name, { display: values.display, role: values.role, area: values.area, can: values.can, cannot: values.cannot });
+        out(json, m, () => `Updated ${m.name}.`);
+        return 0;
+      }
+      const list = team({ all: values.all });
+      out(json, list, () => list.map((m) => `${m.listening ? "●" : " "} @${m.name.padEnd(36)} ${(m.kind).padEnd(7)} ${[m.display, m.role, m.area].filter(Boolean).join(" · ")}${m.cannot ? `  (cannot: ${m.cannot})` : ""}`).join("\n"));
       return 0;
     }
     case "agents": {

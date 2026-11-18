@@ -22,10 +22,11 @@ import { postReview } from "./github";
 import { waitForMail } from "./wake";
 import { INSTRUCTIONS, installSkill } from "./skill";
 import { snapshotPr } from "./pr";
-import { agentForKey, agentKey, closeDoor, doorStatus, instructionsFor, openDoor, revokeKey } from "./tunnel";
+import { agentForKey, agentKey, closeDoor, doorStatus, instructionsFor, keyNames, openDoor, revokeKey } from "./tunnel";
 import type { PrMeta } from "./types";
 import { agents, touch } from "./presence";
 import { DakError, type Verdict } from "./types";
+import { setMember, team } from "./team";
 // Embedded at compile time, so the single dak binary carries its own screens.
 import indexHtml from "../dist/ui/index.html" with { type: "text" };
 import appJs from "../dist/ui/app.js" with { type: "text" };
@@ -229,6 +230,8 @@ async function outside(req: Request, url: URL): Promise<Response> {
     return new Response(instructionsFor(agent, base, "<your key>", me), { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
   // Who it can write to: the person and the agents, with what each does.
+  // The team, read only: who does what, so an outside agent sends work to the right one.
+  if (parts[0] === "team" && req.method === "GET") return json(team().map(({ name, display, role, area, can, cannot, kind }) => ({ name, display, role, area, can, cannot, kind })));
   if (parts[0] === "agents" && req.method === "GET") {
     const c = loadConfig();
     return json(c.readers.filter((r) => r.name !== agent && (r.kind === "agent" || r.name === me)).map((r) => ({ name: r.name, about: r.about ?? (r.name === me ? "The person" : null) })));
@@ -460,17 +463,36 @@ async function api(req: Request, url: URL): Promise<Response> {
       body: String(b.note ?? ""), attachments: [{ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta }] }), 201);
   }
 
+  if (parts[0] === "team") {
+    if (method === "GET" && !parts[1]) return json(team({ all: q.get("all") === "1" }));
+    if (method === "PUT" && parts[1]) return json(setMember(decodeURIComponent(parts[1]), await body()));
+  }
+  // One door, many outside agents: each has its own key and its own setup text.
   if (parts[0] === "door") {
     const c = loadConfig();
-    if (method === "GET") return json(withInstructions(doorStatus()));
+    const named = (v: unknown) => {
+      const a = String(v ?? "grok").toLowerCase();
+      if (!/^[a-z0-9_-]{1,40}$/.test(a)) throw new DakError("bad_name", "An agent name is letters, digits, - or _.");
+      if (c.readers.some((r) => r.name === a && r.kind === "person")) throw new DakError("taken", `${a} is the person, not an agent.`, 403);
+      return a;
+    };
+    const status = (agent?: string) => ({ ...withInstructions(doorStatus(), agent), agents: keyNames() });
+    if (method === "GET") return json(status(q.get("agent") ?? undefined));
     if (method === "POST") {
       const b = await body();
-      const agent = String(b.agent ?? "grok").toLowerCase();
-      if (!/^[a-z0-9_-]{1,40}$/.test(agent)) throw new DakError("bad_name", "An agent name is letters, digits, - or _.");
-      if (b.rotate) agentKey(agent, true);
-      return json(withInstructions(await openDoor(agent, c.port, b.tool === "ngrok" ? "ngrok" : "cloudflare")));
+      const agent = named(b.agent);
+      if (b.rotate) agentKey(agent, true); else agentKey(agent);
+      // Adding an agent only makes its key; the tunnel starts when the door is opened.
+      if (b.open === true) await openDoor(agent, c.port, b.tool === "ngrok" ? "ngrok" : "cloudflare");
+      return json(status(agent));
     }
-    if (method === "DELETE") { const s = doorStatus() as any; closeDoor(); if (s.agent && url.searchParams.get("revoke")) revokeKey(s.agent); return json({ open: false }); }
+    if (method === "DELETE") {
+      // ?revoke=<agent>: that agent's key stops working; the door stays open for the others.
+      const revoke = q.get("revoke");
+      if (revoke) { revokeKey(named(revoke)); return json(status()); }
+      closeDoor();
+      return json({ open: false, agents: keyNames() });
+    }
   }
 
   // Opening Dak on the phone: Settings starts the tunnel and shows the link as a code to scan.
@@ -538,9 +560,10 @@ async function api(req: Request, url: URL): Promise<Response> {
   throw new DakError("not_found", `No route ${method} ${url.pathname}.`, 404);
 }
 
-function withInstructions(s: any) {
-  if (!s.open || !s.url) return s;
-  return { ...s, instructions: instructionsFor(s.agent, s.url, agentKey(s.agent), person(loadConfig())) };
+function withInstructions(s: any, agent?: string) {
+  const who = agent ?? s.agent;
+  if (!s.open || !s.url || !who) return s;
+  return { ...s, for: who, instructions: instructionsFor(who, s.url, agentKey(who), person(loadConfig())) };
 }
 
 function dakBinary(): string {

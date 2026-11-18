@@ -1,5 +1,6 @@
 import { esc, S, me, name, drafts, findAtt, when, fullWhen, mark, helperLabel, helperMark, opensInPane } from "./state";
 import { render as renderMd } from "./md";
+import { markMentions } from "./mention";
 import { anchorLabel, prLink } from "./pr";
 import { blobUrl } from "./api";
 import type { Attachment, Handoff, Message, Proof, Thread, Verdict } from "../src/types";
@@ -42,7 +43,7 @@ function message(m: Message, topic: Topic): string {
   return `<article class="msg ${m.author === me ? "mine" : ""}" data-mid="${m.id}">
     <div class="w">${mark(m.author, "sm")}<b>${esc(name(m.author))}</b>${v}<time title="${esc(fullWhen(m.created_at))}">${when(m.created_at)}</time></div>
     ${m.choice ? `<div class="picked">${I.check}<span>${esc(m.choice)}</span></div>` : ""}
-    ${m.body.trim() ? `<div class="prose">${renderMd(m.body)}</div>` : ""}
+    ${m.body.trim() ? `<div class="prose">${markMentions(renderMd(m.body), m.mentions)}</div>` : ""}
     ${m.handoff ? handoffCard(m.handoff) : ""}
     ${m.cost ? `<p class="cost">${esc(describeCost(m.cost))}</p>` : ""}
     ${m.options?.length ? options(m, topic) : ""}

@@ -39,6 +39,7 @@ export interface Message {
   approved?: { head_sha: string; diff_blob: string }; // on an approval: exactly what was approved
   prs?: number[]; // the PRs a verdict is about; none named means every PR on the thread
   quiet?: boolean; // an update that needs no reply: delivered at the next turn, never wakes or interrupts
+  mentions?: string[]; // the team members @mentioned in it; each was brought onto the topic
   approved_heads?: Record<string, { head_sha: string; diff_blob: string }>; // per PR ("#2450"), what each approval approved
   tryit?: { ticket?: string }; // a "try it" note: its first button means it works
   tryit_result?: { result: "works" | "wrong"; ticket?: string }; // the person's pick on one
@@ -63,6 +64,7 @@ export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: bool
   approved?: { head_sha: string; diff_blob: string }; // what an approval approved, recorded by Dak
   prs?: number[]; // the PRs a verdict is about
   quiet?: boolean; // an update that needs no reply
+  mentions?: string[];
   approved_heads?: Record<string, { head_sha: string; diff_blob: string }>;
   tryit?: { ticket?: string }; // a "try it" note on a live feature: its first button means it works
   tryit_result?: { result: "works" | "wrong"; ticket?: string }; // the person's pick on one

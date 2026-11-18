@@ -9,6 +9,7 @@ import type {
 import { DakError, ROLES, type Participant, type Role, type MessageExtra, type Cost } from "./types";
 import { known } from "./presence";
 import { approvedNow, prStates, type PrState } from "./verdicts";
+import { memberNames, mentionsIn } from "./team";
 
 // One SQLite file shared by every CLI call and the server. WAL lets many agents
 // write at once; busy_timeout makes a writer wait for a lock instead of failing.
@@ -146,6 +147,10 @@ export function createThread(input: {
   const tx = s.transaction(() => {
     s.query("INSERT INTO threads VALUES (?,?,?,?,?,?,?,?)").run(id, to, from, input.subject.trim(), input.kind, input.needs_reply === false && !cleanOptions(input.options) ? "informed" : "waiting", t, t);
     for (const p of others) if (p.name !== to && p.name !== from) addParticipantRow(id, p);
+    // Anyone @mentioned in the first message is on the topic from the start.
+    const mentioned = mentionsIn(input.body, memberNames()).filter((n) => n !== to && n !== from && !others.some((p) => p.name === n));
+    for (const n of mentioned) addParticipantRow(id, { name: n, role: "member" });
+    if (mentioned.length) input = { ...input, extra: { ...input.extra, mentions: mentioned } };
     // Sent with --fyi: an update, delivered at the reader's next turn rather than interrupting it.
     const quiet = input.needs_reply === false && !cleanOptions(input.options);
     return insertMessage(id, from, input.body, null, input.attachments, [], cleanOptions(input.options), undefined, quiet ? { ...input.extra, quiet: true } : input.extra);
@@ -213,8 +218,17 @@ export function addMessage(threadId: string, input: {
       if (Object.keys(heads).length) extra = { ...extra, approved_heads: heads, ...(targets.length === 1 && heads[targets[0].key] ? { approved: heads[targets[0].key] } : {}) };
     }
   }
+  // @mentions bring someone onto the topic from this message on: they get it as mail (and
+  // what follows), not the whole history before it.
+  const mentioned = mentionsIn(input.body, memberNames()).filter((n) => n !== author);
+  if (mentioned.length) extra = { ...extra, mentions: mentioned };
   const s = store();
   const id = s.transaction(() => {
+    const before = (s.query("SELECT coalesce(max(id), 0) AS m FROM messages WHERE thread_id = ?").get(threadId) as { m: number }).m;
+    for (const n of mentioned) if (n !== thread.to && n !== thread.from && !isParticipant(threadId, n)) {
+      addParticipantRow(threadId, { name: n, role: "member" });
+      markRead(n, threadId, before);
+    }
     const mid = insertMessage(threadId, author, input.body, input.verdict ?? null, input.attachments ?? [], input.comments ?? [], cleanOptions(input.options), input.choice, extra);
     s.query("UPDATE threads SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), threadId);
     return mid;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0
+
+The first step towards Dak as the one place a team of people and agents works together.
+
+- **The team.** A Team page (left rail) lists everyone who works through Dak: agents on this Mac, agents outside it that hold a door key, the bots they speak as, and you. Give each a name, a role, an area, and what it can and cannot do. Agents read the same cards with `dak team` (or `GET /x/team` from outside), so work goes to the right one. `dak team set <name> --role ... --area ...`.
+- **@mentions.** Write `@name` in any message or reply and that member is brought onto the topic from that message on: they get it as mail, marked "mentions you", but not the history before it. Typing `@` in a reply box lists the team; Enter or Tab picks. Mentions show highlighted in the conversation.
+- **One door for many outside agents.** The door that lets Grok Bot in now takes any number of agents (cloud agents, personal agents), each with its own key and its own setup text, on the same address. Add, show the setup, give a new key or remove each one on the Team page. Adding an agent no longer starts the tunnel; opening the door does.
+
 ## 0.9.4
 
 - **Each topic keeps its own pane.** Switching topics no longer carries the open PR or doc across: each topic shows what you last had open on it, or stays closed if you closed it. A topic opened for the first time shows its newest PR or doc only when it is waiting on you.

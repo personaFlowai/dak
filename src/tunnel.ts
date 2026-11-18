@@ -27,6 +27,9 @@ export function agentKey(name: string, rotate = false): string {
   return keys[name];
 }
 
+// The agents outside this Mac that hold a key: members of the team even while the door is shut.
+export const keyNames = (): string[] => Object.keys(readKeys());
+
 export function agentForKey(key: string | null): string | null {
   if (!key) return null;
   const hit = Object.entries(readKeys()).find(([, k]) => k === key);
@@ -67,8 +70,9 @@ export function doorStatus() {
 // Cloudflare's quick tunnel needs no account; its address changes when the tunnel restarts.
 // ngrok uses the account it is already signed in to.
 export async function openDoor(agent: string, port: number, tool: "cloudflare" | "ngrok" = "cloudflare") {
+  // One door for every outside agent: a second agent gets its own key on the same address.
   const cur = readDoor();
-  if (cur && cur.agent === agent && cur.tool === tool) { agentKey(agent); return doorStatus(); }
+  if (cur && alive(cur.pid) && cur.tool === tool) { agentKey(agent); return doorStatus(); }
   closeDoor();
   agentKey(agent);
   const log = join(dakHome(), "door-tunnel.log");
@@ -118,6 +122,8 @@ export function instructionsFor(agent: string, url: string, key: string, person:
     `Reply on a thread: POST ${url}/x/reply/<thread id>   JSON {"body": "..."}`,
     `Wait for a reply:  GET  ${url}/x/wait/<thread id>?timeout=50   returns {"messages": [...]} or {"timed_out": true}`,
     `Read new replies:  GET  ${url}/x/inbox`,
+    `The team:          GET  ${url}/x/team   everyone who works through Dak: @name, role, area, what they can and cannot do. Send work to the one whose area it is.`,
+    `@mentions: write @name in any message or reply ("@atlas can you take this?") to bring that member onto the topic; they get it from that message on. Write @${person} only for what needs ${person}.`,
     ``,
     `Getting your mail: Dak cannot reach into your sandbox, so you must ask. At the start of every task and before you finish, call GET ${url}/x/inbox and act on what is there. While you wait for an answer, keep GET ${url}/x/wait/<thread id>?timeout=50 open in a loop rather than stopping.`,
     `These instructions, current: GET ${url}/x/skill. Read them again when something here does not work as described.`,
