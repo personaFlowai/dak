@@ -1,8 +1,9 @@
-/* The Board page: the backlog on the left, one pile per engineer beside it, "Needs you" on top.
-   Drag a ticket from the backlog onto an engineer to give it to them (they and Atlas are told),
-   drag inside a pile to change the order, drag back to the backlog to take it away. Filters: one
-   engineer, a label, a milestone, or words. On a phone it is a list, and assigning is a menu. */
-import { S, esc, mark, when, name, onPhone } from "./state";
+/* The Board page, as the approved mock: one slim bar (Piles / Stages, Needs you, Engineer, Label,
+   Milestone, search), the backlog as a compact list grouped by milestone, and one pile per
+   engineer with Linear-style cards. Drag a backlog row (or a card) onto an engineer to give it to
+   them; drag inside a pile to reorder; drag to the backlog to take it away. Tapping a card opens
+   its panel on the right: the ticket, who has it, where it stands, its work, and its history. */
+import { S, esc, mark, when, fullWhen, onPhone } from "./state";
 import { api } from "./api";
 import { I } from "./icons";
 import type { Card } from "../src/board";
@@ -10,105 +11,174 @@ import type { Card } from "../src/board";
 export interface BoardData { cards: Card[]; labels: string[]; milestones: string[]; synced_at: string | null; linear: { connected: boolean } }
 
 export async function loadBoard() {
-  try { S.board = await api<BoardData>("/board"); } catch (e: any) { S.boardError = e.message ?? "Could not load the Board."; }
+  try { S.board = await api<BoardData>("/board"); S.boardError = ""; } catch (e: any) { S.boardError = e.message ?? "Could not load the Board."; }
 }
 
-const STAGE: Record<string, [string, string]> = {
-  backlog: ["Backlog", ""], next: ["Up next", ""], brief: ["Brief", ""], building: ["Building", ""], review: ["In review", ""],
-  you: ["Needs you", "you"], changes: ["Changes", "warn"], approved: ["Approved", "ok"], merging: ["Merging", ""], live: ["Live", "ok"],
-  checking: ["Checking", ""], done: ["Done", "ok"],
-};
+const STAGES: [string, string][] = [["next", "Up next"], ["brief", "Brief"], ["building", "Building"], ["review", "In review"], ["you", "Needs you"],
+  ["changes", "Changes"], ["approved", "Approved"], ["merging", "Merging"], ["live", "Live"], ["checking", "Checking"]];
+const SNAME: Record<string, string> = Object.fromEntries([["backlog", "Backlog"], ...STAGES, ["done", "Done"]]);
 
-function filtered(cards: Card[]): Card[] {
-  const f = S.boardFilter;
-  const words = f.q.trim().toLowerCase();
-  return cards.filter((c) => (!f.label || c.labels.includes(f.label)) && (!f.milestone || c.milestone === f.milestone)
-    && (!words || `${c.id} ${c.title}`.toLowerCase().includes(words)));
+// A ring that fills as a ticket moves, as Linear draws status; a check once it is finished.
+function glyph(s: string): string {
+  const c = s === "you" ? "var(--accent)" : ["approved", "live", "done", "checking"].includes(s) ? "var(--add)" : s === "changes" ? "var(--warn-text, #9a5b00)" : "var(--text3)";
+  const frac = ({ backlog: -1, next: 0, brief: .15, building: .35, review: .55, you: .55, changes: .45, approved: .8, merging: .9, live: 1, checking: 1, done: 1 } as Record<string, number>)[s] ?? 0;
+  if (frac < 0) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4" stroke-dasharray="2 2"/></svg>`;
+  if (frac >= 1) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="${c}"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" fill="none" stroke="#fff" stroke-width="1.5"/></svg>`;
+  const a = frac * 2 * Math.PI, x = 7 + 3.2 * Math.sin(a), y = 7 - 3.2 * Math.cos(a), big = frac > .5 ? 1 : 0;
+  return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4"/>${frac > 0 ? `<path d="M7 7 L7 3.8 A3.2 3.2 0 ${big} 1 ${x.toFixed(2)} ${y.toFixed(2)} Z" fill="${c}"/>` : ""}</svg>`;
 }
+// Linear's priority: 1 urgent, 2 high, 3 medium, 4 low, 0 none.
+const pri = (p: number | null) => p === 1 ? `<span class="pri urgent" title="Urgent">!</span>`
+  : `<span class="pri" title="${["No priority", "Urgent", "High", "Medium", "Low"][p ?? 0]}">${[1, 2, 3].map((i) => `<i class="${p && p > 1 && 5 - p >= i ? "f" : ""}" style="height:${3 + i * 3}px"></i>`).join("")}</span>`;
+const hue = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 45% 52%)`; };
+const lab = (l: string) => `<span class="blab" style="--c:${hue(l)}">${esc(l)}</span>`;
+const short = (d: string) => d.split(/ - | \(| @ /)[0].trim() || d;
 
-// The engineers shown as piles: every named agent (a reader, a member you carded, a session with a
-// title, anyone outside this Mac, anyone holding tickets), idle or not, so nobody drops off. A
-// session found by its folder often shares its title with the named one ("Tasks engineer (M9)"):
-// one pile per title, the named one kept.
-function engineers(cards: Card[]): { name: string; label: string; role: string; last: string | null }[] {
+// The engineers with a pile: every named agent (a reader, a member you carded, a session with a
+// title, anyone outside this Mac, anyone holding tickets), idle or not. A session found by its
+// folder often shares its title with the named one: one pile per title, the named one kept.
+export function engineers(cards: Card[]): { name: string; label: string; last: string | null }[] {
   const piles = new Set(cards.map((c) => c.agent).filter(Boolean) as string[]);
   const score = (m: any) => (piles.has(m.name) ? 0 : m.reader ? 1 : m.carded ? 2 : 3) * 1000 + m.name.length;
   const best = new Map<string, any>();
   for (const m of (S.team ?? []) as any[]) {
     if (m.kind === "person") continue;
-    if (!(S.boardAll || piles.has(m.name) || m.reader || m.carded || m.display || m.kind === "cloud" || m.kind === "bot")) continue;
-    const key = S.boardAll ? m.name : (m.display || m.name).toLowerCase();
+    if (!(piles.has(m.name) || m.reader || m.carded || m.display || m.kind === "cloud" || m.kind === "bot")) continue;
+    const key = (m.display || m.name).toLowerCase();
     const cur = best.get(key);
     if (!cur || score(m) < score(cur)) best.set(key, m);
   }
-  // A session title like "Atlas - CTO @ Reva" or "Tasks engineer (M9)" reads as "Atlas", "Tasks engineer".
-  const short = (d: string) => d.split(/ - | \(| @ /)[0].trim() || d;
-  return [...best.values()].map((m) => ({ name: m.name, label: m.display ? short(m.display) : m.name, role: [m.role, m.area].filter(Boolean).join(" · "), last: m.last_seen }));
+  return [...best.values()].map((m) => ({ name: m.name, label: m.display ? short(m.display) : m.name, last: m.last_seen }));
 }
 
-function cardHtml(c: Card, draggable: boolean): string {
-  const [word, cls] = STAGE[c.stage] ?? [c.stage, ""];
-  const work = c.work.slice(-3).map((w) => `<button class="bw" data-topic="${esc(w.thread)}" title="Open on Dak">${w.kind === "pr" ? I.pr : I.doc}<span>${esc(w.label)}</span><i class="st ${STAGE[w.state]?.[1] ?? ""}">${esc(STAGE[w.state]?.[0] ?? w.state)}</i></button>`).join("");
-  const assign = onPhone() ? `<label class="popup bassign"><select data-board-assign="${esc(c.id)}" aria-label="Give ${esc(c.id)} to"><option value="">${c.agent ? `@${esc(c.agent)}` : "Give to…"}</option>
-    ${(S.team ?? []).filter((m: any) => m.kind !== "person").map((m: any) => `<option value="${esc(m.name)}">${esc(m.display || m.name)}</option>`).join("")}${c.agent ? `<option value="none">Back to the backlog</option>` : ""}</select></label>` : "";
-  return `<article class="bcard ${c.needs_you ? "you" : ""}" ${draggable ? `draggable="true"` : ""} data-card="${esc(c.id)}">
-    <div class="bc-top"><code>${esc(c.id)}</code><span class="bstage ${cls}">${word}</span></div>
-    <p class="bc-title">${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)}</p>
+function shown(cards: Card[]): Card[] {
+  const f = S.boardFilter, q = f.q.trim().toLowerCase();
+  return cards.filter((c) => (!f.label || c.labels.includes(f.label)) && (!f.milestone || c.milestone === f.milestone)
+    && (!q || `${c.id} ${c.title}`.toLowerCase().includes(q)) && (!f.needs || c.needs_you));
+}
+
+function card(c: Card, who: string | null): string {
+  const prs = c.work.filter((w) => w.kind === "pr").length;
+  const meta = [who ? `<span class="bwho">${mark(c.agent!, "sm")}${esc(who)}</span>` : "", ...c.labels.slice(0, who ? 1 : 2).map(lab),
+    prs ? `<span class="bprs">${I.pr}${prs}</span>` : ""].join("");
+  return `<article class="bcard ${S.boardOpen === c.id ? "on" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" tabindex="0">
+    <div class="bc-top">${c.needs_you ? `<span class="bdot" title="Needs you"></span>` : ""}<code>${esc(c.id)}</code><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span></div>
+    <p class="bc-title">${esc(c.title)}</p>
     ${c.stage_note ? `<p class="bc-note">${esc(c.stage_note)}</p>` : ""}
-    ${c.labels.length || c.milestone ? `<div class="bc-labels">${c.milestone ? `<span class="ms">${esc(c.milestone)}</span>` : ""}${c.labels.map((l) => `<span>${esc(l)}</span>`).join("")}</div>` : ""}
-    ${work ? `<div class="bc-work">${work}</div>` : ""}${assign}</article>`;
+    ${meta ? `<div class="bc-meta">${meta}</div>` : ""}</article>`;
 }
 
-function connectBox(b: BoardData | null): string {
-  if (b?.linear.connected) return "";
-  return `<div class="linear-connect"><div><b>Bring in your Linear backlog</b><span>In Linear: Settings → Security &amp; access → Personal API keys → New key (read-only is enough). Paste it here. It stays in a private file on this Mac and is only sent to Linear.</span></div>
+function backlogPane(list: Card[]): string {
+  const bl = list.filter((c) => !c.agent && c.stage !== "done").sort((x, y) => ((x.priority || 9) - (y.priority || 9)) || x.id.localeCompare(y.id));
+  const groups = new Map<string, Card[]>();
+  for (const c of bl) { const k = c.milestone || "No milestone"; (groups.get(k) ?? groups.set(k, []).get(k)!).push(c); }
+  const html = [...groups.entries()].sort((a, b) => b[1].length - a[1].length).map(([k, cs]) => {
+    const closed = S.boardClosed.includes(k);
+    return `<button class="bgrp ${closed ? "closed" : ""}" data-board-grp="${esc(k)}" aria-expanded="${!closed}">${I.next}<span>${esc(k)}</span><i>${cs.length}</i></button>
+      ${closed ? "" : cs.map((c) => `<div class="brow ${S.boardOpen === c.id ? "on" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" title="${esc(c.title)}">${pri(c.priority)}<code>${esc(c.id)}</code><span>${esc(c.title)}</span></div>`).join("")}`;
+  }).join("");
+  return `<aside class="bbacklog bcol" data-drop=""><header><b>Backlog</b><span>${bl.length} open</span></header><div class="bbl">${html || `<p class="bempty">Nothing matches.</p>`}</div></aside>`;
+}
+
+function dropdown(kind: "agent" | "label" | "milestone", eng: { name: string; label: string }[], b: BoardData): string {
+  const f = S.boardFilter;
+  const cur = kind === "agent" ? f.agent : kind === "label" ? f.label : f.milestone;
+  const label = kind === "agent" ? (cur ? eng.find((e) => e.name === cur)?.label ?? cur : "Everyone") : kind === "label" ? cur || "Label" : cur ? cur.replace(/^\d+\.\s*/, "") : "Milestone";
+  const items: [string, string, number | ""][] = kind === "agent" ? [["", "Everyone", b.cards.filter((c) => c.agent).length], ...eng.map((e) => [e.name, e.label, b.cards.filter((c) => c.agent === e.name).length] as [string, string, number])]
+    : kind === "label" ? [["", "Any label", ""], ...b.labels.map((l) => [l, l, b.cards.filter((c) => c.labels.includes(l)).length] as [string, string, number])]
+    : [["", "Any milestone", ""], ...b.milestones.map((m) => [m, m, b.cards.filter((c) => c.milestone === m).length] as [string, string, number])];
+  const menu = S.boardMenu === kind ? `<div class="menu bmenu" role="menu">${items.map(([v, l, n]) => `<button class="mi" data-board-pick="${kind}" data-v="${esc(v)}"><span class="chk">${cur === v ? I.check : ""}</span>${kind === "label" && v ? lab(l) : `<span class="ml">${esc(l)}</span>`}<i>${n}</i></button>`).join("")}</div>` : "";
+  return `<div class="more-wrap bdd"><button class="bddb ${cur ? "on" : ""}" data-board-menu="${kind}" aria-haspopup="menu" aria-expanded="${S.boardMenu === kind}"><span>${esc(label)}</span>${I.next}</button>${menu}</div>`;
+}
+
+// The bar under the window's toolbar: views on the left, filters on the right.
+function bar(b: BoardData, eng: { name: string; label: string }[]): string {
+  const f = S.boardFilter;
+  const needs = b.cards.filter((c) => c.needs_you).length;
+  return `<div class="bbar"><div class="seg mini" role="group" aria-label="View"><button data-board-view="piles" aria-pressed="${S.boardView === "piles"}">Piles</button><button data-board-view="stages" aria-pressed="${S.boardView === "stages"}">Stages</button></div>
+    <span class="grow"></span>
+    ${needs ? `<button class="bneedsb" data-board-needs aria-pressed="${f.needs}">Needs you <b>${needs}</b></button>` : ""}
+    ${dropdown("agent", eng, b)}${b.labels.length ? dropdown("label", eng, b) : ""}${b.milestones.length ? dropdown("milestone", eng, b) : ""}
+    <input class="input bsearch" id="board-q" type="search" placeholder="Find a ticket" value="${esc(f.q)}" autocomplete="off"></div>`;
+}
+
+function connectBox(b: BoardData): string {
+  if (b.linear.connected) return "";
+  return `<div class="linear-connect"><div><b>Bring in your Linear backlog</b><span>In Linear: Settings → Security &amp; access → Personal API keys → New key (read-only is enough). It stays in a private file on this Mac and is only sent to Linear.</span></div>
     <input class="input" id="linear-key" type="password" placeholder="lin_api_…" autocomplete="off" spellcheck="false"><button class="btn primary" data-linear-connect>Connect</button>
     ${S.boardError ? `<p class="err">${esc(S.boardError)}</p>` : ""}</div>`;
+}
+
+// The panel for one ticket, beside the board.
+function panel(c: Card, eng: { name: string; label: string }[]): string {
+  const who = c.agent ? eng.find((e) => e.name === c.agent)?.label ?? c.agent : null;
+  const assign = `<label class="popup"><select data-board-assign="${esc(c.id)}" aria-label="Who has it"><option value="none" ${c.agent ? "" : "selected"}>Backlog: nobody</option>
+    ${eng.map((e) => `<option value="${esc(e.name)}" ${c.agent === e.name ? "selected" : ""}>${esc(e.label)}</option>`).join("")}</select></label>`;
+  const since = c.status?.at ?? c.started_at ?? c.assigned_at;
+  const work = c.work.length ? c.work.map((w) => `<button class="bp-work" data-topic="${esc(w.thread)}">${w.kind === "pr" ? I.pr : I.doc}<span>${esc(w.label)}</span><i class="bstage">${glyph(w.state)}${SNAME[w.state] ?? w.state}</i></button>`).join("")
+    : `<p class="bp-empty">Nothing linked yet. A Dak topic or PR whose subject or title names ${esc(c.id)} shows here.</p>`;
+  const hist = c.history.length ? c.history.slice().reverse().map((h) => `<li><span>${esc(h.what)}</span><time title="${esc(fullWhen(h.at))}">${when(h.at)}</time></li>`).join("") : "";
+  return `<aside class="bpanel" aria-label="${esc(c.id)}">
+    <header><code>${esc(c.id)}</code><span class="grow"></span>${c.url ? `<a class="icon-btn" href="${esc(c.url)}" target="_blank" rel="noopener" title="Open in Linear">${I.external}</a>` : ""}<button class="icon-btn" data-board-close title="Close (Esc)" aria-label="Close">${I.close}</button></header>
+    <div class="bp-body">
+      <h2>${esc(c.title)}</h2>
+      <dl class="bp-facts">
+        <dt>Stage</dt><dd><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span>${since ? ` <span class="dim">since ${when(since)}</span>` : ""}</dd>
+        <dt>Engineer</dt><dd>${assign}${c.agent ? ` <button class="link" data-board-top="${esc(c.id)}">Move to top</button>` : ""}</dd>
+        ${c.state ? `<dt>Linear</dt><dd>${esc(c.state)}</dd>` : ""}
+        ${c.milestone ? `<dt>Milestone</dt><dd>${esc(c.milestone)}</dd>` : ""}
+        ${c.labels.length ? `<dt>Labels</dt><dd class="bp-labs">${c.labels.map(lab).join("")}</dd>` : ""}
+      </dl>
+      ${c.status ? `<div class="bp-status"><b>${esc(who ?? c.status.by)} says</b><p>${esc(c.status.note)}</p>${c.status.blocked ? `<p class="bp-blocked">Blocked on ${esc(c.status.blocked)}</p>` : ""}<time>${when(c.status.at)}</time></div>` : ""}
+      <h3>Work</h3><div class="bp-works">${work}</div>
+      ${hist ? `<h3>History</h3><ul class="bp-hist">${hist}</ul>` : ""}
+    </div></aside>`;
 }
 
 export function boardView(): string {
   const b: BoardData | null = S.board;
   if (!b) return `<div class="pane-body"><div class="blank"><p>${S.boardError ? esc(S.boardError) : "Loading the Board…"}</p></div></div>`;
-  const f = S.boardFilter;
-  const cards = filtered(b.cards);
+  const list = shown(b.cards);
   const eng = engineers(b.cards);
-  const backlog = cards.filter((c) => !c.agent && c.stage !== "done").sort((x, y) => (x.priority || 9) - (y.priority || 9));
-  const needs = cards.filter((c) => c.needs_you);
-  const pile = (n: string) => cards.filter((c) => c.agent === n).sort((x, y) => (x.position ?? 0) - (y.position ?? 0));
+  const f = S.boardFilter;
   const shownEng = f.agent ? eng.filter((e) => e.name === f.agent) : eng;
-  const chips = `<div class="bfilters"><button class="chip-f ${!f.agent ? "on" : ""}" data-board-agent="">Everyone</button>${eng.map((e) => `<button class="chip-f ${f.agent === e.name ? "on" : ""}" data-board-agent="${esc(e.name)}">${esc(e.label)} <b>${pile(e.name).filter((c) => c.stage !== "done").length}</b></button>`).join("")}
-    <span class="grow"></span>
-    ${b.labels.length ? `<label class="popup"><select data-board-label aria-label="Label"><option value="">All labels</option>${b.labels.map((l) => `<option ${f.label === l ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>` : ""}
-    ${b.milestones.length ? `<label class="popup"><select data-board-milestone aria-label="Milestone"><option value="">All milestones</option>${b.milestones.map((m) => `<option ${f.milestone === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></label>` : ""}
-    <input class="input bsearch" id="board-q" type="search" placeholder="Find a ticket" value="${esc(f.q)}" autocomplete="off"></div>`;
-  const needsRow = needs.length ? `<section class="bneeds"><h3>${I.check} Needs you <b>${needs.length}</b></h3><div class="brow">${needs.map((c) => cardHtml(c, false)).join("")}</div></section>` : "";
-  const col = (key: string, title: string, sub: string, list: Card[], head = "") => `<section class="bcol" data-drop="${esc(key)}"><header>${head}<div><b>${esc(title)}</b><span>${sub}</span></div><i>${list.length}</i></header>
-    <div class="bcol-list">${list.map((c) => cardHtml(c, !onPhone())).join("") || `<p class="bempty">${key === "" ? "Nothing waiting." : "Nothing in this pile. Drag a ticket here."}</p>`}</div></section>`;
-  const idle = (e: { name: string; last: string | null }) => {
-    const p = pile(e.name);
-    const moving = p.find((c) => ["building", "review", "changes", "you", "merging"].includes(c.stage));
-    return moving ? `On ${esc(moving.id)}` : e.last ? `Idle since ${when(e.last)}` : "Idle";
-  };
-  const cols = shownEng.map((e) => col(e.name, e.label, `${e.role ? `${esc(e.role)} · ` : ""}${idle(e)}`, pile(e.name), mark(e.name, "sm"))).join("");
+  const pile = (n: string) => list.filter((c) => c.agent === n && c.stage !== "done").sort((x, y) => (x.position ?? 0) - (y.position ?? 0));
+  let main: string;
+  if (S.boardView === "piles") {
+    main = `<section class="bpiles">${shownEng.map((e) => {
+      const p = pile(e.name);
+      const on = p.find((c) => ["building", "review", "you", "changes", "merging"].includes(c.stage));
+      const sub = on ? `On ${esc(on.id)} · ${SNAME[on.stage]}` : `<span class="bidle">${e.last ? `Idle since ${when(e.last)}` : "Idle"}</span>`;
+      return `<div class="bpile bcol" data-drop="${esc(e.name)}"><header>${mark(e.name, "sm")}<div><b>${esc(e.label)}</b><span>${sub}</span></div><i>${p.length}</i></header>
+        <div class="bpl">${p.map((c) => card(c, null)).join("") || `<p class="bempty">Drop a ticket here</p>`}</div></div>`;
+    }).join("")}</section>`;
+  } else {
+    const inPiles = list.filter((c) => c.agent && (!f.agent || c.agent === f.agent));
+    const label = (n: string) => eng.find((e) => e.name === n)?.label ?? n;
+    main = `<section class="bpiles">${STAGES.map(([k, name]) => {
+      const cs = inPiles.filter((c) => c.stage === k);
+      return cs.length ? `<div class="bpile"><header>${glyph(k)}<div><b>${name}</b></div><i>${cs.length}</i></header><div class="bpl">${cs.map((c) => card(c, label(c.agent!))).join("")}</div></div>` : "";
+    }).join("") || `<p class="bempty">Nothing in a pile yet. Drag a ticket from the backlog onto an engineer.</p>`}</section>`;
+  }
+  const open = S.boardOpen ? b.cards.find((c) => c.id === S.boardOpen) : null;
   const synced = b.linear.connected ? `Linear synced ${b.synced_at ? when(b.synced_at) : "not yet"} · <button class="link" data-board-sync>Refresh</button> · <button class="link" data-linear-disconnect>Disconnect</button>` : "";
-  return `<div class="pane-body board-page">${connectBox(b)}${chips}${needsRow}
-    <div class="bcols">${col("", "Backlog", `${backlog.length} open`, backlog)}${cols}</div>
-    <p class="qfoot">${synced}${synced ? " · " : ""}<button class="link" data-board-all>${S.boardAll ? "Only engineers with a card" : "Show every agent"}</button>. Engineers take the top of their pile with <code>dak next</code> and say where they are with <code>dak status &lt;ticket&gt; "…"</code>.</p></div>`;
+  return `<div class="pane-body board-page">${connectBox(b)}${bar(b, eng)}
+    <div class="bbody ${open ? "with-panel" : ""}">${backlogPane(list)}${main}${open ? panel(open, eng) : ""}</div>
+    ${synced ? `<p class="bfoot">${synced}</p>` : ""}</div>`;
 }
 
 export const boardSub = () => {
   const b: BoardData | null = S.board;
   if (!b) return "";
-  const open = b.cards.filter((c) => c.stage !== "done");
-  return `${open.length} open · ${open.filter((c) => c.agent).length} assigned · ${b.cards.filter((c) => c.needs_you).length} need you`;
+  return `${b.cards.filter((c) => !c.agent && c.stage !== "done").length} in backlog · ${b.cards.filter((c) => c.agent && c.stage !== "done").length} in piles`;
 };
 
 // Drag and drop: where a card lands in a pile is "before" the card under the pointer.
 let dragging: string | null = null;
 export function wireBoardDrag(onDrop: (task: string, agent: string | null, before: string | null) => void) {
   document.addEventListener("dragstart", (e) => {
-    const c = (e.target as HTMLElement).closest?.<HTMLElement>(".bcard[data-card]");
-    if (!c) return;
+    const c = (e.target as HTMLElement).closest?.<HTMLElement>("[data-card]");
+    if (!c || !c.closest(".board-page")) return;
     dragging = c.dataset.card!; e.dataTransfer?.setData("text/plain", dragging); c.classList.add("dragging");
   });
   document.addEventListener("dragend", () => { dragging = null; document.querySelectorAll(".dragging,.drop-on").forEach((x) => x.classList.remove("dragging", "drop-on")); });
@@ -131,5 +201,3 @@ export function wireBoardDrag(onDrop: (task: string, agent: string | null, befor
     onDrop(task, agent, agent ? under?.dataset.card ?? null : null);
   });
 }
-
-export const nameOf = (n: string) => name(n);

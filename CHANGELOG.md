@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0
+
+- **The Board, redesigned** to the approved mock. One slim bar: Piles / Stages on the left; "Needs you" as a filter, and Engineer, Label and Milestone as dropdowns on the right, plus search. The backlog is a compact list grouped by milestone (each group folds), sorted by Linear's priority. Piles hold Linear-style cards: ID, a status ring that fills as the ticket moves, title, label dots and the PR count. No colour stripes: a small dot marks "needs you".
+- **Tapping a ticket opens its panel** beside the Board: the ticket, its Linear status, labels and milestone, who has it (hand it to someone else, or move it to the top of their pile), its stage and since when, the engineer's last line and what blocks it, every brief, doc and PR linked to it (tap to open its topic), and a short history. Esc or the cross closes it.
+- **On the phone** the Board is one column: the bar, the piles, then the backlog; the panel opens full screen, and you hand a ticket to an engineer from it.
+
 ## 0.11.1
 
 - **The Board links work per PR.** A PR counts for a ticket only when its own title names it (a batch topic carries other tickets' PRs too), and the same PR sent on two topics counts once. "Needs you" no longer lists finished tickets or tickets whose PRs only shared a topic with one waiting on you. A Linear ticket already started shows as Building.

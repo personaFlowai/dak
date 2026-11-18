@@ -1082,7 +1082,14 @@ document.addEventListener("dblclick", (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab;
   if (id && S.preview === id) { keepTab(id); $("#tabs")!.innerHTML = tabsView(); }
 });
-document.addEventListener("click", (e) => { if ((S.moreOpen || S.filesOpen) && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; S.filesOpen = false; renderMain(); } }, true);
+document.addEventListener("click", (e) => { if ((S.moreOpen || S.filesOpen || S.boardMenu) && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; S.filesOpen = false; S.boardMenu = null; renderMain(); } }, true);
+// Tapping a ticket on the Board opens its panel (a link or button inside it does its own thing).
+document.addEventListener("click", (e) => {
+  const t = e.target as HTMLElement;
+  if (t.closest("button, a, select, input")) return;
+  const c = t.closest<HTMLElement>(".board-page [data-card]");
+  if (c) { S.boardOpen = S.boardOpen === c.dataset.card ? null : c.dataset.card!; renderMain(); }
+});
 document.addEventListener("load", (e) => { if ((e.target as HTMLElement).closest?.(".docbody")) layoutMargin(); }, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.add("cmd"); });
 document.addEventListener("keyup", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.remove("cmd"); });
@@ -1203,8 +1210,21 @@ document.addEventListener("click", async (e) => {
     await Promise.all([loadBoard(), loadTeam()]);
     return render();
   }
-  if (d.boardAgent !== undefined) { S.boardFilter.agent = d.boardAgent; return renderMain(); }
-  if (d.boardAll !== undefined) { S.boardAll = !S.boardAll; return renderMain(); }
+  if (d.boardMenu) { S.boardMenu = S.boardMenu === d.boardMenu ? null : d.boardMenu as any; return renderMain(); }
+  if (d.boardPick) {
+    const k = d.boardPick as "agent" | "label" | "milestone", v = d.v ?? "";
+    if (k === "agent") S.boardFilter.agent = v; else if (k === "label") S.boardFilter.label = v; else S.boardFilter.milestone = v;
+    S.boardMenu = null; return renderMain();
+  }
+  if (d.boardView) { S.boardView = d.boardView as any; return renderMain(); }
+  if (d.boardNeeds !== undefined) { S.boardFilter.needs = !S.boardFilter.needs; return renderMain(); }
+  if (d.boardGrp) { const i = S.boardClosed.indexOf(d.boardGrp); i >= 0 ? S.boardClosed.splice(i, 1) : S.boardClosed.push(d.boardGrp); return renderMain(); }
+  if (d.boardClose !== undefined) { S.boardOpen = null; return renderMain(); }
+  if (d.boardTop) {
+    const c = S.board?.cards.find((x: any) => x.id === d.boardTop);
+    const first = S.board?.cards.filter((x: any) => x.agent === c?.agent && x.id !== c?.id).sort((x: any, y: any) => x.position - y.position)[0];
+    if (c?.agent) return assignCard(c.id, c.agent, first?.id ?? null);
+  }
   if (d.boardSync !== undefined) {
     try { await api("/board/sync", { method: "POST" }); S.boardError = ""; } catch (err: any) { S.boardError = err.message; }
     await loadBoard(); return renderMain();
@@ -1485,6 +1505,7 @@ document.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).cl
 document.addEventListener("scroll", () => { if (pending) readSelection(); }, true);
 
 document.addEventListener("keydown", (e) => {
+  if (S.view === "board" && e.key === "Escape" && (S.boardOpen || S.boardMenu)) { e.preventDefault(); if (S.boardMenu) S.boardMenu = null; else S.boardOpen = null; return renderMain(); }
   if ((S.moreOpen || S.filesOpen) && e.key === "Escape") { e.preventDefault(); S.moreOpen = false; S.filesOpen = false; return renderMain(); }
   if (S.peek && e.key === "Escape") { e.preventDefault(); closePeek(); return renderMain(); }
   if (S.peek && (e.metaKey || e.ctrlKey) && e.key === "[" && S.peekBack.length) { e.preventDefault(); peekBackStep(); return renderMain(); }

@@ -30,6 +30,7 @@ export interface Card extends Task {
   status: { note: string; blocked: string | null; by: string; at: string } | null; // the engineer's last word
   work: Work[];
   needs_you: boolean;
+  history: { at: string; what: string }[]; // assigned, started, the engineer's lines, newest last
 }
 
 export const STAGES: Stage[] = ["backlog", "next", "brief", "building", "review", "you", "changes", "approved", "merging", "live", "checking", "done"];
@@ -225,7 +226,8 @@ function cardsFor(tasks: Task[]): Card[] {
   const me = person(loadConfig());
   const as = new Map((store().query("SELECT * FROM task_assignments").all() as any[]).map((r) => [r.task_id, r]));
   const st = new Map<string, any>();
-  for (const r of store().query("SELECT * FROM task_status ORDER BY at").all() as any[]) st.set(r.task_id, r);
+  const lines = new Map<string, any[]>();
+  for (const r of store().query("SELECT * FROM task_status ORDER BY at").all() as any[]) { st.set(r.task_id, r); (lines.get(r.task_id) ?? lines.set(r.task_id, []).get(r.task_id)!).push(r); }
   const q = new Map(queue({ all: true }).map((r) => [r.pr, r]));
   const works = workFor(tasks.map((t) => t.id));
   return tasks.map((t) => {
@@ -233,7 +235,12 @@ function cardsFor(tasks: Task[]): Card[] {
     const { stage, note, work, needs_you } = stageOf(t, a, works.get(t.id) ?? [], me, q);
     return { ...t, agent: a?.agent ?? null, position: a?.position ?? null, assigned_at: a?.assigned_at ?? null, started_at: a?.started_at ?? null,
       stage, stage_note: note ?? (s && !s.blocked ? s.note : s?.blocked ? `blocked: ${s.blocked}` : null),
-      status: s ? { note: s.note, blocked: s.blocked, by: s.agent, at: s.at } : null, work, needs_you };
+      status: s ? { note: s.note, blocked: s.blocked, by: s.agent, at: s.at } : null, work, needs_you,
+      history: [
+        ...(a ? [{ at: a.assigned_at, what: `${a.assigned_by} gave it to ${a.agent}` }] : []),
+        ...(a?.started_at ? [{ at: a.started_at, what: `${a.agent} started it` }] : []),
+        ...(lines.get(t.id) ?? []).slice(-6).map((r) => ({ at: r.at, what: `${r.agent}: ${r.note}${r.blocked ? ` (blocked: ${r.blocked})` : ""}` })),
+      ].sort((x, y) => x.at.localeCompare(y.at)) };
   });
 }
 

@@ -34,8 +34,11 @@ export const S = {
   team: [] as any[], // everyone who works through Dak (src/team.ts TeamMember)
   board: null as any, // the Board's tickets (ui/board.ts BoardData)
   boardError: "" as string,
-  boardFilter: { agent: "", label: "", milestone: "", q: "" },
-  boardAll: false, // show every agent as a pile, not only those with a card or tickets
+  boardFilter: { agent: "", label: "", milestone: "", q: "", needs: false },
+  boardView: "piles" as "piles" | "stages",
+  boardMenu: null as null | "agent" | "label" | "milestone", // the open filter dropdown
+  boardClosed: [] as string[], // backlog milestone groups folded away
+  boardOpen: null as string | null, // the ticket whose panel is open
   teamEdit: null as string | null, // whose card is open for editing
   phone: null as any, // the private link to your phone: { open, url, link } or { opening } or { error }
   sideOpen: local.get("sideOpen", true),
