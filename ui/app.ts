@@ -958,8 +958,6 @@ document.addEventListener("change", async (e) => {
   }
   if (el.id === "chapter-pick") { S.chapter = Number(el.value); S.phoneFile = null; S.sel = null; S.editing = null; await prepare(); return renderMain(); }
   if (el.id === "version") { useAtt(el.value); await prepare(); return renderMain(); }
-  if (el.dataset.boardLabel !== undefined) { S.boardFilter.label = el.value; return renderMain(); }
-  if (el.dataset.boardMilestone !== undefined) { S.boardFilter.milestone = el.value; return renderMain(); }
   if (el.dataset.boardAssign && el.value) return assignCard(el.dataset.boardAssign, el.value === "none" ? null : el.value, null);
   if (el.dataset.wakeClosed !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { wake_closed: el.checked } }); return renderMain(); }
   if (el.dataset.codexListen !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { codex_listen: el.checked } }); return renderMain(); }
@@ -1212,10 +1210,12 @@ document.addEventListener("click", async (e) => {
   }
   if (d.boardMenu) { S.boardMenu = S.boardMenu === d.boardMenu ? null : d.boardMenu as any; return renderMain(); }
   if (d.boardPick) {
-    const k = d.boardPick as "agent" | "label" | "milestone", v = d.v ?? "";
-    if (k === "agent") S.boardFilter.agent = v; else if (k === "label") S.boardFilter.label = v; else S.boardFilter.milestone = v;
-    S.boardMenu = null; return renderMain();
+    // Tick or untick; the menu stays open so several can be picked.
+    const list: string[] = S.boardFilter[d.boardPick as "agents" | "labels" | "milestones"], v = d.v ?? "";
+    const i = list.indexOf(v); i >= 0 ? list.splice(i, 1) : list.push(v);
+    return renderMain();
   }
+  if (d.boardClear) { S.boardFilter[d.boardClear as "agents" | "labels" | "milestones"] = []; return renderMain(); }
   if (d.boardView) { S.boardView = d.boardView as any; return renderMain(); }
   if (d.boardNeeds !== undefined) { S.boardFilter.needs = !S.boardFilter.needs; return renderMain(); }
   if (d.boardGrp) { const i = S.boardClosed.indexOf(d.boardGrp); i >= 0 ? S.boardClosed.splice(i, 1) : S.boardClosed.push(d.boardGrp); return renderMain(); }

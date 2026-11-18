@@ -3,7 +3,7 @@
    engineer with Linear-style cards. Drag a backlog row (or a card) onto an engineer to give it to
    them; drag inside a pile to reorder; drag to the backlog to take it away. Tapping a card opens
    its panel on the right: the ticket, who has it, where it stands, its work, and its history. */
-import { S, esc, mark, when, fullWhen, onPhone } from "./state";
+import { S, esc, when, fullWhen, onPhone } from "./state";
 import { api } from "./api";
 import { I } from "./icons";
 import type { Card } from "../src/board";
@@ -55,15 +55,19 @@ export function engineers(cards: Card[]): { name: string; label: string; last: s
   return [...best.values()].map((m) => ({ name: m.name, label: m.display ? short(m.display) : m.name, last: m.last_seen }));
 }
 
+// An engineer is a person-shaped role, not a tool: initials on a soft disc, as Linear shows people.
+const avatar = (label: string) => `<span class="bav" style="--c:${hue(label)}">${esc(label.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase())}</span>`;
+
 function shown(cards: Card[]): Card[] {
   const f = S.boardFilter, q = f.q.trim().toLowerCase();
-  return cards.filter((c) => (!f.label || c.labels.includes(f.label)) && (!f.milestone || c.milestone === f.milestone)
+  // Several of each can be picked: a ticket shows when it matches any picked label (or milestone).
+  return cards.filter((c) => (!f.labels.length || c.labels.some((l) => f.labels.includes(l))) && (!f.milestones.length || f.milestones.includes(c.milestone ?? ""))
     && (!q || `${c.id} ${c.title}`.toLowerCase().includes(q)) && (!f.needs || c.needs_you));
 }
 
 function card(c: Card, who: string | null): string {
   const prs = c.work.filter((w) => w.kind === "pr").length;
-  const meta = [who ? `<span class="bwho">${mark(c.agent!, "sm")}${esc(who)}</span>` : "", ...c.labels.slice(0, who ? 1 : 2).map(lab),
+  const meta = [who ? `<span class="bwho">${avatar(who)}${esc(who)}</span>` : "", ...c.labels.slice(0, who ? 1 : 2).map(lab),
     prs && !c.prs.length && !c.live_prs ? `<span class="bprs">${I.pr}${prs}</span>` : ""].join("");
   return `<article class="bcard ${S.boardOpen === c.id ? "on" : ""} ${c.now ? "now" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" tabindex="0">
     <div class="bc-top">${c.now ? `<span class="bnow">Now</span>` : ""}${c.needs_you ? `<span class="bdot" title="Needs you"></span>` : ""}<code>${esc(c.id)}</code><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span></div>
@@ -98,15 +102,20 @@ function backlogPane(list: Card[]): string {
   return `<aside class="bbacklog bcol" data-drop=""><header><b>Backlog</b><span>${bl.length} open</span><span class="grow"></span><button class="icon-btn" data-board-fold title="Fold the backlog away" aria-label="Fold the backlog away">${I.prev}</button></header><div class="bbl">${html || `<p class="bempty">Nothing matches.</p>`}</div></aside>`;
 }
 
-function dropdown(kind: "agent" | "label" | "milestone", eng: { name: string; label: string }[], b: BoardData): string {
-  const f = S.boardFilter;
-  const cur = kind === "agent" ? f.agent : kind === "label" ? f.label : f.milestone;
-  const label = kind === "agent" ? (cur ? eng.find((e) => e.name === cur)?.label ?? cur : "Everyone") : kind === "label" ? cur || "Label" : cur ? cur.replace(/^\d+\.\s*/, "") : "Milestone";
-  const items: [string, string, number | ""][] = kind === "agent" ? [["", "Everyone", b.cards.filter((c) => c.agent).length], ...eng.map((e) => [e.name, e.label, b.cards.filter((c) => c.agent === e.name).length] as [string, string, number])]
-    : kind === "label" ? [["", "Any label", ""], ...b.labels.map((l) => [l, l, b.cards.filter((c) => c.labels.includes(l)).length] as [string, string, number])]
-    : [["", "Any milestone", ""], ...b.milestones.map((m) => [m, m, b.cards.filter((c) => c.milestone === m).length] as [string, string, number])];
-  const menu = S.boardMenu === kind ? `<div class="menu bmenu" role="menu">${items.map(([v, l, n]) => `<button class="mi" data-board-pick="${kind}" data-v="${esc(v)}"><span class="chk">${cur === v ? I.check : ""}</span>${kind === "label" && v ? lab(l) : `<span class="ml">${esc(l)}</span>`}<i>${n}</i></button>`).join("")}</div>` : "";
-  return `<div class="more-wrap bdd"><button class="bddb ${cur ? "on" : ""}" data-board-menu="${kind}" aria-haspopup="menu" aria-expanded="${S.boardMenu === kind}"><span>${esc(label)}</span>${I.next}</button>${menu}</div>`;
+// Engineer, Label and Milestone each take several picks; the menu stays open while you tick, and
+// "Clear" empties it.
+function dropdown(kind: "agents" | "labels" | "milestones", eng: { name: string; label: string }[], b: BoardData): string {
+  const picked: string[] = S.boardFilter[kind];
+  const word = { agents: "Everyone", labels: "Label", milestones: "Milestone" }[kind];
+  const nameOf = (v: string) => kind === "agents" ? eng.find((e) => e.name === v)?.label ?? v : kind === "milestones" ? v.replace(/^\d+\.\s*/, "") : v;
+  const label = !picked.length ? word : picked.length === 1 ? nameOf(picked[0]) : `${nameOf(picked[0])} +${picked.length - 1}`;
+  const items: [string, string, number][] = kind === "agents" ? eng.map((e) => [e.name, e.label, b.cards.filter((c) => c.agent === e.name && c.stage !== "done").length])
+    : kind === "labels" ? b.labels.map((l) => [l, l, b.cards.filter((c) => c.labels.includes(l)).length] as [string, string, number])
+    : b.milestones.map((m) => [m, m, b.cards.filter((c) => c.milestone === m).length] as [string, string, number]);
+  const menu = S.boardMenu === kind ? `<div class="menu bmenu" role="menu">
+    <button class="mi" data-board-clear="${kind}" ${picked.length ? "" : "disabled"}><span class="chk"></span><span class="ml">${kind === "agents" ? "Everyone" : "Clear"}</span></button>
+    ${items.map(([v, l, n]) => `<button class="mi" role="menuitemcheckbox" aria-checked="${picked.includes(v)}" data-board-pick="${kind}" data-v="${esc(v)}"><span class="chk">${picked.includes(v) ? I.check : ""}</span>${kind === "labels" ? lab(l) : `<span class="ml">${esc(l)}</span>`}<i>${n}</i></button>`).join("")}</div>` : "";
+  return `<div class="more-wrap bdd"><button class="bddb ${picked.length ? "on" : ""}" data-board-menu="${kind}" aria-haspopup="menu" aria-expanded="${S.boardMenu === kind}"><span>${esc(label)}</span>${I.next}</button>${menu}</div>`;
 }
 
 // The bar under the window's toolbar: views on the left, filters on the right.
@@ -116,7 +125,7 @@ function bar(b: BoardData, eng: { name: string; label: string }[]): string {
   return `<div class="bbar"><div class="seg mini" role="group" aria-label="View"><button data-board-view="piles" aria-pressed="${S.boardView === "piles"}">Piles</button><button data-board-view="stages" aria-pressed="${S.boardView === "stages"}">Stages</button></div>
     <span class="grow"></span>
     ${needs ? `<button class="bneedsb" data-board-needs aria-pressed="${f.needs}">Needs you <b>${needs}</b></button>` : ""}
-    ${dropdown("agent", eng, b)}${b.labels.length ? dropdown("label", eng, b) : ""}${b.milestones.length ? dropdown("milestone", eng, b) : ""}
+    ${dropdown("agents", eng, b)}${b.labels.length ? dropdown("labels", eng, b) : ""}${b.milestones.length ? dropdown("milestones", eng, b) : ""}
     <input class="input bsearch" id="board-q" type="search" placeholder="Find a ticket" value="${esc(f.q)}" autocomplete="off"></div>`;
 }
 
@@ -159,7 +168,7 @@ export function boardView(): string {
   const list = shown(b.cards);
   const eng = engineers(b.cards);
   const f = S.boardFilter;
-  const shownEng = f.agent ? eng.filter((e) => e.name === f.agent) : eng;
+  const shownEng = f.agents.length ? eng.filter((e) => f.agents.includes(e.name)) : eng;
   const pile = (n: string) => list.filter((c) => c.agent === n && c.stage !== "done").sort((x, y) => (x.position ?? 0) - (y.position ?? 0));
   let main: string;
   // Each pile reads top down: what the engineer is on Now, what needs you or is blocked, what is in
@@ -181,11 +190,11 @@ export function boardView(): string {
         : waiting ? `<span class="bwait">Waiting: ${esc(waiting.id)}${waiting.status?.blocked ? `, blocked on ${esc(waiting.status.blocked)}` : waiting.stage === "you" ? ", needs you" : ""}</span>`
         : `<span class="bidle">Idle${lastWord || e.last ? ` since ${since(lastWord ?? e.last)}` : ""}</span>`;
       const groups = GROUPS.map(([name, f]) => { const cs = rest.filter(f); return cs.length ? `<h4 class="bgh">${name} <i>${cs.length}</i></h4>${cs.map((c) => card(c, null)).join("")}` : ""; }).join("");
-      return `<div class="bpile bcol" data-drop="${esc(e.name)}"><header>${mark(e.name, "sm")}<div><b>${esc(e.label)}</b><span>${sub}</span></div><i>${p.length}</i></header>
+      return `<div class="bpile bcol" data-drop="${esc(e.name)}"><header>${avatar(e.label)}<div><b>${esc(e.label)}</b><span>${sub}</span></div><i>${p.length}</i></header>
         <div class="bpl">${now ? card(now, null) : ""}${groups || (now ? "" : `<p class="bempty">Drop a ticket here</p>`)}</div></div>`;
     }).join("")}</section>`;
   } else {
-    const inPiles = list.filter((c) => c.agent && c.stage !== "done" && (!f.agent || c.agent === f.agent));
+    const inPiles = list.filter((c) => c.agent && c.stage !== "done" && (!f.agents.length || f.agents.includes(c.agent)));
     const label = (n: string) => eng.find((e) => e.name === n)?.label ?? n;
     const cols: [string, string, Card[]][] = [["now", "Now", inPiles.filter((c) => c.now)], ...STAGES.filter(([k]) => k !== "next").map(([k, n]) => [k, n, inPiles.filter((c) => !c.now && c.stage === k)] as [string, string, Card[]]),
       ["next", "Up next", inPiles.filter((c) => !c.now && c.stage === "next")]];

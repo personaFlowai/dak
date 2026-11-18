@@ -34,9 +34,9 @@ export const S = {
   team: [] as any[], // everyone who works through Dak (src/team.ts TeamMember)
   board: null as any, // the Board's tickets (ui/board.ts BoardData)
   boardError: "" as string,
-  boardFilter: { agent: "", label: "", milestone: "", q: "", needs: false },
+  boardFilter: { agents: [] as string[], labels: [] as string[], milestones: [] as string[], q: "", needs: false },
   boardView: "piles" as "piles" | "stages",
-  boardMenu: null as null | "agent" | "label" | "milestone", // the open filter dropdown
+  boardMenu: null as null | "agents" | "labels" | "milestones", // the open filter dropdown
   boardClosed: [] as string[], // backlog milestone groups folded away
   backlogFolded: local.get<boolean>("backlogFolded", false), // the whole backlog folded to a strip
   boardOpen: null as string | null, // the ticket whose panel is open

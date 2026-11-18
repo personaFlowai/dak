@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.3
+
+- **Pick several at once:** the Engineer, Label and Milestone filters on the Board each take several ticks; the menu stays open while you tick, and Everyone or Clear empties it.
+- **Engineers show as people:** initials on a soft disc in each pile's header, instead of their tool's logo.
+
 ## 0.14.2
 
 - **A status line written for an engineer counts.** `dak status <ticket> … --pr N --pr-stage …` from the lead (or anyone) now sets the ticket's engineer's Now and Now PR; before, only the engineer's own line did, and the rest was silently dropped.
