@@ -84,7 +84,7 @@ function options(m: Message, topic: Topic): string {
 // Every attachment is a card. A PR, a doc, an image or a video opens beside the
 // conversation; a link (an artifact, a page) opens in the browser.
 // A card in another topic carries that topic, so opening it also moves your reply there.
-function chip(a: Attachment, topic: Topic): string {
+export function chip(a: Attachment, topic: Topic): string {
   const on = S.att === a.id;
   const inn = `data-in="${topic.thread.id}"`;
   const card = (icon: string, title: string, meta: string, action: string) =>

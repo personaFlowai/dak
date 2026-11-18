@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2
+
+- **Every attachment on a topic, one tap away.** A paperclip with a count in the topic's top bar opens a list of everything attached on the topic, oldest first, each with who sent it and when. A PR, doc, image or page opens beside the conversation; a link opens in the browser. No more scrolling up to find them.
+
 ## 0.9.1
 
 - Every approval or change request from the app names its PR, even on a topic with one PR: the conversation says "Approved #2462" and the agent's note says "approved #2462", not just "approved".

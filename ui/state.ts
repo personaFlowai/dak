@@ -54,6 +54,7 @@ export const S = {
   topicFind: "", // the sidebar's topic search
   pins: {} as Record<string, string>, // agents pinned to the top of the list, and when
   moreOpen: false, // the ⋯ menu in a thread's toolbar
+  filesOpen: false, // the attachments list from the toolbar
   confirmAll: false, // "Approve all" tapped once: the next tap approves the PRs it named
   sideLevel: "agents" as import("./shell").SideLevel, // the sidebar: agents, one agent's topics, or agents' own threads
   tabs: local.get<string[]>("tabs", []), // threads open as tabs along the top, oldest first

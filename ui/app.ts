@@ -13,13 +13,13 @@ import {
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending, layoutMargin, setDocActive } from "./doc";
-import { chatPane, currentVerdict, composer, askPane, canReply, attachBar } from "./chat";
+import { chatPane, currentVerdict, composer, askPane, canReply, attachBar, chip } from "./chat";
 import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
 import { draftKey, forgetConvo } from "./convo";
 import { isArchived, peers } from "./convo";
 import { peerOf, peerName, isPair, topicFor, loadConvo, onThread, openTopics } from "./convo";
-import type { Message, Participant, Thread, Verdict } from "../src/types";
+import type { Attachment, Message, Participant, Thread, Verdict } from "../src/types";
 import { prKey } from "../src/verdicts";
 
 const native = document.documentElement.classList.contains("native");
@@ -296,7 +296,10 @@ function threadView(): string {
     gh ? `<a class="mi" href="${esc(gh)}" target="_blank" rel="noopener">${I.github}Open on GitHub</a>` : "",
   ].filter(Boolean).join("");
   const more = menu ? `<div class="more-wrap"><button class="icon-btn" data-more aria-expanded="${S.moreOpen}" aria-haspopup="menu" title="More" aria-label="More">${I.more}</button>${S.moreOpen ? `<div class="menu" role="menu">${menu}</div>` : ""}</div>` : "";
-  const right = `${onIt || phone ? "" : reviewingBtn}${approveBtn}${more}`;
+  // Everything attached on this topic, oldest first, one tap away instead of a scroll up.
+  const atts = S.data!.messages.flatMap((m) => m.attachments.map((x) => ({ x, m })));
+  const filesBtn = atts.length ? `<div class="more-wrap files-wrap"><button class="icon-btn files-btn" data-files aria-expanded="${S.filesOpen}" aria-haspopup="dialog" title="Attachments on this topic" aria-label="Attachments, ${atts.length}">${I.clip}<span class="fcount">${atts.length}</span></button>${S.filesOpen ? filesPanel(atts) : ""}</div>` : "";
+  const right = `${onIt || phone ? "" : reviewingBtn}${approveBtn}${filesBtn}${more}`;
   const standing = statusWords ? ` · <span class="tstand ${statusWords.cls}">${esc(statusWords.label)}</span>` : "";
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
@@ -501,6 +504,14 @@ function paneHead(a: any): string {
     : st.url ? `<a class="stack" href="${esc(st.url)}" target="_blank" rel="noopener">Stacked on #${st.number}</a>` : `<span class="stack">Stacked on ${esc(st.branch)}</span>`) : "";
   return `${a.type === "pr" && S.find.open ? findBar(hits()) : ""}${a.type === "pr" ? prStrip(a) : ""}<div class="pane-head"><span class="ptitle" title="${esc(title)}">${esc(title)}</span>${stack}${versions}${splitBtn}${findBtn}${focusBtn}
     <button class="icon-btn" data-close-pane title="Close (Esc)" aria-label="Close">${I.close}</button></div>`;
+}
+
+// The topic's attachments, oldest first, each with who sent it and when. The same cards as in
+// the conversation, so a PR, doc or image opens beside it and a link opens in the browser.
+function filesPanel(atts: { x: Attachment; m: Message }[]): string {
+  const topic = { thread: S.data!.thread, messages: S.data!.messages };
+  return `<div class="menu files-panel" role="dialog" aria-label="Attachments on this topic"><div class="fp-head">${atts.length} attachment${atts.length === 1 ? "" : "s"} · oldest first</div>
+    <div class="fp-list">${atts.map(({ x, m }) => `<div class="fp-item"><div class="fp-who">${esc(name(m.author))} · ${esc(fullWhen(m.created_at))}</div>${chip(x, topic)}</div>`).join("")}</div></div>`;
 }
 
 // A topic carrying several PRs: each one, with its own verdict, one tap to open it.
@@ -987,7 +998,7 @@ document.addEventListener("dblclick", (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab;
   if (id && S.preview === id) { keepTab(id); $("#tabs")!.innerHTML = tabsView(); }
 });
-document.addEventListener("click", (e) => { if (S.moreOpen && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; renderMain(); } }, true);
+document.addEventListener("click", (e) => { if ((S.moreOpen || S.filesOpen) && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; S.filesOpen = false; renderMain(); } }, true);
 document.addEventListener("load", (e) => { if ((e.target as HTMLElement).closest?.(".docbody")) layoutMargin(); }, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.add("cmd"); });
 document.addEventListener("keyup", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.remove("cmd"); });
@@ -1003,7 +1014,9 @@ document.addEventListener("click", async (e) => {
     S.moreOpen = false;
     return send("approve", prsHere().filter((p) => p.verdict !== "approve" && p.number).map((p) => p.number!));
   }
-  if (d.more !== undefined) { S.moreOpen = !S.moreOpen; S.confirmAll = false; return renderMain(); }
+  if (d.more !== undefined) { S.moreOpen = !S.moreOpen; S.filesOpen = false; S.confirmAll = false; return renderMain(); }
+  if (d.files !== undefined) { S.filesOpen = !S.filesOpen; S.moreOpen = false; return renderMain(); }
+  if (S.filesOpen) S.filesOpen = false; // picking an attachment (or anything else) closes the list
   if (S.moreOpen) S.moreOpen = false; // any other click closes the ⋯ menu (and still does what it does)
   if (d.docActive !== undefined) return setDocActive(Number(d.docActive));
   // The rail: Inbox shows the agents (or, already there, nothing changes); Between agents lists their threads.
@@ -1327,7 +1340,7 @@ document.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).cl
 document.addEventListener("scroll", () => { if (pending) readSelection(); }, true);
 
 document.addEventListener("keydown", (e) => {
-  if (S.moreOpen && e.key === "Escape") { e.preventDefault(); S.moreOpen = false; return renderMain(); }
+  if ((S.moreOpen || S.filesOpen) && e.key === "Escape") { e.preventDefault(); S.moreOpen = false; S.filesOpen = false; return renderMain(); }
   if (S.peek && e.key === "Escape") { e.preventDefault(); closePeek(); return renderMain(); }
   if (S.peek && (e.metaKey || e.ctrlKey) && e.key === "[" && S.peekBack.length) { e.preventDefault(); peekBackStep(); return renderMain(); }
   if ((e.metaKey || e.ctrlKey) && (e.key === "[" || e.key === "]")) { e.preventDefault(); return e.key === "[" ? (nav.idx > 0 && history.back()) : (nav.idx < nav.max && history.forward()); }

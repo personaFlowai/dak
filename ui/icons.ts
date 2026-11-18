@@ -2,6 +2,7 @@
 // Simple Icons (CC0) where the brand publishes one; OpenAI's mark comes from Phosphor.
 // Every mark is drawn in currentColor, so agents never get colours of their own.
 import tray from "@phosphor-icons/core/assets/regular/tray.svg" with { type: "text" };
+import clip from "@phosphor-icons/core/assets/regular/paperclip.svg" with { type: "text" };
 import sent from "@phosphor-icons/core/assets/regular/paper-plane-tilt.svg" with { type: "text" };
 import compose from "@phosphor-icons/core/assets/regular/note-pencil.svg" with { type: "text" };
 import gear from "@phosphor-icons/core/assets/regular/gear-six.svg" with { type: "text" };
@@ -43,7 +44,7 @@ import { siClaude, siCursor, siLinear, siNotion, siFigma } from "simple-icons";
 const FILE_ICONS: Record<string, string> = { ts: fileTs, mts: fileTs, tsx: fileTsx, jsx: fileTsx, md: fileMd, js: fileJs, mjs: fileJs, css: fileCss, sql: fileSql };
 export const fileIcon = (path: string) => FILE_ICONS[path.split(".").pop()?.toLowerCase() ?? ""] ?? fileCode;
 
-export const I = { pin, more, list, archive, columns, expand, collapse, lineUp, tray, sent, compose, gear, sidebar, sparkle, chat, external, check, next, prev, pr, doc, close, search, github, terminal, up, person, plug, warning };
+export const I = { clip, pin, more, list, archive, columns, expand, collapse, lineUp, tray, sent, compose, gear, sidebar, sparkle, chat, external, check, next, prev, pr, doc, close, search, github, terminal, up, person, plug, warning };
 
 const brand = (path: string) => `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${path}"/></svg>`;
 
