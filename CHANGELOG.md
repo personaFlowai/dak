@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+- **Setting up the Board in bulk:** `dak assign --file plan.txt` takes one `<ticket> <agent>` per line, in pile order. Every line is checked first (a bad ticket or agent changes nothing), then each agent gets one message listing what it got, and the lead one summary, instead of one message per ticket. `--quiet` tells nobody.
+- **Assignments name who made them:** `--from`, else the session's own name, so Atlas's assignments say Atlas. The lead is not sent an FYI about its own assignments.
+
 ## 0.12.0
 
 - **The Board, redesigned** to the approved mock. One slim bar: Piles / Stages on the left; "Needs you" as a filter, and Engineer, Label and Milestone as dropdowns on the right, plus search. The backlog is a compact list grouped by milestone (each group folds), sorted by Linear's priority. Piles hold Linear-style cards: ID, a status ring that fills as the ticket moves, title, label dots and the PR count. No colour stripes: a small dot marks "needs you".

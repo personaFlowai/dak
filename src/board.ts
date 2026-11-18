@@ -81,17 +81,24 @@ export function getTask(id: string): Task {
 
 // Put a ticket in an agent's pile (or back in the backlog with agent null), before another one
 // or at the end. The agent gets a Dak message saying so; Atlas, when there is one, an FYI.
-export function assign(taskId: string, agent: string | null, opts: { before?: string | null; by?: string } = {}): Card {
+export function assign(taskId: string, agent: string | null, opts: { before?: string | null; by?: string; quiet?: boolean } = {}): Card {
+  place(taskId, agent, opts);
+  return card(getTask(taskId).id);
+}
+
+// The assignment itself, without reading the card back (which reads every topic): what a bulk
+// run of hundreds calls.
+function place(taskId: string, agent: string | null, opts: { before?: string | null; by?: string; quiet?: boolean; checked?: boolean } = {}) {
   ensure();
   const task = getTask(taskId);
   const by = opts.by ?? person(loadConfig());
   const prev = store().query("SELECT agent FROM task_assignments WHERE task_id = ?").get(task.id) as { agent: string } | null;
   if (!agent) {
     store().query("DELETE FROM task_assignments WHERE task_id = ?").run(task.id);
-    return card(task.id);
+    return;
   }
   const who = agent.trim().toLowerCase();
-  if (!team({ all: true }).some((m) => m.name === who && m.kind !== "person")) throw new DakError("no_member", `No agent called ${who} on the team.`, 404);
+  if (!opts.checked && !team({ all: true }).some((m) => m.name === who && m.kind !== "person")) throw new DakError("no_member", `No agent called ${who} on the team.`, 404);
   const pile = store().query("SELECT task_id, position FROM task_assignments WHERE agent = ? AND task_id != ? ORDER BY position").all(who, task.id) as { task_id: string; position: number }[];
   const at = opts.before ? pile.findIndex((p) => p.task_id.toLowerCase() === opts.before!.toLowerCase()) : -1;
   const position = at < 0 ? (pile.at(-1)?.position ?? 0) + 1 : at === 0 ? pile[0].position - 1 : (pile[at - 1].position + pile[at].position) / 2;
@@ -99,8 +106,38 @@ export function assign(taskId: string, agent: string | null, opts: { before?: st
     ON CONFLICT(task_id) DO UPDATE SET agent = excluded.agent, position = excluded.position,
       assigned_at = CASE WHEN task_assignments.agent = excluded.agent THEN task_assignments.assigned_at ELSE excluded.assigned_at END,
       started_at = CASE WHEN task_assignments.agent = excluded.agent THEN task_assignments.started_at ELSE NULL END`).run(task.id, who, position, new Date().toISOString(), by);
-  if (prev?.agent !== who) tellAssigned(task, who, by);
-  return card(task.id);
+  if (prev?.agent !== who && !opts.quiet) tellAssigned(task, who, by);
+}
+
+// Many assignments at once (setting up the Board): each agent gets one message listing what it
+// got, in pile order, instead of one per ticket, and the lead one summary. Lines are
+// "<ticket> <agent>" (agent "none" puts a ticket back in the backlog); the order of the lines is
+// the order of each pile. Every line is checked before anything changes.
+export function assignMany(lines: { task: string; agent: string | null }[], by: string, opts: { quiet?: boolean } = {}): { assigned: number; agents: Record<string, number> } {
+  ensure();
+  const members = new Set(team({ all: true }).filter((m) => m.kind !== "person").map((m) => m.name));
+  const bad = lines.flatMap((l, i) => {
+    try { getTask(l.task); } catch { return [`line ${i + 1}: no ticket ${l.task}`]; }
+    return l.agent && !members.has(l.agent) ? [`line ${i + 1}: no agent ${l.agent}`] : [];
+  });
+  if (bad.length) throw new DakError("bad_plan", `Nothing was assigned:\n  ${bad.slice(0, 20).join("\n  ")}${bad.length > 20 ? `\n  and ${bad.length - 20} more` : ""}`);
+  const got = new Map<string, Task[]>();
+  store().transaction(() => {
+    for (const l of lines) {
+      const before = (store().query("SELECT agent FROM task_assignments WHERE task_id = ?").get(getTask(l.task).id) as { agent: string } | null)?.agent ?? null;
+      place(l.task, l.agent, { by, quiet: true, checked: true });
+      if (l.agent && before !== l.agent) (got.get(l.agent) ?? got.set(l.agent, []).get(l.agent)!).push(getTask(l.task));
+    }
+  })();
+  if (!opts.quiet) {
+    for (const [agent, tasks] of got) {
+      const list = tasks.slice(0, 25).map((t, i) => `${i + 1}. ${t.id} ${t.title}`).join("\n");
+      onTopic(agent, by, "Board: your pile", `${by} put ${tasks.length} ticket${tasks.length === 1 ? "" : "s"} in your pile:\n\n${list}${tasks.length > 25 ? `\n…and ${tasks.length - 25} more (\`dak pile\`)` : ""}\n\nTake them in order with \`dak next\`; say where you are with \`dak status <ticket> "…"\`.`, false);
+    }
+    const lead = team({ all: true }).find((m) => m.name === "atlas" && m.kind !== "person");
+    if (lead && lead.name !== by && got.size) onTopic(lead.name, by, "Board: assignments", `${by} set up the Board: ${[...got].map(([a, t]) => `${a} ${t.length}`).join(", ")}.`, true);
+  }
+  return { assigned: lines.length, agents: Object.fromEntries([...got].map(([a, t]) => [a, t.length])) };
 }
 
 // One standing topic per agent for its pile, and one for Atlas's FYIs, so assigning ten tickets is
@@ -115,8 +152,9 @@ function tellAssigned(task: Task, agent: string, by: string) {
   const place = pileOf(agent).findIndex((c) => c.id === task.id) + 1;
   const link = task.url ? `\n${task.url}` : "";
   onTopic(agent, by, "Board: your pile", `You're on ${task.id}: ${task.title}. It's #${place} in your pile.${link}\n\nTake it when it's next: \`dak next\` gives you the top of your pile. Say where you are with \`dak status ${task.id} "what you're doing"\`.`, false);
+  // The lead hears about it, unless the lead is the one who assigned it.
   const lead = team({ all: true }).find((m) => m.name === "atlas" && m.kind !== "person");
-  if (lead && lead.name !== agent) onTopic(lead.name, by, "Board: assignments", `${by} gave ${task.id} (${task.title}) to ${agent}, #${place} in their pile.`, true);
+  if (lead && lead.name !== agent && lead.name !== by) onTopic(lead.name, by, "Board: assignments", `${by} gave ${task.id} (${task.title}) to ${agent}, #${place} in their pile.`, true);
 }
 
 // The next ticket in an agent's pile that has not started; taking it marks it started.

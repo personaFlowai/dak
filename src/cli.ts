@@ -16,7 +16,7 @@ import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, 
 import { DakError, type Message, type Verdict } from "./types";
 import { approvedSummary, verdictLabel } from "./verdicts";
 import { setMember, team } from "./team";
-import { addTask, assign, board, next as nextTask, pileOf, setTaskStatus, type Card } from "./board";
+import { addTask, assign, assignMany, board, next as nextTask, pileOf, setTaskStatus, type Card } from "./board";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
 import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
@@ -49,7 +49,9 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak pile [--for name]                          your tickets on the Board, in order
   dak next                                       take the top of your pile (marks it started)
   dak status <ticket> "what you're doing" [--blocked "on what"]   your one line on a ticket
-  dak assign <ticket> <agent|none> [--before <ticket>]            put a ticket in an agent's pile
+  dak assign <ticket> <agent|none> [--before <ticket>] [--quiet]  put a ticket in an agent's pile
+  dak assign --file plan.txt [--quiet]           many at once: "<ticket> <agent>" per line, in pile order;
+                                                 each agent gets one message listing its tickets
   dak board [--for agent] [--json]               every open ticket and where it stands
   dak task add "title"                           a ticket that is not in Linear
   dak team [--json]                              everyone on the team: @name, role, area, what they can and cannot do
@@ -278,7 +280,7 @@ const OPTIONS = {
   pr: { type: "string" }, repo: { type: "string" }, base: { type: "string" }, diff: { type: "string" },
   chapters: { type: "string" }, doc: { type: "string", multiple: true }, file: { type: "string", multiple: true },
   link: { type: "string", multiple: true }, verdict: { type: "string" }, on: { type: "string", multiple: true },
-  blocked: { type: "string" }, before: { type: "string" },
+  blocked: { type: "string" }, before: { type: "string" }, quiet: { type: "boolean" },
   display: { type: "string" }, role: { type: "string" }, area: { type: "string" }, can: { type: "string" }, cannot: { type: "string" }, timeout: { type: "string" },
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
@@ -457,9 +459,21 @@ export async function main(argv: string[]): Promise<number> {
         return 0;
       }
       if (cmd === "assign") {
+        // Who assigned it: --from, else this session's own name (so Atlas's assignments say Atlas).
+        const by = values.from ?? whoami({ tool: detectTool(), where: process.cwd() });
+        if (values.file) {
+          // One "<ticket> <agent>" per line, in pile order; # starts a comment.
+          const lines = readFileSync(values.file[0], "utf8").split("\n").map((l) => l.replace(/#.*/, "").trim()).filter(Boolean).map((l) => {
+            const [task, agent] = l.split(/\s+/);
+            return { task, agent: !agent || agent === "none" ? null : agent.toLowerCase() };
+          });
+          const r = assignMany(lines, by, { quiet: !!values.quiet });
+          out(json, r, () => `Assigned ${r.assigned} ticket${r.assigned === 1 ? "" : "s"}: ${Object.entries(r.agents).map(([a, n]) => `${a} ${n}`).join(", ") || "no pile changed"}.${values.quiet ? " Nobody was told." : " Each agent got one message listing its tickets."}`);
+          return 0;
+        }
         const [id, agent] = positionals;
-        if (!id) throw new DakError("no_task", "dak assign <ticket> <agent> [--before <ticket>]   (agent 'none' puts it back in the backlog)");
-        const c = assign(id, !agent || agent === "none" ? null : agent, { before: values.before });
+        if (!id) throw new DakError("no_task", "dak assign <ticket> <agent> [--before <ticket>] [--quiet]   (agent 'none' puts it back in the backlog)\n       dak assign --file plan.txt [--quiet]   one '<ticket> <agent>' per line, in pile order");
+        const c = assign(id, !agent || agent === "none" ? null : agent, { before: values.before, by, quiet: !!values.quiet });
         out(json, c, () => c.agent ? `${c.id} is in ${c.agent}'s pile.` : `${c.id} is back in the backlog.`);
         return 0;
       }

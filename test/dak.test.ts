@@ -1300,8 +1300,8 @@ describe("the Board", () => {
     dak("send", "--to", "sam", "--from", "board-eng", "--subject", "Hello", "hi"); // board-eng is on the team
     const a = dak("task", "add", "Attendance photo check", "--json").json();
     const b = dak("task", "add", "Attendance export", "--json").json();
-    dak("assign", a.id, "board-eng");
-    dak("assign", b.id, "board-eng", "--before", a.id);
+    dak("assign", a.id, "board-eng", "--from", "sam");
+    dak("assign", b.id, "board-eng", "--before", a.id, "--from", "sam");
     expect(dak("pile", "--for", "board-eng", "--json").json().map((c: any) => c.id)).toEqual([b.id, a.id]);
     // The agent got told, and so did Atlas (as an update).
     const mail = dak("inbox", "--for", "board-eng", "--unread", "--json").json().map((m: any) => m.body);
@@ -1347,5 +1347,31 @@ describe("the Board", () => {
     expect(cards.find((c: any) => c.id === "REVA-9001")).toMatchObject({ labels: ["attendance"], milestone: "M21", stage: "backlog" });
     expect(cards.find((c: any) => c.id === "REVA-9002").stage).toBe("checking");
     clearLinearKey();
+  });
+});
+
+describe("setting up the Board in bulk", () => {
+  test("a plan file assigns many tickets in pile order, tells each agent once, and names who assigned them", () => {
+    dak("send", "--to", "sam", "--from", "bulk-a", "--subject", "Hi", "hi");
+    dak("send", "--to", "sam", "--from", "bulk-b", "--subject", "Hi", "hi");
+    const ids = [1, 2, 3, 4].map((i) => dak("task", "add", `Bulk ticket ${i}`, "--json").json().id);
+    writeFileSync(join(repo, "plan.txt"), `# setup\n${ids[2]} bulk-a\n${ids[0]} bulk-a\n${ids[1]} bulk-b\n${ids[3]} bulk-b\n`);
+    const r = dak("assign", "--file", "plan.txt", "--from", "atlas", "--json").json();
+    expect(r).toEqual({ assigned: 4, agents: { "bulk-a": 2, "bulk-b": 2 } });
+    expect(dak("pile", "--for", "bulk-a", "--json").json().map((c: any) => c.id)).toEqual([ids[2], ids[0]]);
+    const mail = dak("inbox", "--for", "bulk-a", "--unread", "--json").json().filter((m: any) => m.body.includes("put 2 tickets"));
+    expect(mail.length).toBe(1);
+    expect(mail[0].author).toBe("atlas");
+    expect(dak("show", dak("pile", "--for", "bulk-a", "--json").json()[0].work[0]?.thread ?? mail[0].thread_id, "--json").json().thread.from).toBe("atlas");
+    // A bad line stops the whole plan before anything changes.
+    writeFileSync(join(repo, "bad.txt"), `${ids[0]} bulk-b\nNOPE-1 bulk-a\n`);
+    const bad = dak("assign", "--file", "bad.txt");
+    expect(bad.code).not.toBe(0);
+    expect(bad.err).toContain("no ticket NOPE-1");
+    expect(dak("pile", "--for", "bulk-b", "--json").json().map((c: any) => c.id)).toEqual([ids[1], ids[3]]);
+    // Quiet: nobody is told.
+    const t5 = dak("task", "add", "Quiet one", "--json").json().id;
+    dak("assign", t5, "bulk-b", "--quiet", "--from", "atlas");
+    expect(dak("inbox", "--for", "bulk-b", "--unread", "--json").json().filter((m: any) => m.body.includes(t5)).length).toBe(0);
   });
 });
