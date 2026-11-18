@@ -21,6 +21,8 @@ export interface TeamMember {
   via: string | null; // for a bot: the door key it speaks through
   last_seen: string | null;
   listening: boolean;
+  reader: boolean; // a named reader in Dak's settings ("atlas"), not a session found by its folder
+  carded: boolean; // the person has written this member's card
 }
 export type MemberFields = Partial<Pick<TeamMember, "display" | "role" | "area" | "can" | "cannot">>;
 
@@ -34,10 +36,10 @@ export function team(opts: { all?: boolean } = {}): TeamMember[] {
   const cfg = loadConfig();
   const byName = new Map<string, TeamMember>();
   const blank = (name: string, kind: MemberKind): TeamMember =>
-    ({ name, display: null, role: null, area: null, can: null, cannot: null, kind, tool: null, via: null, last_seen: null, listening: false });
+    ({ name, display: null, role: null, area: null, can: null, cannot: null, kind, tool: null, via: null, last_seen: null, listening: false, reader: false, carded: false });
   for (const a of agents({ all: opts.all })) {
     const m = blank(a.name, a.kind === "person" ? "person" : a.tool === "grok" || a.tool === "http" ? "cloud" : "local");
-    Object.assign(m, { tool: a.tool, last_seen: a.last_seen, listening: a.listening, display: a.title ?? null, role: a.about ?? null });
+    Object.assign(m, { tool: a.tool, last_seen: a.last_seen, listening: a.listening, display: a.title ?? null, role: a.about ?? null, reader: a.reader });
     byName.set(a.name, m);
   }
   for (const k of keyNames()) if (!byName.has(k)) byName.set(k, { ...blank(k, "cloud"), tool: "http" });
@@ -49,6 +51,7 @@ export function team(opts: { all?: boolean } = {}): TeamMember[] {
   for (const r of store().query("SELECT * FROM team").all() as any[]) {
     const m = byName.get(r.name);
     if (!m) continue; // a member that left: kept in the table, not listed
+    m.carded = true;
     for (const f of ["display", "role", "area", "can", "cannot"] as const) if (r[f] !== null) m[f] = r[f];
   }
   // The plain list keeps it to the team you would recognise: readers, anyone with a card, agents

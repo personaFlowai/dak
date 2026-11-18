@@ -16,6 +16,7 @@ import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, 
 import { DakError, type Message, type Verdict } from "./types";
 import { approvedSummary, verdictLabel } from "./verdicts";
 import { setMember, team } from "./team";
+import { addTask, assign, board, next as nextTask, pileOf, setTaskStatus, type Card } from "./board";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
 import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
@@ -45,6 +46,12 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
                     [--done]                               the work is finished: the topic leaves the reader's list
                     [--fyi]                                an update that needs no answer (after an approval, text-only replies are updates anyway)
   dak show <thread>                              the whole thread
+  dak pile [--for name]                          your tickets on the Board, in order
+  dak next                                       take the top of your pile (marks it started)
+  dak status <ticket> "what you're doing" [--blocked "on what"]   your one line on a ticket
+  dak assign <ticket> <agent|none> [--before <ticket>]            put a ticket in an agent's pile
+  dak board [--for agent] [--json]               every open ticket and where it stands
+  dak task add "title"                           a ticket that is not in Linear
   dak team [--json]                              everyone on the team: @name, role, area, what they can and cannot do
                                                  (@name in any message brings them onto that topic)
   dak thread --pr <n>                            the thread carrying PR #n (prints its id)
@@ -271,6 +278,7 @@ const OPTIONS = {
   pr: { type: "string" }, repo: { type: "string" }, base: { type: "string" }, diff: { type: "string" },
   chapters: { type: "string" }, doc: { type: "string", multiple: true }, file: { type: "string", multiple: true },
   link: { type: "string", multiple: true }, verdict: { type: "string" }, on: { type: "string", multiple: true },
+  blocked: { type: "string" }, before: { type: "string" },
   display: { type: "string" }, role: { type: "string" }, area: { type: "string" }, can: { type: "string" }, cannot: { type: "string" }, timeout: { type: "string" },
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
@@ -429,6 +437,41 @@ export async function main(argv: string[]): Promise<number> {
         : null;
       if (values.done) setStatus(id, "closed");
       out(json, m ?? { done: id }, () => values.done ? `Marked ${id} done.` : `Replied on ${id}.`);
+      return 0;
+    }
+    // The Board from the command line: your pile, the next ticket, a status line, assigning.
+    case "pile": case "next": case "status": case "assign": case "board": case "task": {
+      const who = values.for ?? values.from ?? whoami({ tool: detectTool(), where: process.cwd() });
+      const line = (c: Card) => `${c.id.padEnd(11)} ${c.stage.padEnd(9)} ${c.title}${c.stage_note ? `  (${c.stage_note})` : ""}${c.agent && cmd === "board" ? `  @${c.agent}` : ""}`;
+      if (cmd === "pile") { const p = pileOf(who); out(json, p, () => p.length ? p.map((c, i) => `${String(i + 1).padStart(2)}. ${line(c)}`).join("\n") : `Nothing in ${who}'s pile.`); return 0; }
+      if (cmd === "next") {
+        const c = nextTask(who);
+        out(json, c, () => c ? `Next for ${who}: ${c.id} ${c.title}${c.url ? `\n${c.url}` : ""}\nSay where you are with: dak status ${c.id} "what you're doing"` : `Nothing waiting in ${who}'s pile.`);
+        return 0;
+      }
+      if (cmd === "status") {
+        const [id, ...rest] = positionals;
+        if (!id) throw new DakError("no_task", 'Which ticket? dak status REVA-3041 "fixing Cursor round 2" [--blocked "..."]');
+        const c = setTaskStatus(id, who, rest.join(" ") || readBody([], values), values.blocked);
+        out(json, c, () => `${c.id}: ${c.stage}${c.stage_note ? ` (${c.stage_note})` : ""}`);
+        return 0;
+      }
+      if (cmd === "assign") {
+        const [id, agent] = positionals;
+        if (!id) throw new DakError("no_task", "dak assign <ticket> <agent> [--before <ticket>]   (agent 'none' puts it back in the backlog)");
+        const c = assign(id, !agent || agent === "none" ? null : agent, { before: values.before });
+        out(json, c, () => c.agent ? `${c.id} is in ${c.agent}'s pile.` : `${c.id} is back in the backlog.`);
+        return 0;
+      }
+      if (cmd === "task") {
+        if (positionals[0] !== "add") throw new DakError("usage", 'dak task add "title"   a ticket that is not in Linear');
+        const t = addTask(positionals.slice(1).join(" "));
+        out(json, t, () => `Added ${t.id}.`);
+        return 0;
+      }
+      const b = board();
+      const shown = values.for ? b.cards.filter((c) => c.agent === values.for) : b.cards;
+      out(json, { ...b, cards: shown }, () => shown.map(line).join("\n") || "The Board is empty. Set the Linear key on the Board page.");
       return 0;
     }
     case "team": {

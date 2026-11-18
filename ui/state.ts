@@ -13,7 +13,7 @@ export interface Draft { id: string; attachment_id: string; anchor: Anchor; body
 export interface Sel { att: string; file: string; side: "old" | "new"; start: number; end: number }
 export interface AgentRow { name: string; title?: string | null; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
 export interface AskTurn { q: string; a?: string; error?: string; context?: string; loading?: boolean; seconds?: number; by?: string }
-export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "waiting" | "team";
+export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "waiting" | "team" | "board";
 
 export const me = boot.me;
 
@@ -32,6 +32,10 @@ export const S = {
   paneClosed: false, // you closed the PR or doc beside the chat; a card reopens it
   door: null as any, // the tunnel for agents outside this Mac, and their keys
   team: [] as any[], // everyone who works through Dak (src/team.ts TeamMember)
+  board: null as any, // the Board's tickets (ui/board.ts BoardData)
+  boardError: "" as string,
+  boardFilter: { agent: "", label: "", milestone: "", q: "" },
+  boardAll: false, // show every agent as a pile, not only those with a card or tickets
   teamEdit: null as string | null, // whose card is open for editing
   phone: null as any, // the private link to your phone: { open, url, link } or { opening } or { error }
   sideOpen: local.get("sideOpen", true),

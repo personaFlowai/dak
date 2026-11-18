@@ -27,6 +27,8 @@ import type { PrMeta } from "./types";
 import { agents, touch } from "./presence";
 import { DakError, type Verdict } from "./types";
 import { setMember, team } from "./team";
+import { addTask, assign, board } from "./board";
+import { clearLinearKey, linearKey, setLinearKey, syncLinear } from "./linear";
 // Embedded at compile time, so the single dak binary carries its own screens.
 import indexHtml from "../dist/ui/index.html" with { type: "text" };
 import appJs from "../dist/ui/app.js" with { type: "text" };
@@ -59,6 +61,8 @@ export function serve(port?: number) {
   const ticker = setInterval(() => {
     try { tickRunners(); } catch { /* never stop the server */ }
     if (++ticks % 3 === 0) try { tickSleepers(); } catch { /* same */ } // closed sessions: every 6 s is soon enough
+    // The Linear backlog, every five minutes while a key is set. A failed read waits for the next.
+    if (ticks % 150 === 1 && linearKey() && !process.env.DAK_NO_LINEAR) syncLinear().catch(() => {});
   }, 2000);
   ticker.unref?.();
   const allowedHosts = new Set([`127.0.0.1:${p}`, `localhost:${p}`]);
@@ -463,6 +467,21 @@ async function api(req: Request, url: URL): Promise<Response> {
       body: String(b.note ?? ""), attachments: [{ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta }] }), 201);
   }
 
+  // The Board: the backlog, each agent's pile, and where every ticket stands.
+  if (parts[0] === "board") {
+    if (method === "GET" && !parts[1]) return json({ ...board(), linear: { connected: !!linearKey() } });
+    if (method === "POST" && parts[1] === "assign") {
+      const b = await body();
+      return json(assign(String(b.task ?? ""), b.agent ? String(b.agent) : null, { before: b.before ? String(b.before) : null, by: person(loadConfig()) }));
+    }
+    if (method === "POST" && parts[1] === "sync") return json(await syncLinear());
+    if (method === "POST" && parts[1] === "tasks") { const b = await body(); return json(addTask(String(b.title ?? ""), { labels: Array.isArray(b.labels) ? b.labels.map(String) : [] }), 201); }
+  }
+  // The person's Linear key: kept in a private file, never returned.
+  if (parts[0] === "linear-key") {
+    if (method === "PUT") { const r = await setLinearKey(String((await body()).key ?? "")); await syncLinear().catch(() => {}); return json(r); }
+    if (method === "DELETE") { clearLinearKey(); return json({ connected: false }); }
+  }
   if (parts[0] === "team") {
     if (method === "GET" && !parts[1]) return json(team({ all: q.get("all") === "1" }));
     if (method === "PUT" && parts[1]) return json(setMember(decodeURIComponent(parts[1]), await body()));

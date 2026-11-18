@@ -19,6 +19,7 @@ process.env.DAK_CODEX_HOOKS = join(home, "codex-hooks.json");
 process.env.DAK_CURSOR_HOOKS = join(home, "cursor-hooks.json");
 // The server's wake ticker would take other tests' mail; the wake test drives it by hand.
 process.env.DAK_NO_WAKE = "1";
+process.env.DAK_NO_LINEAR = "1"; // never call Linear from a test
 process.env.DAK_CLAUDE_SESSIONS = join(home, "claude-sessions");
 process.env.DAK_WAKE_GRACE_MS = "0";
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -1291,5 +1292,60 @@ describe("the team and @mentions", () => {
     // In the first message of a new topic, too.
     const { thread: t2 } = dak("send", "--to", "atlas", "--from", "sam", "--subject", "Kickoff", "@builder-two and @atlas, start here.", "--json").json();
     expect(dak("show", t2.id, "--json").json().participants.map((p: any) => p.name)).toContain("builder-two");
+  });
+});
+
+describe("the Board", () => {
+  test("assigning a ticket puts it in the agent's pile, tells the agent and Atlas, and its stage follows the work", async () => {
+    dak("send", "--to", "sam", "--from", "board-eng", "--subject", "Hello", "hi"); // board-eng is on the team
+    const a = dak("task", "add", "Attendance photo check", "--json").json();
+    const b = dak("task", "add", "Attendance export", "--json").json();
+    dak("assign", a.id, "board-eng");
+    dak("assign", b.id, "board-eng", "--before", a.id);
+    expect(dak("pile", "--for", "board-eng", "--json").json().map((c: any) => c.id)).toEqual([b.id, a.id]);
+    // The agent got told, and so did Atlas (as an update).
+    const mail = dak("inbox", "--for", "board-eng", "--unread", "--json").json().map((m: any) => m.body);
+    expect(mail.some((x: string) => x.includes(`You're on ${a.id}`))).toBe(true);
+    const atlas = dak("inbox", "--for", "atlas", "--unread", "--json").json().filter((m: any) => m.body.includes(`gave ${a.id}`));
+    expect(atlas[0]?.quiet).toBe(true);
+    // Next takes the top of the pile and starts it; a status line sets the note.
+    const nx = dak("next", "--for", "board-eng", "--json").json();
+    expect([nx.id, nx.stage]).toEqual([b.id, "building"]);
+    const st = dak("status", b.id, "wiring the export", "--for", "board-eng", "--json").json();
+    expect(st.stage_note).toBe("wiring the export");
+    // A topic naming the ticket is its work; a PR waiting on the person makes it "you", approval "approved".
+    const { thread } = dak("send", "--to", "sam", "--from", "board-eng", "--diff", "d2.diff", "--subject", `${b.id}: the export`, "--json").json();
+    let card = dak("board", "--json").json().cards.find((c: any) => c.id === b.id);
+    expect([card.stage, card.needs_you, card.work.length]).toEqual(["you", true, 1]);
+    dak("reply", thread.id, "--from", "sam", "--verdict", "approve", "Go.");
+    card = dak("board", "--json").json().cards.find((c: any) => c.id === b.id);
+    expect(card.stage).toBe("approved");
+    // Back to the backlog.
+    dak("assign", a.id, "none");
+    expect(dak("pile", "--for", "board-eng", "--json").json().map((c: any) => c.id)).toEqual([b.id]);
+    expect(dak("assign", a.id, "nobody-here").code).not.toBe(0);
+  });
+
+  test("the Linear reader copies open tickets with labels and milestone, and rejects a bad key without keeping it", async () => {
+    const { setLinearKey, syncLinear, linearKey, clearLinearKey } = await import("../src/linear");
+    const fake = async (_u: string, init: RequestInit) => {
+      const q = JSON.parse(String(init.body)).query as string;
+      if (q.includes("viewer")) return new Response(JSON.stringify({ data: { viewer: { name: "Sam" } } }));
+      return new Response(JSON.stringify({ data: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [
+        { identifier: "REVA-9001", title: "Dress check", url: "https://linear.app/x/REVA-9001", priority: 2, updatedAt: new Date().toISOString(),
+          state: { name: "Todo", type: "unstarted" }, labels: { nodes: [{ name: "attendance" }] }, project: { name: "North Star" }, projectMilestone: { name: "M21" }, team: { key: "REVA" } },
+        { identifier: "REVA-9002", title: "Checking one", url: null, priority: 0, updatedAt: new Date().toISOString(),
+          state: { name: "Checking", type: "started" }, labels: { nodes: [] }, project: null, projectMilestone: null, team: { key: "REVA" } },
+      ] } } }));
+    };
+    await expect(setLinearKey("not-a-key", fake as any)).rejects.toThrow("lin_api_");
+    expect(linearKey()).toBeNull();
+    await setLinearKey("lin_api_" + "a".repeat(40), fake as any);
+    expect(linearKey()).toBe("lin_api_" + "a".repeat(40));
+    expect((await syncLinear(fake as any)).count).toBe(2);
+    const cards = dak("board", "--json").json().cards;
+    expect(cards.find((c: any) => c.id === "REVA-9001")).toMatchObject({ labels: ["attendance"], milestone: "M21", stage: "backlog" });
+    expect(cards.find((c: any) => c.id === "REVA-9002").stage).toBe("checking");
+    clearLinearKey();
   });
 });

@@ -3,6 +3,7 @@
    conversation with the agent on the left, the thing under review on the right. */
 import { api, local } from "./api";
 import { loadTeam, teamCount, teamView } from "./team";
+import { boardSub, boardView, loadBoard, wireBoardDrag } from "./board";
 import { addTab, closeTab, keepTab, railView, sideBody, tabsView, phoneListHead } from "./shell";
 import { closePeek, openPeek, peekBackStep, peekView, showSpot, wordAt } from "./peek";
 import { topicRows } from "./topics";
@@ -229,6 +230,7 @@ function renderMain() {
     chapter: $(".chapter.beside")?.dataset.key, code: $("#code-scroll")?.scrollTop ?? 0, notes: $(".notes-col > header")?.scrollTop ?? 0 };
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
   else if (S.view === "settings") main.innerHTML = toolbar("Settings") + settingsView();
+  else if (S.view === "board") main.innerHTML = toolbar("Board", boardSub()) + boardView();
   else if (S.view === "team") main.innerHTML = toolbar("Team", `${teamCount()} agent${teamCount() === 1 ? "" : "s"}`) + teamView();
   else if (S.view === "welcome") main.innerHTML = toolbar("Welcome to Dak") + welcomeView();
   else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", queueSummary()) + queueView();
@@ -905,6 +907,13 @@ document.addEventListener("input", (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "message" && S.cur) { S.message[draftKey()] = el.value; keepUnsent(); }
   if (el.id === "new-subject") S.newSubject = el.value;
+  if (el.id === "board-q") {
+    // Filter as you type, keeping the cursor where it was.
+    const at = el.selectionStart ?? el.value.length;
+    S.boardFilter.q = el.value; renderMain();
+    const box = $<HTMLInputElement>("#board-q"); box?.focus(); box?.setSelectionRange(at, at);
+    return;
+  }
   if (el.id === "topic-find") { S.topicFind = el.value; const l = $("#tlist"); if (l) l.innerHTML = topicRows(); }
   if (el.id === "pal-q") {
     S.search.q = el.value; S.search.i = 0;
@@ -949,6 +958,9 @@ document.addEventListener("change", async (e) => {
   }
   if (el.id === "chapter-pick") { S.chapter = Number(el.value); S.phoneFile = null; S.sel = null; S.editing = null; await prepare(); return renderMain(); }
   if (el.id === "version") { useAtt(el.value); await prepare(); return renderMain(); }
+  if (el.dataset.boardLabel !== undefined) { S.boardFilter.label = el.value; return renderMain(); }
+  if (el.dataset.boardMilestone !== undefined) { S.boardFilter.milestone = el.value; return renderMain(); }
+  if (el.dataset.boardAssign && el.value) return assignCard(el.dataset.boardAssign, el.value === "none" ? null : el.value, null);
   if (el.dataset.wakeClosed !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { wake_closed: el.checked } }); return renderMain(); }
   if (el.dataset.codexListen !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { codex_listen: el.checked } }); return renderMain(); }
   if (el.dataset.login !== undefined) { (window as any).webkit?.messageHandlers?.dak?.postMessage({ login: el.checked }); return; }
@@ -1022,6 +1034,14 @@ document.addEventListener("drop", (e) => {
 });
 window.addEventListener("resize", () => layoutMargin());
 // The ⋯ menu closes on a click anywhere else.
+// Give a ticket to an agent (or back to the backlog), then show the Board as it now stands.
+async function assignCard(task: string, agent: string | null, before: string | null) {
+  try { await api("/board/assign", { method: "POST", body: { task, agent, before } }); S.boardError = ""; }
+  catch (err: any) { S.boardError = err.message; }
+  await loadBoard(); renderMain();
+}
+wireBoardDrag((task, agent, before) => { void assignCard(task, agent, before); });
+
 // Close a tab; closing the one you are on moves to its neighbour, or to Waiting on you.
 async function closeTabAndMove(id: string) {
   if (id === S.cur && S.view === "thread") rememberPane(id);
@@ -1178,6 +1198,25 @@ document.addEventListener("click", async (e) => {
     } else S.phone = await api(`/phone${d.phone === "signout" ? "?signout=1" : ""}`, { method: "DELETE" });
     return renderMain();
   }
+  if (d.boardOpen !== undefined) {
+    S.view = "board"; S.phoneList = false; S.boardError = ""; render();
+    await Promise.all([loadBoard(), loadTeam()]);
+    return render();
+  }
+  if (d.boardAgent !== undefined) { S.boardFilter.agent = d.boardAgent; return renderMain(); }
+  if (d.boardAll !== undefined) { S.boardAll = !S.boardAll; return renderMain(); }
+  if (d.boardSync !== undefined) {
+    try { await api("/board/sync", { method: "POST" }); S.boardError = ""; } catch (err: any) { S.boardError = err.message; }
+    await loadBoard(); return renderMain();
+  }
+  if (d.linearConnect !== undefined) {
+    const key = $<HTMLInputElement>("#linear-key")?.value.trim() ?? "";
+    if (!key) return;
+    b.textContent = "Connecting";
+    try { await api("/linear-key", { method: "PUT", body: { key } }); S.boardError = ""; } catch (err: any) { S.boardError = err.message; }
+    await loadBoard(); return renderMain();
+  }
+  if (d.linearDisconnect !== undefined) { await api("/linear-key", { method: "DELETE" }); await loadBoard(); return renderMain(); }
   if (d.teamOpen !== undefined) {
     S.view = "team"; S.teamEdit = null; render();
     await Promise.all([loadTeam(), api("/door").then((x) => { S.door = x; }).catch(() => {})]);

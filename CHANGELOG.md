@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0
+
+- **The Board** (left rail, and a tab on the phone): your backlog and every engineer's pile in one place. Drag a ticket from the Backlog onto an engineer to give it to them, drag inside a pile to reorder, drag back to the Backlog to take it away. The engineer gets it on their "Board: your pile" topic and Atlas gets an FYI. Filter by engineer, label or milestone, or search. Anything waiting on you is at the top. Every engineer shows, with what they are on or how long they have been idle.
+- **Your Linear backlog, read only.** Paste a Linear personal API key on the Board: Dak keeps it in a private file (mode 600), sends it only to Linear, and copies open tickets (title, labels, milestone, status) every five minutes. Tickets without Linear can be made in Dak (`dak task add`).
+- **Stages from facts.** A ticket's work is any Dak topic or PR that names it. Its stage (Brief, Building, In review, Needs you, Changes, Approved, Merging, Live, Checking, Done) comes from your verdicts, the merge queue and Linear's status first, and from the engineer's own line only where nothing else says more.
+- **For engineers:** `dak next` takes the top of their pile, `dak status <ticket> "…" [--blocked "…"]` is their one line, `dak pile` lists theirs, `dak board` shows everything, `dak assign <ticket> <agent>`.
+- On the phone the tab bar now reads Inbox, For you, Queue, Board, Search; "Between agents" stays on the Mac.
+
 ## 0.10.1
 
 - **Back on the phone goes up a level,** as iPhone apps do: from a topic to its agent's topics, from the topics to the Inbox. It used to step back through browser history, which could land anywhere you had been before.
