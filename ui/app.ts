@@ -1123,7 +1123,17 @@ document.addEventListener("click", async (e) => {
   if (d.toggleSide !== undefined) return toggleSide();
   if (d.phoneBack !== undefined) { S.phoneList = true; return render(); }
   // Back: the last place; on a phone with nowhere to go back to, the list.
-  if (d.navBack !== undefined) { if (nav.idx > 0) history.back(); else if (onPhone()) { S.phoneList = true; render(); } return; }
+  if (d.navBack !== undefined) {
+    // On the phone, Back goes up a level, as iPhone apps do: a topic to its agent's topics, the
+    // topics to the Inbox. It never jumps to wherever you happened to be before.
+    if (onPhone()) {
+      if (S.view === "thread" && !S.phoneList) { S.phoneList = true; S.sideLevel = "topics"; }
+      else { S.phoneList = true; S.sideLevel = S.peer && isPair(S.peer) ? "pairs" : "agents"; S.view = "thread"; }
+      return render();
+    }
+    if (nav.idx > 0) history.back();
+    return;
+  }
   if (d.navFwd !== undefined) { if (nav.idx < nav.max) history.forward(); return; }
   if (d.unfold) { const k = `${S.att}:${d.unfold}`; S.unfold.has(k) ? S.unfold.delete(k) : S.unfold.add(k); return renderMain(); }
   if (d.finish === "approve") return send("approve");

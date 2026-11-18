@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+
+- **Back on the phone goes up a level,** as iPhone apps do: from a topic to its agent's topics, from the topics to the Inbox. It used to step back through browser history, which could land anywhere you had been before.
+
 ## 0.10.0
 
 The first step towards Dak as the one place a team of people and agents works together.
