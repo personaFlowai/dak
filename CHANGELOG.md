@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.4
+
+- **The Board shows each engineer's own logo again,** centred in its box at the sidebar's size. A style meant for the pile header's text had pushed it into the box's corner; the initials from 0.14.3 are gone.
+
 ## 0.14.3
 
 - **Pick several at once:** the Engineer, Label and Milestone filters on the Board each take several ticks; the menu stays open while you tick, and Everyone or Clear empties it.

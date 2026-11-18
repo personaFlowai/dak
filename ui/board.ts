@@ -3,7 +3,7 @@
    engineer with Linear-style cards. Drag a backlog row (or a card) onto an engineer to give it to
    them; drag inside a pile to reorder; drag to the backlog to take it away. Tapping a card opens
    its panel on the right: the ticket, who has it, where it stands, its work, and its history. */
-import { S, esc, when, fullWhen, onPhone } from "./state";
+import { S, esc, mark, when, fullWhen, onPhone } from "./state";
 import { api } from "./api";
 import { I } from "./icons";
 import type { Card } from "../src/board";
@@ -55,9 +55,6 @@ export function engineers(cards: Card[]): { name: string; label: string; last: s
   return [...best.values()].map((m) => ({ name: m.name, label: m.display ? short(m.display) : m.name, last: m.last_seen }));
 }
 
-// An engineer is a person-shaped role, not a tool: initials on a soft disc, as Linear shows people.
-const avatar = (label: string) => `<span class="bav" style="--c:${hue(label)}">${esc(label.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase())}</span>`;
-
 function shown(cards: Card[]): Card[] {
   const f = S.boardFilter, q = f.q.trim().toLowerCase();
   // Several of each can be picked: a ticket shows when it matches any picked label (or milestone).
@@ -67,7 +64,7 @@ function shown(cards: Card[]): Card[] {
 
 function card(c: Card, who: string | null): string {
   const prs = c.work.filter((w) => w.kind === "pr").length;
-  const meta = [who ? `<span class="bwho">${avatar(who)}${esc(who)}</span>` : "", ...c.labels.slice(0, who ? 1 : 2).map(lab),
+  const meta = [who ? `<span class="bwho">${mark(c.agent!, "sm")}${esc(who)}</span>` : "", ...c.labels.slice(0, who ? 1 : 2).map(lab),
     prs && !c.prs.length && !c.live_prs ? `<span class="bprs">${I.pr}${prs}</span>` : ""].join("");
   return `<article class="bcard ${S.boardOpen === c.id ? "on" : ""} ${c.now ? "now" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" tabindex="0">
     <div class="bc-top">${c.now ? `<span class="bnow">Now</span>` : ""}${c.needs_you ? `<span class="bdot" title="Needs you"></span>` : ""}<code>${esc(c.id)}</code><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span></div>
@@ -190,7 +187,7 @@ export function boardView(): string {
         : waiting ? `<span class="bwait">Waiting: ${esc(waiting.id)}${waiting.status?.blocked ? `, blocked on ${esc(waiting.status.blocked)}` : waiting.stage === "you" ? ", needs you" : ""}</span>`
         : `<span class="bidle">Idle${lastWord || e.last ? ` since ${since(lastWord ?? e.last)}` : ""}</span>`;
       const groups = GROUPS.map(([name, f]) => { const cs = rest.filter(f); return cs.length ? `<h4 class="bgh">${name} <i>${cs.length}</i></h4>${cs.map((c) => card(c, null)).join("")}` : ""; }).join("");
-      return `<div class="bpile bcol" data-drop="${esc(e.name)}"><header>${avatar(e.label)}<div><b>${esc(e.label)}</b><span>${sub}</span></div><i>${p.length}</i></header>
+      return `<div class="bpile bcol" data-drop="${esc(e.name)}"><header>${mark(e.name, "md")}<div><b>${esc(e.label)}</b><span>${sub}</span></div><i>${p.length}</i></header>
         <div class="bpl">${now ? card(now, null) : ""}${groups || (now ? "" : `<p class="bempty">Drop a ticket here</p>`)}</div></div>`;
     }).join("")}</section>`;
   } else {
