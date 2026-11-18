@@ -1220,6 +1220,7 @@ document.addEventListener("click", async (e) => {
   if (d.boardNeeds !== undefined) { S.boardFilter.needs = !S.boardFilter.needs; return renderMain(); }
   if (d.boardGrp) { const i = S.boardClosed.indexOf(d.boardGrp); i >= 0 ? S.boardClosed.splice(i, 1) : S.boardClosed.push(d.boardGrp); return renderMain(); }
   if (d.boardClose !== undefined) { S.boardOpen = null; return renderMain(); }
+  if (d.boardFold !== undefined) { S.backlogFolded = !S.backlogFolded; local.set("backlogFolded", S.backlogFolded); return renderMain(); }
   if (d.boardTop) {
     const c = S.board?.cards.find((x: any) => x.id === d.boardTop);
     const first = S.board?.cards.filter((x: any) => x.agent === c?.agent && x.id !== c?.id).sort((x: any, y: any) => x.position - y.position)[0];

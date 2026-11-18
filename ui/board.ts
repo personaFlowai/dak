@@ -79,7 +79,9 @@ function backlogPane(list: Card[]): string {
     return `<button class="bgrp ${closed ? "closed" : ""}" data-board-grp="${esc(k)}" aria-expanded="${!closed}">${I.next}<span>${esc(k)}</span><i>${cs.length}</i></button>
       ${closed ? "" : cs.map((c) => `<div class="brow ${S.boardOpen === c.id ? "on" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" title="${esc(c.title)}">${pri(c.priority)}<code>${esc(c.id)}</code><span>${esc(c.title)}</span></div>`).join("")}`;
   }).join("");
-  return `<aside class="bbacklog bcol" data-drop=""><header><b>Backlog</b><span>${bl.length} open</span></header><div class="bbl">${html || `<p class="bempty">Nothing matches.</p>`}</div></aside>`;
+  // Folded, the backlog is a slim strip that still takes drops; one tap opens it again.
+  if (S.backlogFolded) return `<aside class="bbacklog bcol folded" data-drop=""><button class="bfold" data-board-fold title="Show the backlog" aria-label="Show the backlog, ${bl.length} open">${I.next}<span>Backlog</span><i>${bl.length}</i></button></aside>`;
+  return `<aside class="bbacklog bcol" data-drop=""><header><b>Backlog</b><span>${bl.length} open</span><span class="grow"></span><button class="icon-btn" data-board-fold title="Fold the backlog away" aria-label="Fold the backlog away">${I.prev}</button></header><div class="bbl">${html || `<p class="bempty">Nothing matches.</p>`}</div></aside>`;
 }
 
 function dropdown(kind: "agent" | "label" | "milestone", eng: { name: string; label: string }[], b: BoardData): string {

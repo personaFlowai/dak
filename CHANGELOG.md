@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.3
+
+- **Fold the backlog away.** The arrow in the Backlog's header folds it to a slim strip (it still takes a dropped ticket), so the piles get the room; tap the strip to open it. Dak remembers which way you left it.
+
 ## 0.13.2
 
 - **Now shows for engineers who never ran `dak next`.** Until an engineer sets a Now, the Board takes the ticket they last said something about that is not blocked. Setting one with `dak next` or `dak status` wins.

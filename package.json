@@ -1,6 +1,6 @@
 {
   "name": "dak",
-  "version": "0.13.2",
+  "version": "0.13.3",
   "description": "A local review inbox and message queue between you and the AI coding agents on your Mac.",
   "license": "MIT",
   "type": "module",

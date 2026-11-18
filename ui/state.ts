@@ -38,6 +38,7 @@ export const S = {
   boardView: "piles" as "piles" | "stages",
   boardMenu: null as null | "agent" | "label" | "milestone", // the open filter dropdown
   boardClosed: [] as string[], // backlog milestone groups folded away
+  backlogFolded: local.get<boolean>("backlogFolded", false), // the whole backlog folded to a strip
   boardOpen: null as string | null, // the ticket whose panel is open
   teamEdit: null as string | null, // whose card is open for editing
   phone: null as any, // the private link to your phone: { open, url, link } or { opening } or { error }
