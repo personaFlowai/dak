@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.0
+
+- **Which PR, not just which ticket.** A ticket's card lists its open PRs, each with its own stage (In review, With you, Fixing, Approved, Merging, Held), the engineer's PR first and marked; merged ones fold into "N live". Tap a PR to open its topic.
+- **A Now PR.** `dak status <ticket> "…" --pr 2551` names the PR the engineer is on; otherwise it is the ticket's newest open PR. The ticket's stage is its Now PR's, so a ticket of eight PRs no longer reads as whichever PR happened to be oldest.
+- **Held is held.** A PR stopped at a gate, held or parked in the merge queue (or marked [parked]) shows as Held, never Merging.
+- **Linear is fresher.** What changed in Linear is read every minute (any state, so a ticket moved back from Checking comes back); the full backlog every half hour. Linear's "Checking" is read first, since some workflows file it as a finished state.
+
 ## 0.13.7
 
 - **Checking comes only from Linear.** A ticket whose PRs are all merged is not finished (more of its work is often still to come), so it stays Up next or Now, with its PR history, until Linear moves it to Checking.

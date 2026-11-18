@@ -37,6 +37,13 @@ export async function setLinearKey(key: string, fetcher: Fetch = fetch): Promise
 }
 export function clearLinearKey() { try { unlinkSync(keyPath()); } catch { /* none */ } }
 
+const FIELDS = `pageInfo { hasNextPage endCursor }
+    nodes { identifier title url priority updatedAt
+      state { name type } labels { nodes { name } } project { name } projectMilestone { name } team { key } }`;
+// What changed since the last read, in any state: a ticket moved back from Checking comes back too.
+const CHANGED = `query($after: String, $since: DateTimeOrDuration) {
+  issues(first: 100, after: $after, filter: { updatedAt: { gt: $since } }) { ${FIELDS} }
+}`;
 const ISSUES = `query($after: String, $since: DateTimeOrDuration) {
   issues(first: 100, after: $after, filter: { or: [{ state: { type: { in: ["backlog", "unstarted", "started"] } } }, { completedAt: { gt: $since } }] }) {
     pageInfo { hasNextPage endCursor }
@@ -46,14 +53,17 @@ const ISSUES = `query($after: String, $since: DateTimeOrDuration) {
 }`;
 
 // Copy the backlog. Stops at 2,000 tickets: a backlog bigger than that is not read one page at a time.
-export async function syncLinear(fetcher: Fetch = fetch): Promise<{ count: number }> {
+// changedSince: only tickets Linear changed after that moment (cheap; every minute). Without it,
+// the whole open backlog plus the last week's finished (every half hour, and on Refresh).
+export async function syncLinear(fetcher: Fetch = fetch, opts: { changedSince?: string } = {}): Promise<{ count: number }> {
   const key = linearKey();
   if (!key) throw new DakError("no_linear_key", "Paste a Linear key on the Board page first.", 400);
-  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const since = opts.changedSince ?? new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const query = opts.changedSince ? CHANGED : ISSUES;
   const all: Task[] = [];
   let after: string | null = null;
   for (let page = 0; page < 20; page++) {
-    const d: any = await gql(key, ISSUES, { after, since }, fetcher);
+    const d: any = await gql(key, query, { after, since }, fetcher);
     for (const n of d.issues.nodes) all.push({ id: n.identifier, source: "linear", title: n.title, url: n.url, labels: (n.labels?.nodes ?? []).map((l: any) => l.name),
       milestone: n.projectMilestone?.name ?? null, project: n.project?.name ?? null, team: n.team?.key ?? null, state: n.state?.name ?? null,
       state_type: n.state?.type ?? null, priority: n.priority ?? null, updated_at: n.updatedAt ?? null });

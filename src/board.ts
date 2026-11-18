@@ -25,8 +25,11 @@ export interface Task {
 // next: in a pile, not started. you: its own topic waits on the person, or it is blocked on them.
 // blocked: the engineer said what blocks it. review / changes / approved / merging: its own PRs.
 // checking: Linear says Checking: shipped, its Done-only-when test not proven yet.
-export type Stage = "backlog" | "next" | "you" | "blocked" | "review" | "changes" | "approved" | "merging" | "checking" | "done";
-export interface Work { kind: "pr" | "doc" | "note"; thread: string; label: string; state: string; at: string }
+// held: its PR is stopped at a gate or parked, not moving.
+export type Stage = "backlog" | "next" | "you" | "blocked" | "review" | "changes" | "approved" | "merging" | "held" | "checking" | "done";
+export interface Work { kind: "pr" | "doc" | "note"; thread: string; label: string; state: string; at: string; pr?: number | null }
+// One open PR of a ticket, with its own stage; the engineer's Now PR is marked.
+export interface PrLine { number: number | null; title: string; stage: string; thread: string; now: boolean }
 export interface Card extends Task {
   agent: string | null; position: number | null; assigned_at: string | null; started_at: string | null;
   now: boolean; // the one ticket its engineer is on now
@@ -36,9 +39,11 @@ export interface Card extends Task {
   work: Work[];
   needs_you: boolean;
   history: { at: string; what: string }[]; // assigned, started, the engineer's lines, newest last
+  prs: PrLine[]; // its open PRs, oldest first, each with its own stage
+  live_prs: number; // merged and live, folded into one count
 }
 
-export const STAGES: Stage[] = ["backlog", "next", "you", "blocked", "review", "changes", "approved", "merging", "checking", "done"];
+export const STAGES: Stage[] = ["backlog", "next", "you", "blocked", "review", "changes", "approved", "merging", "held", "checking", "done"];
 
 function ensure() {
   store().exec(`
@@ -50,6 +55,7 @@ function ensure() {
     CREATE INDEX IF NOT EXISTS task_status_by_task ON task_status (task_id, at);`);
   const cols = new Set((store().query("PRAGMA table_info(task_assignments)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("now_at")) store().exec("ALTER TABLE task_assignments ADD COLUMN now_at TEXT"); // when it became its engineer's Now
+  if (!cols.has("now_pr")) store().exec("ALTER TABLE task_assignments ADD COLUMN now_pr INTEGER"); // the PR of it the engineer is on
   const scols = new Set((store().query("PRAGMA table_info(task_status)").all() as { name: string }[]).map((c) => c.name));
   if (!scols.has("kind")) store().exec("ALTER TABLE task_status ADD COLUMN kind TEXT"); // 'stop': the line and any block were cleared
 }
@@ -194,7 +200,7 @@ export function unstart(taskId: string, by?: string): Card {
 }
 
 // The engineer's one line: what they are doing on a ticket, and what blocks it.
-export function setTaskStatus(taskId: string, agent: string, note: string, blocked?: string | null): Card {
+export function setTaskStatus(taskId: string, agent: string, note: string, blocked?: string | null, pr?: number | null): Card {
   ensure();
   const task = getTask(taskId);
   if (!note.trim()) throw new DakError("no_note", "Say what you are doing: dak status <ticket> \"fixing Cursor round 2\".");
@@ -202,6 +208,7 @@ export function setTaskStatus(taskId: string, agent: string, note: string, block
   // A line about a ticket makes it this engineer's Now; a blocked one is not Now: it waits.
   const mine = store().query("SELECT 1 FROM task_assignments WHERE task_id = ? AND agent = ?").get(task.id, agent);
   if (mine && !blocked?.trim()) makeNow(agent, task.id);
+  if (mine && pr) store().query("UPDATE task_assignments SET now_pr = ? WHERE task_id = ?").run(pr, task.id);
   if (mine && blocked?.trim()) store().query("UPDATE task_assignments SET now_at = NULL, started_at = coalesce(started_at, ?) WHERE task_id = ?").run(new Date().toISOString(), task.id);
   return card(task.id);
 }
@@ -235,13 +242,13 @@ function latestPrStages(work: Work[]): Stage[] {
   return [...by.values()].map((w) => w.state as Stage);
 }
 
-const RANK: Record<Stage, number> = { backlog: 0, next: 1, you: 2, blocked: 3, changes: 4, review: 5, approved: 6, merging: 7, checking: 8, done: 9 };
+const RANK: Record<Stage, number> = { backlog: 0, next: 1, you: 2, blocked: 3, held: 4, changes: 5, review: 6, approved: 7, merging: 8, checking: 9, done: 10 };
 
 /* A ticket's work is its own: the PRs whose title names it, and the topics whose subject names it.
    It needs the person only when one of ITS OWN topics (the subject names the ticket) waits on them
    with no verdict yet: a batch topic that also carries this ticket's PR is the batch's ask, shown
    on that topic, not on every ticket in it. */
-function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: Map<number, any>): { stage: Stage; note: string | null; work: Work[]; needs_you: boolean } {
+function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: Map<number, any>): { stage: Stage; note: string | null; work: Work[]; needs_you: boolean; prs: PrLine[]; live_prs: number } {
   const work: Work[] = [];
   let needsYou = false;
   let note: string | null = null;
@@ -259,10 +266,12 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
         let st: Stage | "live" = p.verdict === "approve" ? "approved" : p.verdict === "changes" ? "changes" : "review";
         if (row) {
           if (["deployed", "merged", "migrated"].includes(row.state)) st = "live";
-          else if (["testing", "building", "merging", "failed", "held"].includes(row.state)) { st = "merging"; if (row.state === "failed" || row.state === "held") note = `stopped: ${row.note ?? row.state}`; }
+          else if (row.state === "failed" || row.state === "held" || row.state === "parked" || row.hold) { st = "held"; note = `stopped: ${row.note ?? row.waiting ?? row.state}`; }
+          else if (["testing", "building", "merging"].includes(row.state)) st = "merging";
         }
+        if (/\[parked\b/i.test(p.title ?? "") || /\[parked\b/i.test(t.subject)) st = "held";
         if (asksMe && !p.verdict) needsYou = true;
-        work.push({ kind: "pr", thread: t.id, label: `${p.key}${p.title ? ` ${p.title}` : ""}`, state: asksMe && !p.verdict ? "you" : st, at: t.updated_at });
+        work.push({ kind: "pr", thread: t.id, label: `${p.key}${p.title ? ` ${p.title}` : ""}`, state: asksMe && !p.verdict && st !== "live" ? "you" : st, at: t.updated_at, pr: p.number });
       }
     } else if (own) {
       if (asksMe) needsYou = true;
@@ -276,21 +285,26 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
   const prs = latestPrStages(unique);
   const open = prs.filter((x) => (x as string) !== "live");
   const blocked = s?.blocked as string | null | undefined;
+  // The PR the engineer is on: the one they named (dak status --pr), else the newest open one.
+  const openPrs = unique.filter((w) => w.kind === "pr" && w.state !== "live");
+  const nowPr = (a?.now_pr && openPrs.find((w) => w.pr === a.now_pr)) || openPrs.slice().sort((x, y) => y.at.localeCompare(x.at))[0];
   let stage: Stage;
-  if (task.state_type === "completed" || task.state_type === "canceled") stage = "done";
-  // Checking comes only from Linear's "Checking" (the lead sets it): merged PRs alone do not
-  // finish a ticket, since more of its work is often still to come.
-  else if (/check/i.test(task.state ?? "")) stage = "checking";
+  // Linear's "Checking" first: some workflows file it as a completed state.
+  if (/check/i.test(task.state ?? "")) stage = "checking";
+  else if (task.state_type === "completed" || task.state_type === "canceled") stage = "done";
   // "Needs you" is only ever something you can open and answer: a topic of the ticket's own that
   // waits on you. An engineer saying it is blocked on you is Blocked, with their reason, until
   // they ask on Dak.
   else if (needsYou) stage = "you";
   else if (blocked) stage = "blocked"; // the reason is shown beside the engineer's line, not instead of it
+  // A ticket of many PRs is where its Now PR is, not where its oldest or newest PR happens to be.
+  else if (nowPr) stage = nowPr.state as Stage;
   else if (open.length) stage = open.reduce((lo, x) => (RANK[x] < RANK[lo] ? x : lo));
   else if (a) stage = "next";
   else stage = "backlog";
   if (stage === "done") needsYou = false;
-  return { stage, note, work: unique, needs_you: needsYou };
+  const prLines: PrLine[] = openPrs.map((w) => ({ number: w.pr ?? null, title: w.label.replace(/^#?\S+\s/, ""), stage: w.state, thread: w.thread, now: w === nowPr }));
+  return { stage, note, work: unique, needs_you: needsYou, prs: prLines, live_prs: unique.filter((w) => w.kind === "pr" && w.state === "live").length };
 }
 
 function cardsFor(tasks: Task[]): Card[] {
@@ -316,12 +330,12 @@ function cardsFor(tasks: Task[]): Card[] {
   }
   return tasks.map((t) => {
     const a = as.get(t.id), s = st.get(t.id);
-    const { stage, note, work, needs_you } = stageOf(t, a, s, works.get(t.id) ?? [], me, q);
+    const { stage, note, work, needs_you, prs, live_prs } = stageOf(t, a, s, works.get(t.id) ?? [], me, q);
     const lastWord = [a?.now_at, a?.started_at, s?.at].filter(Boolean).sort().at(-1) ?? null;
     return { ...t, agent: a?.agent ?? null, position: a?.position ?? null, assigned_at: a?.assigned_at ?? null, started_at: a?.started_at ?? null,
       now: (!!a?.now_at || implicitNow.get(a?.agent)?.id === t.id) && stage !== "done" && stage !== "blocked", last_word: lastWord,
       stage, stage_note: note ?? s?.note ?? null,
-      status: s ? { note: s.note, blocked: s.blocked, by: s.agent, at: s.at } : null, work, needs_you,
+      status: s ? { note: s.note, blocked: s.blocked, by: s.agent, at: s.at } : null, work, needs_you, prs, live_prs,
       history: [
         ...(a ? [{ at: a.assigned_at, what: `${a.assigned_by} gave it to ${a.agent}` }] : []),
         ...(a?.started_at ? [{ at: a.started_at, what: `${a.agent} started it` }] : []),

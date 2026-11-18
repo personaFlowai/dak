@@ -61,8 +61,12 @@ export function serve(port?: number) {
   const ticker = setInterval(() => {
     try { tickRunners(); } catch { /* never stop the server */ }
     if (++ticks % 3 === 0) try { tickSleepers(); } catch { /* same */ } // closed sessions: every 6 s is soon enough
-    // The Linear backlog, every five minutes while a key is set. A failed read waits for the next.
-    if (ticks % 150 === 1 && linearKey() && !process.env.DAK_NO_LINEAR) syncLinear().catch(() => {});
+    // The Linear backlog while a key is set: what changed, every minute; everything, every half
+    // hour. A failed read waits for the next.
+    if (linearKey() && !process.env.DAK_NO_LINEAR) {
+      if (ticks % 900 === 1) syncLinear().catch(() => {});
+      else if (ticks % 30 === 0) syncLinear(fetch, { changedSince: new Date(Date.now() - 3 * 60_000).toISOString() }).catch(() => {});
+    }
   }, 2000);
   ticker.unref?.();
   const allowedHosts = new Set([`127.0.0.1:${p}`, `localhost:${p}`]);

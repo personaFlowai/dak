@@ -15,14 +15,16 @@ export async function loadBoard() {
 }
 
 const STAGES: [string, string][] = [["next", "Up next"], ["you", "Needs you"], ["blocked", "Blocked"], ["review", "In review"],
-  ["changes", "Changes asked"], ["approved", "Approved"], ["merging", "Merging"], ["checking", "Checking"]];
+  ["changes", "Fixing"], ["approved", "Approved"], ["merging", "Merging"], ["held", "Held"], ["checking", "Checking"]];
 const SNAME: Record<string, string> = Object.fromEntries([["backlog", "Backlog"], ...STAGES, ["done", "Done"], ["live", "Live"]]);
+// A PR's own stage, in the words the person uses for one PR.
+const PRNAME: Record<string, string> = { you: "With you", review: "In review", changes: "Fixing", approved: "Approved", merging: "Merging", held: "Held", live: "Live" };
 
 // A ring that fills as a ticket moves, as Linear draws status; a check once it is finished; a bar
 // across it when it is blocked.
 function glyph(s: string): string {
-  const c = s === "you" ? "var(--accent)" : ["approved", "checking", "live", "done"].includes(s) ? "var(--add)" : ["changes", "blocked"].includes(s) ? "var(--warn-text, #9a5b00)" : "var(--text3)";
-  if (s === "blocked") return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4"/><path d="M3.6 7h6.8" stroke="${c}" stroke-width="1.6"/></svg>`;
+  const c = s === "you" ? "var(--accent)" : ["approved", "checking", "live", "done"].includes(s) ? "var(--add)" : ["changes", "blocked", "held"].includes(s) ? "var(--warn-text, #9a5b00)" : "var(--text3)";
+  if (s === "blocked" || s === "held") return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4"/><path d="M3.6 7h6.8" stroke="${c}" stroke-width="1.6"/></svg>`;
   const frac = ({ backlog: -1, next: 0, you: .5, review: .55, changes: .45, approved: .8, merging: .9, checking: .97, live: 1, done: 1 } as Record<string, number>)[s] ?? 0;
   if (frac < 0) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4" stroke-dasharray="2 2"/></svg>`;
   if (frac >= 1) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="${c}"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" fill="none" stroke="#fff" stroke-width="1.5"/></svg>`;
@@ -62,13 +64,24 @@ function shown(cards: Card[]): Card[] {
 function card(c: Card, who: string | null): string {
   const prs = c.work.filter((w) => w.kind === "pr").length;
   const meta = [who ? `<span class="bwho">${mark(c.agent!, "sm")}${esc(who)}</span>` : "", ...c.labels.slice(0, who ? 1 : 2).map(lab),
-    prs ? `<span class="bprs">${I.pr}${prs}</span>` : ""].join("");
+    prs && !c.prs.length && !c.live_prs ? `<span class="bprs">${I.pr}${prs}</span>` : ""].join("");
   return `<article class="bcard ${S.boardOpen === c.id ? "on" : ""} ${c.now ? "now" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" tabindex="0">
     <div class="bc-top">${c.now ? `<span class="bnow">Now</span>` : ""}${c.needs_you ? `<span class="bdot" title="Needs you"></span>` : ""}<code>${esc(c.id)}</code><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span></div>
     <p class="bc-title">${esc(c.title)}</p>
     ${c.stage_note ? `<p class="bc-note">${esc(c.stage_note)}</p>` : ""}
     ${c.stage === "blocked" && c.status?.blocked ? `<p class="bc-blocked">Blocked on ${esc(c.status.blocked)}</p>` : ""}
+    ${prList(c)}
     ${meta ? `<div class="bc-meta">${meta}</div>` : ""}</article>`;
+}
+
+// Its open PRs, each with its own stage, the engineer's Now PR first and marked; merged ones fold
+// into one count. A ticket broken into eight PRs reads as which one is where.
+function prList(c: Card): string {
+  if (!c.prs.length && !c.live_prs) return "";
+  const rows = c.prs.slice().sort((x, y) => Number(y.now) - Number(x.now));
+  const shown = rows.slice(0, 4).map((p) => `<button class="bpr ${p.now ? "now" : ""}" data-topic="${esc(p.thread)}" title="${esc(p.title)}">${p.now ? `<b class="bprnow" title="The PR they are on">●</b>` : `<span class="bprdot"></span>`}<code>${p.number ? `#${p.number}` : "PR"}</code><span class="bprt">${esc(p.title)}</span><i>${glyph(p.stage)}${PRNAME[p.stage] ?? p.stage}</i></button>`).join("");
+  const more = rows.length > 4 ? `<p class="bprmore">+${rows.length - 4} more open</p>` : "";
+  return `<div class="bc-prs">${shown}${more}${c.live_prs ? `<p class="bprmore">${glyph("live")}${c.live_prs} live</p>` : ""}</div>`;
 }
 
 function backlogPane(list: Card[]): string {
