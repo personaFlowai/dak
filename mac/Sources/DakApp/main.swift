@@ -331,6 +331,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc func reload(_ sender: Any?) { web.reload() }
     @objc func openSettings(_ sender: Any?) { showWindow(nil); web.evaluateJavaScript("window.dak && window.dak.settings()") }
     @objc func newMessage(_ sender: Any?) { showWindow(nil); web.evaluateJavaScript("window.dak && window.dak.compose()") }
+    @objc func closeTab(_ sender: Any?) {
+        web.evaluateJavaScript("window.dak && window.dak.closeTab ? window.dak.closeTab() : false") { [weak self] result, _ in
+            if (result as? Bool) != true { self?.web.window?.performClose(nil) }
+        }
+    }
     @objc func findInPr(_ sender: Any?) { web.evaluateJavaScript("window.dak && window.dak.find && window.dak.find()") }
 
     func buildStatusItem() {
@@ -402,7 +407,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         main.addItem(windowItem)
         let win = NSMenu(title: "Window")
         win.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        win.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        // ⌘W closes the topic's tab, as in a browser; with no tab open it closes the window.
+        win.addItem(withTitle: "Close Tab", action: #selector(closeTab(_:)), keyEquivalent: "w")
+        let closeWin = NSMenuItem(title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
+        win.addItem(closeWin)
         windowItem.submenu = win
         NSApp.mainMenu = main
     }

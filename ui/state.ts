@@ -201,7 +201,7 @@ export const allAtts = () => S.data ? S.data.messages.flatMap((m) => m.attachmen
 export const findAtt = (id: string | null) => allAtts().find((x) => x.a.id === id)?.a ?? null;
 
 export function defaultAtt(): string | null {
-  const list = [...allAtts()].reverse();
+  const list = [...allAtts()].filter((x) => !x.a.hidden).reverse();
   return (list.find((x) => x.a.type === "pr") ?? list.find((x) => x.a.type === "doc"))?.a.id ?? null;
 }
 

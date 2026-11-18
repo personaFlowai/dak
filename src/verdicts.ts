@@ -29,7 +29,7 @@ export function prStates(messages: Message[], deciders: string[]): PrState[] {
   const by = new Map<string, PrState>();
   for (const m of messages) {
     for (const a of m.attachments) {
-      if (a.type !== "pr") continue;
+      if (a.type !== "pr" || a.hidden) continue; // a PR taken off the topic no longer counts
       const key = prKey(a.meta.number);
       const was = by.get(key);
       by.set(key, {

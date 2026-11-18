@@ -88,7 +88,7 @@ export function tabsView(): string {
     const yours = t.to === me && t.status === "waiting";
     const who = peerOf(t);
     const preview = S.preview === t.id;
-    return `<div class="tab ${on ? "on" : ""} ${preview ? "preview" : ""}" role="tab" aria-selected="${on}"><button class="tab-go" data-tab="${t.id}" title="${esc(`${isPair(who) ? peerName(who) : name(who)}: ${t.subject}`)}${preview ? " (preview: the next topic you open takes this tab; double-click to keep it)" : ""}">
+    return `<div class="tab ${on ? "on" : ""} ${preview ? "preview" : ""}" draggable="true" role="tab" aria-selected="${on}"><button class="tab-go" data-tab="${t.id}" title="${esc(`${isPair(who) ? peerName(who) : name(who)}: ${t.subject}`)}${preview ? " (preview: the next topic you open takes this tab; double-click to keep it)" : ""}">
       ${yours ? `<span class="dot" title="Waiting on you"></span>` : ""}<span class="tl">${esc(t.subject)}</span></button>
       <button class="tab-x" data-tab-close="${t.id}" aria-label="Close tab">${I.close}</button></div>`;
   }).join("");

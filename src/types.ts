@@ -68,11 +68,12 @@ export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: bool
   tryit_result?: { result: "works" | "wrong"; ticket?: string }; // the person's pick on one
 }
 
-export type Attachment =
+export type Attachment = (
   | { id: string; type: "pr"; name: string; meta: PrMeta }
   | { id: string; type: "doc"; name: string; meta: DocMeta }
   | { id: string; type: "file"; name: string; meta: FileMeta }
-  | { id: string; type: "link"; name: string; meta: { url: string } };
+  | { id: string; type: "link"; name: string; meta: { url: string } }
+) & { hidden?: boolean }; // taken off the topic by the person (a merged PR): kept, but out of the way
 
 export interface PrMeta {
   url: string | null;

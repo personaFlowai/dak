@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { loadConfig, writeConfig, configPath, dakHome, person, HELPERS } from "./config";
 import {
-  addMessage, createThread, getThread, threadForPr, listThreads, putBlob, refreshPr, requireReader, setStatus, takeUnread,
+  addMessage, setReviewing, createThread, getThread, threadForPr, listThreads, putBlob, refreshPr, requireReader, setStatus, takeUnread,
   addParticipant, decisions, groups, setGroup, awaitingReview, routes, setRoute,
   type NewAttachment,
 } from "./store";
@@ -72,7 +72,8 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak queue [--all] | dak queue set <pr> --state <s> [--head sha] [--migration f] [--note text] [--title t]
                                                  the merge queue; states: approved testing building merging merged migrated deployed failed held
                                                  --eta 4m: how long this step should take; --after 2413: waits for that PR first
-  dak reviewing <thread> [text]                  tell the sender you are reviewing it (the person's "I'm on it")
+  dak reviewing <thread> [text] [--on 2450] [--stop]  tell the sender you are reviewing it (the person's "I'm on it"),
+                                                 one PR with --on, or that you stopped for now with --stop
   dak queue remove <pr>
   dak queue set <pr> --tier urgent|normal|later --why "unblocks 8 PRs" --waiting "a rebase"
   dak queue set <pr|thread> --rework "prefix being added"   about to change: greyed, below the rest, skipped by
@@ -142,7 +143,7 @@ function readLine(t: ReturnType<typeof getThread>): string {
     const lastTheirs = theirs[theirs.length - 1].id;
     const lastOwn = [...t.messages].reverse().find((m) => m.author === w && !m.reviewing);
     if (lastOwn && lastOwn.id > theirs[0].id && w !== t.thread.from) return `${label} replied`;
-    const on = [...t.messages].reverse().find((m) => m.author === w && (m.reviewing || m.verdict));
+    const on = [...t.messages].reverse().find((m) => m.author === w && (m.reviewing !== undefined || m.verdict));
     if (on?.reviewing) return `${label} is reviewing it, since ${new Date(on.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     const r = t.reads.find((x) => x.reader === w);
     if (!r || r.up_to < theirs[0].id) return `${label} has not opened it`;
@@ -269,7 +270,7 @@ const OPTIONS = {
   link: { type: "string", multiple: true }, verdict: { type: "string" }, on: { type: "string", multiple: true }, timeout: { type: "string" },
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
-  force: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
+  force: { type: "boolean" }, stop: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
   cc: { type: "string", multiple: true }, ready: { type: "boolean" }, head: { type: "string" }, migration: { type: "string" },
   proof: { type: "string", multiple: true }, skipped: { type: "string", multiple: true }, cost: { type: "string" }, cap: { type: "string" },
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
@@ -617,8 +618,8 @@ export async function main(argv: string[]): Promise<number> {
       // The reader saying "I'm on it": the sender hears, and the PR stays waiting on them.
       const id = positionals.shift() ?? "";
       const from = String(values.from ?? person(loadConfig()));
-      addMessage(id, { author: from, body: readBody(positionals, values) || "Reviewing this now.", needs_reply: false, extra: { reviewing: true } });
-      out(json, { reviewing: id }, () => `Told ${getThread(id).thread.from} you are reviewing ${id}.`);
+      setReviewing(id, from, { prs: prNumbers(values.on), stop: !!values.stop, body: readBody(positionals, values) });
+      out(json, { reviewing: id, stopped: !!values.stop }, () => `Told ${getThread(id).thread.from} you ${values.stop ? "stopped reviewing" : "are reviewing"} ${id}.`);
       return 0;
     }
     case "decisions": {

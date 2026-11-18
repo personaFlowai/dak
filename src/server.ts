@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { loadConfig, person, token } from "./config";
 import {
   addMessage, blobPath, store, createThread, getThread, latestMessageId, listThreads, markRead, putBlob,
-  requireReader, takeUnread, archives, setArchived, pins, setPinned, setStatus, search, type NewAttachment, type NewComment,
+  requireReader, takeUnread, setReviewing, setAttachmentHidden, archives, setArchived, pins, setPinned, setStatus, search, type NewAttachment, type NewComment,
   addParticipant, decisions, groups, setGroup, awaitingReview,
 } from "./store";
 import { explain, ask } from "./explain";
@@ -271,9 +271,15 @@ async function api(req: Request, url: URL): Promise<Response> {
       if (readAs && t.messages.length) markRead(readAs, id, t.messages[t.messages.length - 1].id);
       return json(t);
     }
+    if (parts[2] === "attachments" && parts[3] && method === "POST") {
+      const b = await body();
+      setAttachmentHidden(id, parts[3], b.author ?? person(loadConfig()), b.hidden !== false);
+      return json(getThread(id));
+    }
     if (parts[2] === "reviewing" && method === "POST") {
       const b = await body();
-      return json(addMessage(id, { author: b.author ?? person(loadConfig()), body: String(b.body ?? "") || "Reviewing this now.", needs_reply: false, extra: { reviewing: true } }), 201);
+      const prs = Array.isArray(b.prs) ? b.prs.map(Number).filter((n: number) => Number.isInteger(n) && n > 0) : undefined;
+      return json(setReviewing(id, b.author ?? person(loadConfig()), { prs, stop: b.stop === true, body: b.body ? String(b.body) : undefined }), 201);
     }
     if (parts[2] === "participants" && method === "POST") {
       const b = await body();

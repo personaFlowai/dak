@@ -51,16 +51,20 @@ async function openThread(id: string, keep = false) {
   // A conversation shows one topic, so opening one goes to its latest message.
   S.scrollTo = changed || !sameConvo ? "end" : S.scrollTo;
   if (peer !== S.peer || changed) { S.newTopic = false; S.newSubject = ""; }
-  // Moving between topics of the same conversation keeps the side pane as you left it: closed
-  // stays closed. Coming from elsewhere (the queue, a list) opens what you clicked.
-  const keepClosed = sameConvo && changed && S.paneClosed;
+  // Each topic keeps its own pane: what was open on it, or that it was closed. Leaving one
+  // remembers it; coming back restores it. A topic opened for the first time shows its newest
+  // PR or doc only when it is waiting on you to review; otherwise the conversation has the room.
+  if (changed && S.cur && S.view === "thread") rememberPane(S.cur);
+  const saved = changed ? paneOf(id) : null;
   // Opening a conversation from anywhere else drills the sidebar into its topics, and the
   // thread becomes a tab.
   if (!sameConvo) S.sideLevel = "topics";
   addTab(id);
   S.cur = id; S.data = data; S.view = "thread"; S.peer = peer; S.phoneList = false;
   if (changed || !keep) {
-    S.paneClosed = keepClosed; useAtt(keepClosed ? null : defaultAtt()); S.sel = null; S.editing = null; S.askContext = null; S.sendError = ""; S.sendNote = ""; S.pane = "chat";
+    const fresh = saved ?? { att: data.thread.to === me && data.thread.status === "waiting" ? undefined : null };
+    const att = fresh.att === undefined ? defaultAtt() : fresh.att && data.messages.some((m) => m.attachments.some((x) => x.id === fresh.att)) ? fresh.att : null;
+    S.paneClosed = !att; useAtt(att); S.sel = null; S.editing = null; S.askContext = null; S.sendError = ""; S.sendNote = ""; S.pane = "chat";
     clearPending();
   } else if (!findAtt(S.att) && !S.paneClosed) useAtt(defaultAtt());
   local.set("last", id);
@@ -136,6 +140,18 @@ function tintHits() {
 }
 
 /* ================= where you were ================= */
+
+// What each topic had open beside the conversation (null: the pane was closed), kept on this Mac.
+type PaneState = { att: string | null | undefined };
+const PANES_KEY = "panes";
+function paneOf(id: string): PaneState | null { return local.get<Record<string, PaneState>>(PANES_KEY, {})[id] ?? null; }
+function rememberPane(id: string) {
+  const all = local.get<Record<string, PaneState>>(PANES_KEY, {});
+  all[id] = { att: S.paneClosed ? null : S.att };
+  // Only the most recent topics: the record stays small.
+  const keys = Object.keys(all); if (keys.length > 200) for (const k of keys.slice(0, keys.length - 200)) delete all[k];
+  local.set(PANES_KEY, all);
+}
 
 // Each PR or doc version remembers its chapter and how far each column was scrolled, on this
 // Mac, so closing Dak and coming back opens it where you left off.
@@ -275,21 +291,27 @@ function threadView(): string {
     : multi ? (cur && cur.verdict !== "approve" ? `<button class="btn primary" id="approve" data-on-pr="${cur.number}" ${S.sending ? "disabled" : ""} title="Approve ${cur.key} only; anything you have typed or commented goes with it">${I.check} Approve ${cur.key}</button>` : "")
     : `<button class="btn primary" id="approve" ${S.sending ? "disabled" : ""} title="Approve now; anything you have typed or commented goes with it">${I.check} Approve</button>`;
   const archived = S.peer ? isArchived(S.peer) : false;
-  // "I'm reviewing": tells the sender you are on it; the PR stays waiting on you until your verdict.
-  const onIt = S.threads.find((x) => x.id === t.id)?.reviewing_since;
+  // "I'm reviewing": tells the sender you are on it, on the topic or on the PR that is open; the
+  // PR stays waiting on you until your verdict. "Stop" says you put it down for now.
+  const rv = myReviewing(S.data!.messages);
+  const onIt = rv?.at ?? null;
+  const rvPr = multi && cur?.number ? cur.number : null;
+  const rvWhat = rv?.prs?.length ? ` ${rv.prs.map((n) => `#${n}`).join(", ")}` : "";
   // Anything waiting on you with something to read: a PR or a doc, however the thread began.
   const readable = t.kind !== "note" || S.data!.messages.some((m) => m.attachments.some((x) => x.type === "pr" || x.type === "doc"));
   const reviewingBtn = readable && t.to === me && t.status === "waiting"
-    ? onIt ? `<span class="status reviewing" title="Since ${esc(fullWhen(onIt))}">You're reviewing</span>`
-      : `<button class="btn" data-reviewing="${t.id}" title="Tell ${esc(name(t.from))} you are reviewing this">I'm reviewing</button>` : "";
+    // Reviewing already: the line under the name says so, and the bar offers to stop.
+    ? onIt ? `<button class="btn" data-stop-reviewing="${t.id}" ${rv?.prs?.length ? `data-on-pr="${rv.prs.join(",")}"` : ""} title="You're reviewing${esc(rvWhat)} since ${esc(fullWhen(onIt))}. Tell ${esc(name(t.from))} you stopped for now; it stays waiting on you">Stop reviewing</button>`
+      : `<button class="btn" data-reviewing="${t.id}" ${rvPr ? `data-on-pr="${rvPr}"` : ""} title="Tell ${esc(name(t.from))} you are reviewing ${rvPr ? `#${rvPr}` : "this"}">I'm reviewing${rvPr ? ` #${rvPr}` : ""}</button>` : "";
   // On the Mac the bar keeps only what you act on (I'm reviewing, Approve); where the topic
   // stands goes on the line under the name, and Done, Archive and GitHub go in the ⋯ menu.
-  const statusWords = onIt ? { label: "You're reviewing", cls: "reviewing" } : st;
+  const statusWords = onIt ? { label: `You're reviewing${rvWhat}`, cls: "reviewing" } : st;
   // A phone's bar has room for Approve and ⋯ only; I'm reviewing moves into the menu there.
   const phone = onPhone();
   const menu = [
     canApprove && multi && todo.length ? `<button class="mi ${S.confirmAll ? "warn" : ""}" data-approve-all>${I.check}${S.confirmAll ? `Tap again to approve ${todo.length} PRs` : `Approve all ${todo.length}${todo.length < prs.length ? " left" : ""}`}</button>` : "",
-    phone && reviewingBtn && !onIt ? `<button class="mi" data-reviewing="${t.id}">${I.person}I'm reviewing</button>` : "",
+    phone && reviewingBtn && !onIt ? `<button class="mi" data-reviewing="${t.id}" ${rvPr ? `data-on-pr="${rvPr}"` : ""}>${I.person}I'm reviewing${rvPr ? ` #${rvPr}` : ""}</button>` : "",
+    phone && reviewingBtn && onIt ? `<button class="mi" data-stop-reviewing="${t.id}" ${rv?.prs?.length ? `data-on-pr="${rv.prs.join(",")}"` : ""}>${I.close}Stop reviewing${rvWhat}</button>` : "",
     S.peer && !isPair(S.peer) && canReply(t) ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
     S.peer && !isPair(S.peer) ? `<button class="mi" data-${S.pins[S.peer] ? "unpin" : "pin"}="${esc(S.peer)}">${I.pin}${S.pins[S.peer] ? `Unpin ${esc(name(S.peer))}` : `Pin ${esc(name(S.peer))} to the top`}</button>` : "",
     S.peer ? `<button class="mi" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}">${archived ? `${I.lineUp}Back to the Inbox` : `${I.archive}Archive conversation`}</button>` : "",
@@ -297,9 +319,10 @@ function threadView(): string {
   ].filter(Boolean).join("");
   const more = menu ? `<div class="more-wrap"><button class="icon-btn" data-more aria-expanded="${S.moreOpen}" aria-haspopup="menu" title="More" aria-label="More">${I.more}</button>${S.moreOpen ? `<div class="menu" role="menu">${menu}</div>` : ""}</div>` : "";
   // Everything attached on this topic, oldest first, one tap away instead of a scroll up.
-  const atts = S.data!.messages.flatMap((m) => m.attachments.map((x) => ({ x, m })));
-  const filesBtn = atts.length ? `<div class="more-wrap files-wrap"><button class="icon-btn files-btn" data-files aria-expanded="${S.filesOpen}" aria-haspopup="dialog" title="Attachments on this topic" aria-label="Attachments, ${atts.length}">${I.clip}<span class="fcount">${atts.length}</span></button>${S.filesOpen ? filesPanel(atts) : ""}</div>` : "";
-  const right = `${onIt || phone ? "" : reviewingBtn}${approveBtn}${filesBtn}${more}`;
+  const everyAtt = S.data!.messages.flatMap((m) => m.attachments.map((x) => ({ x, m })));
+  const atts = everyAtt.filter(({ x }) => !x.hidden);
+  const filesBtn = everyAtt.length ? `<div class="more-wrap files-wrap"><button class="icon-btn files-btn" data-files aria-expanded="${S.filesOpen}" aria-haspopup="dialog" title="Attachments on this topic" aria-label="Attachments, ${atts.length}">${I.clip}<span class="fcount">${atts.length}</span></button>${S.filesOpen ? filesPanel(atts, everyAtt.filter(({ x }) => x.hidden)) : ""}</div>` : "";
+  const right = `${phone ? "" : reviewingBtn}${approveBtn}${filesBtn}${more}`;
   const standing = statusWords ? ` · <span class="tstand ${statusWords.cls}">${esc(statusWords.label)}</span>` : "";
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
@@ -386,7 +409,7 @@ function headMoved(r: (typeof S.queue)[number]): string {
 function reviewRow(r: (typeof S.reviews)[number], pos: number): string {
   // A decision is answered with a tap, not reviewed: no "I'm reviewing" for it.
   const reviewable = r.type !== "decision" && r.type !== "tryit";
-  const action = r.reviewing_since ? `<b class="st reviewing">You're reviewing</b>`
+  const action = r.reviewing_since ? `<b class="st reviewing">You're reviewing</b><button class="btn subtle" data-stop-reviewing="${esc(r.thread_id)}" title="Stopped for now; it stays on this list">Stop</button>`
     : reviewable ? `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`
     : `<button class="btn" data-topic="${esc(r.thread_id)}">Answer</button>`;
   return `<li class="qrow review" draggable="true" data-drag-review="${esc(r.thread_id)}" data-tier="${r.tier}"><span class="qpos">${pos}</span>
@@ -508,10 +531,12 @@ function paneHead(a: any): string {
 
 // The topic's attachments, oldest first, each with who sent it and when. The same cards as in
 // the conversation, so a PR, doc or image opens beside it and a link opens in the browser.
-function filesPanel(atts: { x: Attachment; m: Message }[]): string {
+function filesPanel(atts: { x: Attachment; m: Message }[], removed: { x: Attachment; m: Message }[]): string {
   const topic = { thread: S.data!.thread, messages: S.data!.messages };
+  const who = (m: Message) => `${esc(name(m.author))} · ${esc(fullWhen(m.created_at))}`;
   return `<div class="menu files-panel" role="dialog" aria-label="Attachments on this topic"><div class="fp-head">${atts.length} attachment${atts.length === 1 ? "" : "s"} · oldest first</div>
-    <div class="fp-list">${atts.map(({ x, m }) => `<div class="fp-item"><div class="fp-who">${esc(name(m.author))} · ${esc(fullWhen(m.created_at))}</div>${chip(x, topic)}</div>`).join("")}</div></div>`;
+    <div class="fp-list">${atts.map(({ x, m }) => `<div class="fp-item"><div class="fp-who"><span>${who(m)}</span><button type="button" class="link fp-remove" data-hide-att="${x.id}" title="Take it off this topic (Restore brings it back)">Remove</button></div>${chip(x, topic)}</div>`).join("")}
+    ${removed.length ? `<div class="fp-removed"><div class="fp-head sub">Removed (${removed.length})</div>${removed.map(({ x, m }) => `<div class="fp-gone"><span><b>${esc(x.name)}</b> · ${who(m)}</span><button type="button" class="link" data-unhide-att="${x.id}">Restore</button></div>`).join("")}</div>` : ""}</div></div>`;
 }
 
 // A topic carrying several PRs: each one, with its own verdict, one tap to open it.
@@ -796,6 +821,17 @@ async function sendNewTopic() {
   } catch (e: any) { S.sending = false; S.sendError = e.message ?? "Could not send."; renderMain(); }
 }
 
+// Your latest "I'm reviewing" or "stopped" on this topic since your last verdict.
+function myReviewing(messages: Message[]): { at: string; prs?: number[] } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.author !== me) continue;
+    if (m.verdict) return null;
+    if (m.reviewing !== undefined) return m.reviewing ? { at: m.created_at, prs: m.prs } : null;
+  }
+  return null;
+}
+
 function verdictPrs(): number[] | undefined {
   const all = prsHere();
   const p = all.length > 1 ? prOfAtt(findAtt(S.att)) : all[0];
@@ -993,6 +1029,41 @@ document.addEventListener("drop", (e) => {
 });
 window.addEventListener("resize", () => layoutMargin());
 // The ⋯ menu closes on a click anywhere else.
+// Close a tab; closing the one you are on moves to its neighbour, or to Waiting on you.
+async function closeTabAndMove(id: string) {
+  if (id === S.cur && S.view === "thread") rememberPane(id);
+  const next = closeTab(id);
+  if (id === S.cur && S.view === "thread") { if (next) return openThread(next); S.view = "waiting"; return render(); }
+  $("#tabs")!.innerHTML = tabsView();
+}
+// Middle-click a tab to close it, as in a browser.
+document.addEventListener("auxclick", (e) => {
+  if (e.button !== 1) return;
+  const id = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab;
+  if (id) { e.preventDefault(); void closeTabAndMove(id); }
+});
+// Drag a tab to reorder; the order is kept.
+let dragTab: string | null = null;
+document.addEventListener("dragstart", (e) => {
+  const id = (e.target as HTMLElement).closest?.<HTMLElement>(".tab")?.querySelector<HTMLElement>("[data-tab]")?.dataset.tab;
+  if (!id) return;
+  dragTab = id; e.dataTransfer?.setData("text/plain", id); if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+});
+document.addEventListener("dragover", (e) => {
+  if (!dragTab) return;
+  const over = (e.target as HTMLElement).closest?.<HTMLElement>(".tab");
+  if (!over) return;
+  e.preventDefault();
+  const id = over.querySelector<HTMLElement>("[data-tab]")?.dataset.tab;
+  if (!id || id === dragTab) return;
+  const r = over.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+  const list = S.tabs.filter((t) => t !== dragTab);
+  list.splice(list.indexOf(id) + (after ? 1 : 0), 0, dragTab);
+  if (list.join() !== S.tabs.join()) { S.tabs = list; local.set("tabs", S.tabs); $("#tabs")!.innerHTML = tabsView(); }
+});
+document.addEventListener("dragend", () => { dragTab = null; });
+window.addEventListener("pagehide", () => { if (S.cur && S.view === "thread") rememberPane(S.cur); });
+
 // Double-click a preview tab to keep it.
 document.addEventListener("dblclick", (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab;
@@ -1015,6 +1086,15 @@ document.addEventListener("click", async (e) => {
     return send("approve", prsHere().filter((p) => p.verdict !== "approve" && p.number).map((p) => p.number!));
   }
   if (d.more !== undefined) { S.moreOpen = !S.moreOpen; S.filesOpen = false; S.confirmAll = false; return renderMain(); }
+  if (d.hideAtt || d.unhideAtt) {
+    // Taken off the topic, never deleted: Restore brings it back.
+    const id = d.in || S.cur!;
+    const att = d.hideAtt || d.unhideAtt!;
+    await api(`/threads/${id}/attachments/${att}`, { method: "POST", body: { author: me, hidden: !!d.hideAtt } });
+    if (d.hideAtt && S.att === att) { S.att = null; S.paneClosed = true; }
+    S.filesOpen = !!d.hideAtt && S.filesOpen;
+    return openThread(S.cur!, true);
+  }
   if (d.files !== undefined) { S.filesOpen = !S.filesOpen; S.moreOpen = false; return renderMain(); }
   if (S.filesOpen) S.filesOpen = false; // picking an attachment (or anything else) closes the list
   if (S.moreOpen) S.moreOpen = false; // any other click closes the ⋯ menu (and still does what it does)
@@ -1032,11 +1112,7 @@ document.addEventListener("click", async (e) => {
   if (d.sideBack !== undefined) { S.sideLevel = S.peer && isPair(S.peer) ? "pairs" : "agents"; return onPhone() ? render() : renderSide(); }
   if (d.tab) { S.sideLevel = "topics"; return openThread(d.tab); }
   if (d.reviewing) keepTab(d.reviewing);
-  if (d.tabClose) {
-    const next = closeTab(d.tabClose);
-    if (d.tabClose === S.cur && S.view === "thread") { if (next) return openThread(next); S.view = "waiting"; return render(); }
-    return renderSide();
-  }
+  if (d.tabClose) return closeTabAndMove(d.tabClose);
   if (d.peekClose !== undefined) { closePeek(); return renderMain(); }
   if (d.peekBack !== undefined) { peekBackStep(); return renderMain(); }
   if (d.peekDef !== undefined && S.peek) { S.peek = { ...S.peek, def: Number(d.peekDef) }; return renderMain(); }
@@ -1082,10 +1158,14 @@ document.addEventListener("click", async (e) => {
   if (d.queue !== undefined) { S.view = "queue"; S.phoneList = false; return render(); }
   if (d.waiting !== undefined) { S.view = "waiting"; S.phoneList = false; return render(); }
   if (d.reviewFilter !== undefined) { S.reviewFilter = d.reviewFilter; local.set("reviewFilter", S.reviewFilter); return renderMain(); }
-  if (d.reviewing) {
-    // "I'm on it": the sender hears through Dak, and the PR stays waiting on you.
-    await api(`/threads/${d.reviewing}/reviewing`, { method: "POST", body: { author: me } });
-    await loadList(); return render();
+  if (d.reviewing || d.stopReviewing) {
+    // "I'm on it" (or "stopped for now"): the sender hears through Dak, and the PR stays waiting on you.
+    const id = d.reviewing || d.stopReviewing!;
+    const prs = d.onPr ? d.onPr.split(",").map(Number) : undefined;
+    await api(`/threads/${id}/reviewing`, { method: "POST", body: { author: me, prs, stop: !!d.stopReviewing } });
+    await loadList();
+    if (S.cur === id) await openThread(id, true);
+    return render();
   }
   if (d.settings !== undefined) { S.view = "settings"; askLogin(); render(); await Promise.all([loadSettings(), loadAgents(true)]); return render(); }
   if (d.phone) {
@@ -1465,6 +1545,8 @@ addEventListener("resize", postControls);
   settings: async () => { S.view = "settings"; askLogin(); render(); await Promise.all([loadSettings(), loadAgents(true)]); render(); },
   compose: () => openCompose(),
   find: () => openFind(),
+  // ⌘W in the Mac app: closes the topic's tab; false when there is none, so the window closes.
+  closeTab: () => { if (S.view !== "thread" || !S.cur || !S.tabs.includes(S.cur)) return false; void closeTabAndMove(S.cur); return true; },
   loginState: (state: string) => { S.login = state; if (S.view === "settings") renderMain(); },
 };
 

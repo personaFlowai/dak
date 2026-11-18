@@ -58,6 +58,9 @@ export function store(): Database {
     CREATE TABLE IF NOT EXISTS archives (
       reader TEXT NOT NULL, peer TEXT NOT NULL, archived_at TEXT NOT NULL,
       PRIMARY KEY (reader, peer));
+    -- An attachment taken off a topic (a merged PR nobody needs): kept, but out of the way.
+    CREATE TABLE IF NOT EXISTS hidden_attachments (
+      attachment_id TEXT PRIMARY KEY, by_name TEXT NOT NULL, hidden_at TEXT NOT NULL);
   `);
   // Columns added after the first release. ALTER TABLE has no IF NOT EXISTS, so look first.
   const cols = new Set((db.query("PRAGMA table_info(messages)").all() as { name: string }[]).map((c) => c.name));
@@ -171,7 +174,7 @@ export function addMessage(threadId: string, input: {
   const other = author !== thread.from && author !== thread.to && isParticipant(threadId, author);
   const settled = thread.status === "informed" || thread.status === "closed";
   const asks = !other && author !== thread.to && needsReply(thread, input);
-  const status: ThreadStatus = input.extra?.reviewing ? thread.status // "on it" is not an answer
+  const status: ThreadStatus = input.extra?.reviewing !== undefined ? thread.status // "on it" (or "stopped") is not an answer
     : author === thread.to && othersStillWaiting(threadId, author, input) ? "waiting"
     : author === thread.to ? "answered"
     : other ? (thread.to.startsWith("group:") && !settled ? "answered" : thread.status)
@@ -181,7 +184,7 @@ export function addMessage(threadId: string, input: {
   // turn and never interrupts one or wakes an idle session. Buttons, verdicts and new versions
   // always ask.
   const quiet = !input.options?.length && !input.verdict && !input.choice && !input.attachments?.length
-    && (input.needs_reply === false || !!input.extra?.reviewing || (author === thread.from && !other && !asks));
+    && (input.needs_reply === false || input.extra?.reviewing !== undefined || (author === thread.from && !other && !asks));
   // An approval records exactly what was approved (head and diff), so a later push can be told
   // apart: the merge queue says "head moved since your approval" and whether the changes differ.
   let extra: MessageExtra | undefined = quiet ? { ...input.extra, quiet: true } : input.extra;
@@ -353,14 +356,15 @@ function hydrate(rows: any[]): Message[] {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
   const marks = ids.map(() => "?").join(",");
-  const atts = store().query(`SELECT * FROM attachments WHERE message_id IN (${marks})`).all(...ids) as any[];
+  const atts = store().query(`SELECT a.*, (h.attachment_id IS NOT NULL) AS hidden FROM attachments a LEFT JOIN hidden_attachments h ON h.attachment_id = a.id
+    WHERE a.message_id IN (${marks})`).all(...ids) as any[];
   const coms = store().query(`SELECT * FROM comments WHERE message_id IN (${marks}) ORDER BY id`).all(...ids) as any[];
   return rows.map((r) => ({
     id: r.id, thread_id: r.thread_id, author: r.author, body: r.body, verdict: r.verdict, created_at: r.created_at,
     ...(r.options ? { options: JSON.parse(r.options) } : {}), ...(r.choice ? { choice: r.choice } : {}),
     ...(r.extra ? JSON.parse(r.extra) : {}),
     attachments: atts.filter((a) => a.message_id === r.id)
-      .map((a) => ({ id: a.id, type: a.type, name: a.name, meta: JSON.parse(a.meta) }) as Attachment),
+      .map((a) => ({ id: a.id, type: a.type, name: a.name, meta: JSON.parse(a.meta), ...(a.hidden ? { hidden: true } : {}) }) as Attachment),
     comments: coms.filter((c) => c.message_id === r.id).map((c) => ({
       id: c.id, thread_id: c.thread_id, message_id: c.message_id, attachment_id: c.attachment_id,
       author: c.author, anchor: c.anchor ? JSON.parse(c.anchor) : null, body: c.body,
@@ -388,6 +392,15 @@ export function getThread(id: string): { thread: Thread; messages: Message[]; re
   // what an agent reads to know which PRs are approved.
   const deciders = [thread.to, ...participants.filter((p) => p.role === "approver").map((p) => p.name)];
   return { thread, messages, reads, participants, prs: prStates(messages, deciders) };
+}
+
+// Take an attachment off its topic, or put it back. It is never deleted: the message still says
+// it was sent, and Restore brings it back.
+export function setAttachmentHidden(threadId: string, attId: string, by: string, hidden: boolean) {
+  const ok = store().query(`SELECT 1 FROM attachments a JOIN messages m ON m.id = a.message_id WHERE a.id = ? AND m.thread_id = ?`).get(attId, threadId);
+  if (!ok) throw new DakError("no_attachment", "That attachment is not on this thread.", 404);
+  if (hidden) store().query("INSERT OR REPLACE INTO hidden_attachments VALUES (?,?,?)").run(attId, by, now());
+  else store().query("DELETE FROM hidden_attachments WHERE attachment_id = ?").run(attId);
 }
 
 // The newest thread carrying PR #n, for a stacked PR's link to the one below it.
@@ -483,10 +496,19 @@ export function decisions(reader: string): Decision[] {
 
 export interface ThreadSummary extends Thread { unread: number; last_body: string; last_author: string; message_count: number; participants: string[]; reviewing_since: string | null }
 
-// When the addressee said "I'm reviewing" and has not given a verdict since.
-const REVIEWING = `(SELECT created_at FROM messages r WHERE r.thread_id = t.id AND r.author = t.to_reader AND r.extra LIKE '%"reviewing":true%'
+// When the addressee said "I'm reviewing" and has neither given a verdict nor said they stopped since.
+const REVIEWING = `(SELECT CASE WHEN r.extra LIKE '%"reviewing":true%' THEN r.created_at END FROM messages r
+  WHERE r.thread_id = t.id AND r.author = t.to_reader AND r.extra LIKE '%"reviewing":%'
   AND r.id > coalesce((SELECT max(id) FROM messages v WHERE v.thread_id = t.id AND v.author = t.to_reader AND v.verdict IS NOT NULL), 0)
   ORDER BY r.id DESC LIMIT 1)`;
+
+// "I'm reviewing" (or "stopped reviewing"), on the whole topic or on the PRs named: the sender
+// hears it as an update, and the topic stays waiting on the reader either way.
+export function setReviewing(threadId: string, author: string, opts: { prs?: number[]; stop?: boolean; body?: string } = {}): Message {
+  const on = opts.prs?.length ? ` ${opts.prs.map((n) => `#${n}`).join(", ")}` : "";
+  const body = opts.body?.trim() || (opts.stop ? `Stopped reviewing${on || " this"} for now; it is still waiting on me.` : `Reviewing${on || " this"} now.`);
+  return addMessage(threadId, { author, body, needs_reply: false, extra: { reviewing: !opts.stop, ...(opts.prs?.length ? { prs: opts.prs } : {}) } });
+}
 
 // On the thread: its sender, its addressee, or anyone else added to it.
 const ON = `(t.to_reader = $r OR t.from_name = $r OR EXISTS (SELECT 1 FROM participants p WHERE p.thread_id = t.id AND p.name = $r))`;

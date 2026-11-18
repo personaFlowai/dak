@@ -1233,3 +1233,32 @@ describe("updates don't interrupt", () => {
     expect(answer.quiet).toBeUndefined();
   });
 });
+
+describe("reviewing and removing", () => {
+  test("I'm reviewing names a PR, and Stop says you put it down; the topic stays waiting on you", async () => {
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--diff", "d2.diff", "--subject", "Read me", "--json").json();
+    dak("reviewing", thread.id, "--from", "sam", "--on", "2462");
+    let mine = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    expect(mine.find((r) => r.thread_id === thread.id)?.reviewing_since).toBeTruthy();
+    expect(dak("show", thread.id, "--json").json().messages.at(-1).body).toBe("Reviewing #2462 now.");
+    await http(`/v1/threads/${thread.id}/reviewing`, { method: "POST", body: JSON.stringify({ author: "sam", stop: true }) });
+    mine = (await (await http("/v1/reviews?for=sam")).json()) as any[];
+    const row = mine.find((r) => r.thread_id === thread.id);
+    expect(row).toBeTruthy(); // still waiting on sam
+    expect(row.reviewing_since).toBeNull();
+    const last = dak("show", thread.id, "--json").json().messages.at(-1);
+    expect([last.reviewing, last.quiet]).toEqual([false, true]); // an update to atlas, not a question
+  });
+
+  test("an attachment taken off a topic is kept and can be restored; a removed PR stops counting", async () => {
+    const { thread } = dak("send", "--to", "sam", "--from", "atlas", "--diff", "d2.diff", "--subject", "Merged one", "--json").json();
+    const att = dak("show", thread.id, "--json").json().messages[0].attachments[0].id;
+    const off = await (await http(`/v1/threads/${thread.id}/attachments/${att}`, { method: "POST", body: JSON.stringify({ author: "sam" }) })).json();
+    expect(off.messages[0].attachments[0].hidden).toBe(true);
+    expect(off.prs).toEqual([]);
+    const back = await (await http(`/v1/threads/${thread.id}/attachments/${att}`, { method: "POST", body: JSON.stringify({ author: "sam", hidden: false }) })).json();
+    expect(back.messages[0].attachments[0].hidden).toBeUndefined();
+    expect(back.prs.length).toBe(1);
+    expect((await http(`/v1/threads/${thread.id}/attachments/a_nope`, { method: "POST", body: "{}" })).status).toBe(404);
+  });
+});

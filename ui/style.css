@@ -1275,3 +1275,18 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 .files-panel .fp-who { font-size: 11.5px; color: var(--text3); margin: 0 2px 4px; }
 .files-panel .acard { width: 100%; }
 .app.phone .more-wrap .files-panel { position: fixed; left: 16px; right: 16px; top: 64px; width: auto; max-width: none; }
+
+/* "Stop" beside "You're reviewing": quiet, since putting a review down is the rarer act. */
+.btn.subtle { background: transparent; border-color: transparent; color: var(--text3); padding: 0 8px; }
+.btn.subtle:hover { background: var(--hover); color: var(--text2); }
+
+/* Removing an attachment from a topic. */
+.files-panel .fp-who { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.files-panel .fp-remove { font-size: 11.5px; color: var(--text3); opacity: 0; }
+.files-panel .fp-item:hover .fp-remove, .files-panel .fp-remove:focus-visible, .app.phone .files-panel .fp-remove { opacity: 1; }
+.files-panel .fp-remove:hover { color: var(--accent-text); }
+.files-panel .fp-removed { margin-top: 10px; border-top: 1px solid var(--line2); }
+.files-panel .fp-head.sub { border: 0; padding: 10px 2px 4px; }
+.files-panel .fp-gone { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 2px; font-size: 12.5px; color: var(--text3); }
+.files-panel .fp-gone b { color: var(--text2); font-weight: 500; }
+.removed-att { font-size: 12.5px; color: var(--text3); padding: 4px 0; }

@@ -31,7 +31,10 @@ function message(m: Message, topic: Topic): string {
   const on = m.prs?.length ? ` ${m.prs.map((n) => `#${n}`).join(", ")}` : "";
   const v = m.verdict ? `<span class="verdict ${m.verdict}">${{ approve: "Approved", changes: "Changes requested", question: "Question" }[m.verdict]}${on}</span>` : "";
   const refs = m.comments.map((c) => `<li><code>${esc(anchorLabel(c.anchor))}</code> ${esc(c.body)}</li>`).join("");
-  const chips = m.attachments.map((a) => chip(a, topic)).join("");
+  // A removed attachment leaves one quiet line where it was, with a way to bring it back.
+  const chips = m.attachments.map((a) => a.hidden
+    ? `<div class="removed-att">${esc(a.name)} · removed from this topic <button type="button" class="link" data-unhide-att="${a.id}" data-in="${topic.thread.id}">Restore</button></div>`
+    : chip(a, topic)).join("");
   const media = m.attachments.filter((a) => a.type === "file" && /^(image|video)\//.test((a.meta as any).mime)).map((a) => {
     const f = a.meta as any;
     return f.mime.startsWith("image/") ? `<img src="${blobUrl(f.blob, f.mime)}" alt="${esc(a.name)}" loading="lazy">` : `<video src="${blobUrl(f.blob, f.mime)}" controls preload="metadata"></video>`;

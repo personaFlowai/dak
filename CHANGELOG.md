@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.4
+
+- **Each topic keeps its own pane.** Switching topics no longer carries the open PR or doc across: each topic shows what you last had open on it, or stays closed if you closed it. A topic opened for the first time shows its newest PR or doc only when it is waiting on you.
+- **"I'm reviewing" on one PR, and "Stop reviewing".** On a topic with several PRs the button names the PR that is open ("I'm reviewing #2462"). Once you are reviewing, the bar offers "Stop reviewing": the agent hears you put it down for now, and the topic stays waiting on you. `dak reviewing <thread> --on 2462 [--stop]`.
+- **Tabs:** ⌘W closes the topic's tab (⇧⌘W closes the window), a middle-click closes any tab, and tabs can be dragged to reorder.
+- **Remove an attachment from a topic** (a merged PR you no longer need): "Remove" in the paperclip list. It is kept, not deleted: the conversation shows one quiet line with Restore, and a removed PR no longer counts toward approvals.
+
 ## 0.9.3
 
 - **Updates don't interrupt.** A message that needs no reply (sent with `--fyi` or `--done`, the sender's text after an approval, "I'm reviewing") no longer reopens an agent's turn at its stop or wakes an idle session. It arrives at the agent's next turn, marked "(an update, no reply needed)", with no reply line. Questions, buttons, verdicts and new versions still interrupt as before, and carry any waiting updates with them.
