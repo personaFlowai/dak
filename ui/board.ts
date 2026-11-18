@@ -67,6 +67,7 @@ function card(c: Card, who: string | null): string {
     <div class="bc-top">${c.now ? `<span class="bnow">Now</span>` : ""}${c.needs_you ? `<span class="bdot" title="Needs you"></span>` : ""}<code>${esc(c.id)}</code><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span></div>
     <p class="bc-title">${esc(c.title)}</p>
     ${c.stage_note ? `<p class="bc-note">${esc(c.stage_note)}</p>` : ""}
+    ${c.stage === "blocked" && c.status?.blocked ? `<p class="bc-blocked">Blocked on ${esc(c.status.blocked)}</p>` : ""}
     ${meta ? `<div class="bc-meta">${meta}</div>` : ""}</article>`;
 }
 
@@ -161,7 +162,11 @@ export function boardView(): string {
       const now = p.find((c) => c.now);
       const rest = p.filter((c) => c !== now);
       const lastWord = p.map((c) => c.last_word).filter(Boolean).sort().at(-1) as string | undefined;
-      const sub = now ? `Now: ${esc(now.id)} · last word ${since(now.last_word)}` : `<span class="bidle">Idle${lastWord || e.last ? ` since ${since(lastWord ?? e.last)}` : ""}</span>`;
+      // No Now, but waiting on something: say what it waits on, not "idle" (what the person reads).
+      const waiting = !now ? p.filter((c) => c.stage === "blocked" || c.stage === "you").sort((x, y) => (y.last_word ?? "").localeCompare(x.last_word ?? ""))[0] : undefined;
+      const sub = now ? `Now: ${esc(now.id)} · last word ${since(now.last_word)}`
+        : waiting ? `<span class="bwait">Waiting: ${esc(waiting.id)}${waiting.status?.blocked ? `, blocked on ${esc(waiting.status.blocked)}` : waiting.stage === "you" ? ", needs you" : ""}</span>`
+        : `<span class="bidle">Idle${lastWord || e.last ? ` since ${since(lastWord ?? e.last)}` : ""}</span>`;
       const groups = GROUPS.map(([name, f]) => { const cs = rest.filter(f); return cs.length ? `<h4 class="bgh">${name} <i>${cs.length}</i></h4>${cs.map((c) => card(c, null)).join("")}` : ""; }).join("");
       return `<div class="bpile bcol" data-drop="${esc(e.name)}"><header>${mark(e.name, "sm")}<div><b>${esc(e.label)}</b><span>${sub}</span></div><i>${p.length}</i></header>
         <div class="bpl">${now ? card(now, null) : ""}${groups || (now ? "" : `<p class="bempty">Drop a ticket here</p>`)}</div></div>`;

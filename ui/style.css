@@ -1454,3 +1454,5 @@ body.cmd .diff td.tx, body.cmd .peek-code td.tx { cursor: pointer; }
 .app.phone .bbacklog.folded { width: auto; height: 44px; }
 .app.phone .bfold { flex-direction: row; justify-content: center; padding: 0; }
 .app.phone .bfold span, .app.phone .bfold i { writing-mode: horizontal-tb; }
+.bc-blocked { margin: 4px 0 0; font-size: 11.5px; color: var(--warn-text, #9a5b00); }
+.bwait { color: var(--warn-text, #9a5b00); }

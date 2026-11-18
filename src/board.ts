@@ -280,7 +280,7 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
   // waits on you. An engineer saying it is blocked on you is Blocked, with their reason, until
   // they ask on Dak.
   else if (needsYou) stage = "you";
-  else if (blocked) { stage = "blocked"; note = `blocked: ${blocked}`; }
+  else if (blocked) stage = "blocked"; // the reason is shown beside the engineer's line, not instead of it
   else if (open.length) stage = open.reduce((lo, x) => (RANK[x] < RANK[lo] ? x : lo));
   else if (a) stage = "next";
   else stage = "backlog";
@@ -314,7 +314,7 @@ function cardsFor(tasks: Task[]): Card[] {
     const lastWord = [a?.now_at, a?.started_at, s?.at].filter(Boolean).sort().at(-1) ?? null;
     return { ...t, agent: a?.agent ?? null, position: a?.position ?? null, assigned_at: a?.assigned_at ?? null, started_at: a?.started_at ?? null,
       now: (!!a?.now_at || implicitNow.get(a?.agent)?.id === t.id) && stage !== "done" && stage !== "blocked", last_word: lastWord,
-      stage, stage_note: note ?? (s && !s.blocked ? s.note : null),
+      stage, stage_note: note ?? s?.note ?? null,
       status: s ? { note: s.note, blocked: s.blocked, by: s.agent, at: s.at } : null, work, needs_you,
       history: [
         ...(a ? [{ at: a.assigned_at, what: `${a.assigned_by} gave it to ${a.agent}` }] : []),

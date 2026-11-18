@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.5
+
+- **A blocked ticket shows the engineer's line and the reason:** the line as written, and "Blocked on …" under it (the line was stored but hidden).
+- **An engineer with no Now but something blocked or waiting on you** reads "Waiting: REVA-x, blocked on …" in the pile's header, not "Idle".
+
 ## 0.13.4
 
 - `dak status <ticket> --stop` puts a ticket back to Up next: it stops being its engineer's Now and is no longer started. For a Now left behind by an old `dak next`.
