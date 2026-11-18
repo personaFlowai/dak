@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.2
+
+- **Now shows for engineers who never ran `dak next`.** Until an engineer sets a Now, the Board takes the ticket they last said something about that is not blocked. Setting one with `dak next` or `dak status` wins.
+
 ## 0.13.1
 
 - **Checking stays on the Board.** A ticket whose PRs are all merged and live, or that Linear has at "Checking", shows as Checking (its own group in each pile) until Linear says Done, so merged work never vanishes before its Done-only-when test is proven.

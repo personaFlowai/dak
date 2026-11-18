@@ -288,12 +288,24 @@ function cardsFor(tasks: Task[]): Card[] {
   for (const r of store().query("SELECT * FROM task_status ORDER BY at").all() as any[]) { st.set(r.task_id, r); (lines.get(r.task_id) ?? lines.set(r.task_id, []).get(r.task_id)!).push(r); }
   const q = new Map(queue({ all: true }).map((r) => [r.pr, r]));
   const works = workFor(tasks.map((t) => t.id));
+  // An engineer who took tickets before Now existed (or never ran dak next) still has one: the
+  // ticket they last said something about that is not blocked. Set explicitly, it wins.
+  const implicitNow = new Map<string, { id: string; at: string }>();
+  const explicit = new Set([...as.values()].filter((r: any) => r.now_at).map((r: any) => r.agent));
+  for (const r of as.values() as any) {
+    if (explicit.has(r.agent) || !r.started_at) continue;
+    const last = st.get(r.task_id);
+    if (last?.blocked) continue;
+    const at = [r.started_at, last?.at].filter(Boolean).sort().at(-1)!;
+    const cur = implicitNow.get(r.agent);
+    if (!cur || at > cur.at) implicitNow.set(r.agent, { id: r.task_id, at });
+  }
   return tasks.map((t) => {
     const a = as.get(t.id), s = st.get(t.id);
     const { stage, note, work, needs_you } = stageOf(t, a, s, works.get(t.id) ?? [], me, q);
     const lastWord = [a?.now_at, a?.started_at, s?.at].filter(Boolean).sort().at(-1) ?? null;
     return { ...t, agent: a?.agent ?? null, position: a?.position ?? null, assigned_at: a?.assigned_at ?? null, started_at: a?.started_at ?? null,
-      now: !!a?.now_at && stage !== "done" && stage !== "blocked" && !(stage === "you" && s?.blocked), last_word: lastWord,
+      now: (!!a?.now_at || implicitNow.get(a?.agent)?.id === t.id) && stage !== "done" && stage !== "blocked", last_word: lastWord,
       stage, stage_note: note ?? (s && !s.blocked ? s.note : null),
       status: s ? { note: s.note, blocked: s.blocked, by: s.agent, at: s.at } : null, work, needs_you,
       history: [
