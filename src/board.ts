@@ -26,7 +26,10 @@ export interface Task {
 // blocked: the engineer said what blocks it. review / changes / approved / merging: its own PRs.
 // checking: Linear says Checking: shipped, its Done-only-when test not proven yet.
 // held: its PR is stopped at a gate or parked, not moving.
-export type Stage = "backlog" | "next" | "you" | "blocked" | "review" | "changes" | "approved" | "merging" | "held" | "checking" | "done";
+// building / cursor / proof: what the engineer reports about their PR before it reaches the person
+// (Dak cannot see a branch or a Cursor round); changes reads as "Fixing".
+export type Stage = "backlog" | "next" | "you" | "blocked" | "building" | "cursor" | "review" | "changes" | "proof" | "approved" | "merging" | "held" | "checking" | "done";
+export const PR_STAGES = ["building", "cursor", "fixing", "proof"] as const;
 export interface Work { kind: "pr" | "doc" | "note"; thread: string; label: string; state: string; at: string; pr?: number | null }
 // One open PR of a ticket, with its own stage; the engineer's Now PR is marked.
 export interface PrLine { number: number | null; title: string; stage: string; thread: string; now: boolean }
@@ -43,7 +46,7 @@ export interface Card extends Task {
   live_prs: number; // merged and live, folded into one count
 }
 
-export const STAGES: Stage[] = ["backlog", "next", "you", "blocked", "review", "changes", "approved", "merging", "held", "checking", "done"];
+export const STAGES: Stage[] = ["backlog", "next", "you", "blocked", "building", "cursor", "review", "changes", "proof", "approved", "merging", "held", "checking", "done"];
 
 function ensure() {
   store().exec(`
@@ -56,6 +59,7 @@ function ensure() {
   const cols = new Set((store().query("PRAGMA table_info(task_assignments)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("now_at")) store().exec("ALTER TABLE task_assignments ADD COLUMN now_at TEXT"); // when it became its engineer's Now
   if (!cols.has("now_pr")) store().exec("ALTER TABLE task_assignments ADD COLUMN now_pr INTEGER"); // the PR of it the engineer is on
+  if (!cols.has("now_pr_stage")) store().exec("ALTER TABLE task_assignments ADD COLUMN now_pr_stage TEXT"); // building, cursor, fixing or proof, as reported
   const scols = new Set((store().query("PRAGMA table_info(task_status)").all() as { name: string }[]).map((c) => c.name));
   if (!scols.has("kind")) store().exec("ALTER TABLE task_status ADD COLUMN kind TEXT"); // 'stop': the line and any block were cleared
 }
@@ -200,7 +204,7 @@ export function unstart(taskId: string, by?: string): Card {
 }
 
 // The engineer's one line: what they are doing on a ticket, and what blocks it.
-export function setTaskStatus(taskId: string, agent: string, note: string, blocked?: string | null, pr?: number | null): Card {
+export function setTaskStatus(taskId: string, agent: string, note: string, blocked?: string | null, pr?: number | null, prStage?: string | null): Card {
   ensure();
   const task = getTask(taskId);
   if (!note.trim()) throw new DakError("no_note", "Say what you are doing: dak status <ticket> \"fixing Cursor round 2\".");
@@ -208,7 +212,9 @@ export function setTaskStatus(taskId: string, agent: string, note: string, block
   // A line about a ticket makes it this engineer's Now; a blocked one is not Now: it waits.
   const mine = store().query("SELECT 1 FROM task_assignments WHERE task_id = ? AND agent = ?").get(task.id, agent);
   if (mine && !blocked?.trim()) makeNow(agent, task.id);
-  if (mine && pr) store().query("UPDATE task_assignments SET now_pr = ? WHERE task_id = ?").run(pr, task.id);
+  if (prStage && !(PR_STAGES as readonly string[]).includes(prStage)) throw new DakError("bad_stage", `--pr-stage is one of ${PR_STAGES.join(", ")}.`);
+  if (mine && pr) store().query("UPDATE task_assignments SET now_pr = ?, now_pr_stage = ? WHERE task_id = ?").run(pr, prStage ?? null, task.id);
+  else if (mine && prStage) store().query("UPDATE task_assignments SET now_pr_stage = ? WHERE task_id = ?").run(prStage, task.id);
   if (mine && blocked?.trim()) store().query("UPDATE task_assignments SET now_at = NULL, started_at = coalesce(started_at, ?) WHERE task_id = ?").run(new Date().toISOString(), task.id);
   return card(task.id);
 }
@@ -242,7 +248,7 @@ function latestPrStages(work: Work[]): Stage[] {
   return [...by.values()].map((w) => w.state as Stage);
 }
 
-const RANK: Record<Stage, number> = { backlog: 0, next: 1, you: 2, blocked: 3, held: 4, changes: 5, review: 6, approved: 7, merging: 8, checking: 9, done: 10 };
+const RANK: Record<Stage, number> = { backlog: 0, next: 1, you: 2, blocked: 3, held: 4, building: 5, cursor: 6, changes: 7, review: 8, proof: 9, approved: 10, merging: 11, checking: 12, done: 13 };
 
 /* A ticket's work is its own: the PRs whose title names it, and the topics whose subject names it.
    It needs the person only when one of ITS OWN topics (the subject names the ticket) waits on them
@@ -255,7 +261,8 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
   const names = new RegExp(`(^|[^A-Za-z0-9])${task.id.replace(/[-]/g, "\\-")}(?![0-9])`, "i");
   for (const t of threads) {
     const full = getThread(t.id);
-    const all = prStates(full.messages, [t.to]);
+    // Approved means the person approved that exact PR: an agent's verdict on a topic sent to it is not.
+    const all = prStates(full.messages, [me]);
     const own = names.test(t.subject);
     const asksMe = own && t.status === "waiting" && t.to === me;
     if (all.length) {
@@ -285,8 +292,13 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
   const prs = latestPrStages(unique);
   const open = prs.filter((x) => (x as string) !== "live");
   const blocked = s?.blocked as string | null | undefined;
-  // The PR the engineer is on: the one they named (dak status --pr), else the newest open one.
+  // The PR the engineer is on: the one they named (dak status --pr), else the newest open one. A
+  // named PR not on Dak yet (still in Cursor) is listed from what they reported. While the person
+  // has not seen it, the engineer's word on it (cursor, fixing, proof) says where it is.
   const openPrs = unique.filter((w) => w.kind === "pr" && w.state !== "live");
+  const reported = (a?.now_pr_stage === "fixing" ? "changes" : a?.now_pr_stage) as Stage | undefined;
+  if (a?.now_pr && !unique.some((w) => w.pr === a.now_pr)) openPrs.push({ kind: "pr", thread: "", label: `#${a.now_pr} not on Dak yet`, state: reported ?? "building", at: a.now_at ?? a.assigned_at, pr: a.now_pr });
+  else if (a?.now_pr && reported) { const w = openPrs.find((x) => x.pr === a.now_pr); if (w && ["review", "changes"].includes(w.state)) w.state = reported; }
   const nowPr = (a?.now_pr && openPrs.find((w) => w.pr === a.now_pr)) || openPrs.slice().sort((x, y) => y.at.localeCompare(x.at))[0];
   let stage: Stage;
   // Linear's "Checking" first: some workflows file it as a completed state.

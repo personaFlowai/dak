@@ -1336,6 +1336,11 @@ describe("the Board", () => {
     card = dak("board", "--json").json().cards.find((c: any) => c.id === b.id);
     expect(card.stage).toBe("approved");
     // Back to the backlog.
+    // A PR named with --pr that is not on Dak yet is listed from the engineer's word, and the ticket reads as it.
+    const named = dak("status", b.id, "fixing Cursor round 2", "--pr", "7777", "--pr-stage", "fixing", "--for", "board-eng", "--json").json();
+    expect(named.prs.find((p: any) => p.number === 7777)).toMatchObject({ now: true, stage: "changes" });
+    expect(named.stage).toBe("changes");
+    expect(dak("status", b.id, "x", "--pr-stage", "nonsense", "--for", "board-eng").code).not.toBe(0);
     // A batch topic that carries this ticket's PR does not make it "needs you": only its own topic does.
     const batch = dak("send", "--to", "sam", "--from", "board-eng", "--diff", "d2.diff", "--subject", "Batch of three", "--json").json();
     expect(batch.thread.id).toBeTruthy();

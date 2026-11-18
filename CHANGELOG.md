@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.1
+
+- **Approved means the person approved that exact PR.** An agent's verdict on a PR sent to it no longer shows as Approved on the Board.
+- **`--pr-stage building|cursor|fixing|proof`** with `dak status <ticket> --pr N` says where the engineer's PR is before it reaches the person. A PR named with `--pr` is listed on the card even before it is on Dak, and the ticket reads as that PR.
+
 ## 0.14.0
 
 - **Which PR, not just which ticket.** A ticket's card lists its open PRs, each with its own stage (In review, With you, Fixing, Approved, Merging, Held), the engineer's PR first and marked; merged ones fold into "N live". Tap a PR to open its topic.

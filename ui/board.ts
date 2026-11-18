@@ -14,18 +14,18 @@ export async function loadBoard() {
   try { S.board = await api<BoardData>("/board"); S.boardError = ""; } catch (e: any) { S.boardError = e.message ?? "Could not load the Board."; }
 }
 
-const STAGES: [string, string][] = [["next", "Up next"], ["you", "Needs you"], ["blocked", "Blocked"], ["review", "In review"],
+const STAGES: [string, string][] = [["next", "Up next"], ["you", "Needs you"], ["blocked", "Blocked"], ["building", "Building"], ["cursor", "Cursor"], ["review", "In review"], ["proof", "Proof"],
   ["changes", "Fixing"], ["approved", "Approved"], ["merging", "Merging"], ["held", "Held"], ["checking", "Checking"]];
 const SNAME: Record<string, string> = Object.fromEntries([["backlog", "Backlog"], ...STAGES, ["done", "Done"], ["live", "Live"]]);
 // A PR's own stage, in the words the person uses for one PR.
-const PRNAME: Record<string, string> = { you: "With you", review: "In review", changes: "Fixing", approved: "Approved", merging: "Merging", held: "Held", live: "Live" };
+const PRNAME: Record<string, string> = { building: "Building", cursor: "Cursor", review: "In review", changes: "Fixing", proof: "Proof", you: "With you", approved: "Approved", merging: "Merging", held: "Held", live: "Live" };
 
 // A ring that fills as a ticket moves, as Linear draws status; a check once it is finished; a bar
 // across it when it is blocked.
 function glyph(s: string): string {
   const c = s === "you" ? "var(--accent)" : ["approved", "checking", "live", "done"].includes(s) ? "var(--add)" : ["changes", "blocked", "held"].includes(s) ? "var(--warn-text, #9a5b00)" : "var(--text3)";
   if (s === "blocked" || s === "held") return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4"/><path d="M3.6 7h6.8" stroke="${c}" stroke-width="1.6"/></svg>`;
-  const frac = ({ backlog: -1, next: 0, you: .5, review: .55, changes: .45, approved: .8, merging: .9, checking: .97, live: 1, done: 1 } as Record<string, number>)[s] ?? 0;
+  const frac = ({ backlog: -1, next: 0, building: .25, cursor: .4, you: .5, review: .55, changes: .45, proof: .7, approved: .8, merging: .9, checking: .97, live: 1, done: 1 } as Record<string, number>)[s] ?? 0;
   if (frac < 0) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4" stroke-dasharray="2 2"/></svg>`;
   if (frac >= 1) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="${c}"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" fill="none" stroke="#fff" stroke-width="1.5"/></svg>`;
   const a = frac * 2 * Math.PI, x = 7 + 3.2 * Math.sin(a), y = 7 - 3.2 * Math.cos(a), big = frac > .5 ? 1 : 0;
@@ -79,7 +79,7 @@ function card(c: Card, who: string | null): string {
 function prList(c: Card): string {
   if (!c.prs.length && !c.live_prs) return "";
   const rows = c.prs.slice().sort((x, y) => Number(y.now) - Number(x.now));
-  const shown = rows.slice(0, 4).map((p) => `<button class="bpr ${p.now ? "now" : ""}" data-topic="${esc(p.thread)}" title="${esc(p.title)}">${p.now ? `<b class="bprnow" title="The PR they are on">●</b>` : `<span class="bprdot"></span>`}<code>${p.number ? `#${p.number}` : "PR"}</code><span class="bprt">${esc(p.title)}</span><i>${glyph(p.stage)}${PRNAME[p.stage] ?? p.stage}</i></button>`).join("");
+  const shown = rows.slice(0, 4).map((p) => `<button class="bpr ${p.now ? "now" : ""}" ${p.thread ? `data-topic="${esc(p.thread)}"` : "disabled"} title="${esc(p.title)}">${p.now ? `<b class="bprnow" title="The PR they are on">●</b>` : `<span class="bprdot"></span>`}<code>${p.number ? `#${p.number}` : "PR"}</code><span class="bprt">${esc(p.title)}</span><i>${glyph(p.stage)}${PRNAME[p.stage] ?? p.stage}</i></button>`).join("");
   const more = rows.length > 4 ? `<p class="bprmore">+${rows.length - 4} more open</p>` : "";
   return `<div class="bc-prs">${shown}${more}${c.live_prs ? `<p class="bprmore">${glyph("live")}${c.live_prs} live</p>` : ""}</div>`;
 }
@@ -167,7 +167,7 @@ export function boardView(): string {
   const onYou = (c: Card) => /pratik|\byou\b/i.test(c.status?.blocked ?? "");
   const GROUPS: [string, (c: Card) => boolean][] = [["Needs you", (c) => c.stage === "you"], ["Blocked on you", (c) => c.stage === "blocked" && onYou(c)],
     ["Blocked", (c) => c.stage === "blocked" && !onYou(c)],
-    ["In review", (c) => ["review", "changes", "approved", "merging"].includes(c.stage)], ["Checking", (c) => c.stage === "checking"], ["Up next", (c) => c.stage === "next"]];
+    ["In review", (c) => ["building", "cursor", "review", "changes", "proof", "approved", "merging", "held"].includes(c.stage)], ["Checking", (c) => c.stage === "checking"], ["Up next", (c) => c.stage === "next"]];
   const since = (iso: string | null) => (iso ? when(iso) : "");
   if (S.boardView === "piles") {
     main = `<section class="bpiles">${shownEng.map((e) => {

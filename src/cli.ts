@@ -49,7 +49,9 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak pile [--for name]                          your tickets on the Board, in order
   dak next                                       take the top of your pile (marks it started)
   dak status <ticket> "what you're doing" [--pr 2551] [--blocked "on what"]   your one line on a ticket (makes it
-                                                 your Now; --pr names the PR of it you are on)
+                                                 your Now; --pr names the PR of it you are on;
+                                                 --pr-stage building|cursor|fixing|proof says where that PR is
+                                                 before it reaches the person)
   dak status <ticket> --stop                     back to Up next: not Now, not started
   dak assign <ticket> <agent|none> [--before <ticket>] [--quiet]  put a ticket in an agent's pile
   dak assign --file plan.txt [--quiet]           many at once: "<ticket> <agent>" per line, in pile order;
@@ -282,7 +284,7 @@ const OPTIONS = {
   pr: { type: "string" }, repo: { type: "string" }, base: { type: "string" }, diff: { type: "string" },
   chapters: { type: "string" }, doc: { type: "string", multiple: true }, file: { type: "string", multiple: true },
   link: { type: "string", multiple: true }, verdict: { type: "string" }, on: { type: "string", multiple: true },
-  blocked: { type: "string" }, before: { type: "string" }, quiet: { type: "boolean" },
+  blocked: { type: "string" }, before: { type: "string" }, quiet: { type: "boolean" }, "pr-stage": { type: "string" },
   display: { type: "string" }, role: { type: "string" }, area: { type: "string" }, can: { type: "string" }, cannot: { type: "string" }, timeout: { type: "string" },
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
@@ -459,7 +461,7 @@ export async function main(argv: string[]): Promise<number> {
         if (values.stop) { const c = unstart(id, who); out(json, c, () => `${c.id} is back in Up next: not Now, not started, no line or block.`); return 0; }
         const prN = values.pr ? Number(String(values.pr).replace(/^#/, "")) : null;
         if (values.pr && !Number.isInteger(prN)) throw new DakError("bad_pr", "--pr takes the PR number you are on: --pr 2551");
-        const c = setTaskStatus(id, who, rest.join(" ") || readBody([], values), values.blocked, prN);
+        const c = setTaskStatus(id, who, rest.join(" ") || readBody([], values), values.blocked, prN, values["pr-stage"] ?? null);
         out(json, c, () => `${c.id}: ${c.stage}${c.stage_note ? ` (${c.stage_note})` : ""}`);
         return 0;
       }
