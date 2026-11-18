@@ -1358,7 +1358,7 @@ describe("the Board", () => {
     expect((await syncLinear(fake as any)).count).toBe(2);
     const cards = dak("board", "--json").json().cards;
     expect(cards.find((c: any) => c.id === "REVA-9001")).toMatchObject({ labels: ["attendance"], milestone: "M21", stage: "backlog" });
-    expect(cards.find((c: any) => c.id === "REVA-9002").stage).toBe("backlog"); // Linear's own status no longer sets the stage; only Done takes it off
+    expect(cards.find((c: any) => c.id === "REVA-9002").stage).toBe("checking"); // Linear's "Checking": merged, its test not yet proven
     clearLinearKey();
   });
 });

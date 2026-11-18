@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1
+
+- **Checking stays on the Board.** A ticket whose PRs are all merged and live, or that Linear has at "Checking", shows as Checking (its own group in each pile) until Linear says Done, so merged work never vanishes before its Done-only-when test is proven.
+
 ## 0.13.0
 
 - **One Now per engineer.** `dak next` takes the top of an engineer's pile and makes it their Now; `dak status <ticket> "…"` makes that ticket their Now and puts the previous one back in Up next. Each pile reads top down: Now, Needs you, Blocked on you, Blocked, In review, Up next. Its header says "Now: REVA-x · last word 2h ago", or "Idle since …" when there is no Now.

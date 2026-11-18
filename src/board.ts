@@ -24,7 +24,8 @@ export interface Task {
 }
 // next: in a pile, not started. you: its own topic waits on the person, or it is blocked on them.
 // blocked: the engineer said what blocks it. review / changes / approved / merging: its own PRs.
-export type Stage = "backlog" | "next" | "you" | "blocked" | "review" | "changes" | "approved" | "merging" | "done";
+// checking: merged and live, but its Done-only-when test is not proven yet (Linear says when).
+export type Stage = "backlog" | "next" | "you" | "blocked" | "review" | "changes" | "approved" | "merging" | "checking" | "done";
 export interface Work { kind: "pr" | "doc" | "note"; thread: string; label: string; state: string; at: string }
 export interface Card extends Task {
   agent: string | null; position: number | null; assigned_at: string | null; started_at: string | null;
@@ -37,7 +38,7 @@ export interface Card extends Task {
   history: { at: string; what: string }[]; // assigned, started, the engineer's lines, newest last
 }
 
-export const STAGES: Stage[] = ["backlog", "next", "you", "blocked", "review", "changes", "approved", "merging", "done"];
+export const STAGES: Stage[] = ["backlog", "next", "you", "blocked", "review", "changes", "approved", "merging", "checking", "done"];
 
 function ensure() {
   store().exec(`
@@ -221,7 +222,7 @@ function latestPrStages(work: Work[]): Stage[] {
   return [...by.values()].map((w) => w.state as Stage);
 }
 
-const RANK: Record<Stage, number> = { backlog: 0, next: 1, you: 2, blocked: 3, changes: 4, review: 5, approved: 6, merging: 7, done: 8 };
+const RANK: Record<Stage, number> = { backlog: 0, next: 1, you: 2, blocked: 3, changes: 4, review: 5, approved: 6, merging: 7, checking: 8, done: 9 };
 
 /* A ticket's work is its own: the PRs whose title names it, and the topics whose subject names it.
    It needs the person only when one of ITS OWN topics (the subject names the ticket) waits on them
@@ -264,7 +265,9 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
   const blocked = s?.blocked as string | null | undefined;
   let stage: Stage;
   if (task.state_type === "completed" || task.state_type === "canceled") stage = "done";
-  else if (prs.length && !open.length) stage = "done"; // every PR it has is merged and live
+  // Every PR it has is merged and live: it stays on the Board as Checking until Linear says Done,
+  // so merged work never vanishes before its test is proven. Linear's own "Checking" says so too.
+  else if ((prs.length && !open.length) || /check/i.test(task.state ?? "")) stage = "checking";
   // "Needs you" is only ever something you can open and answer: a topic of the ticket's own that
   // waits on you. An engineer saying it is blocked on you is Blocked, with their reason, until
   // they ask on Dak.
