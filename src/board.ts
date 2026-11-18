@@ -9,6 +9,7 @@ import { loadConfig, person } from "./config";
 import { store, createThread, getThread, addMessage } from "./store";
 import { queue } from "./queue";
 import { prStates } from "./verdicts";
+import { ghState } from "./ghstate";
 import { team } from "./team";
 import { DakError, type Thread } from "./types";
 
@@ -209,13 +210,14 @@ export function setTaskStatus(taskId: string, agent: string, note: string, block
   const task = getTask(taskId);
   if (!note.trim()) throw new DakError("no_note", "Say what you are doing: dak status <ticket> \"fixing Cursor round 2\".");
   store().query("INSERT INTO task_status (task_id, agent, note, blocked, at) VALUES (?,?,?,?,?)").run(task.id, agent, note.trim().slice(0, 300), blocked?.trim() || null, new Date().toISOString());
-  // A line about a ticket makes it this engineer's Now; a blocked one is not Now: it waits.
-  const mine = store().query("SELECT 1 FROM task_assignments WHERE task_id = ? AND agent = ?").get(task.id, agent);
-  if (mine && !blocked?.trim()) makeNow(agent, task.id);
+  // A line about a ticket makes it its engineer's Now, whoever writes it (the engineer, or the lead
+  // for them); a blocked one is not Now: it waits. --pr names the PR of it they are on.
   if (prStage && !(PR_STAGES as readonly string[]).includes(prStage)) throw new DakError("bad_stage", `--pr-stage is one of ${PR_STAGES.join(", ")}.`);
-  if (mine && pr) store().query("UPDATE task_assignments SET now_pr = ?, now_pr_stage = ? WHERE task_id = ?").run(pr, prStage ?? null, task.id);
-  else if (mine && prStage) store().query("UPDATE task_assignments SET now_pr_stage = ? WHERE task_id = ?").run(prStage, task.id);
-  if (mine && blocked?.trim()) store().query("UPDATE task_assignments SET now_at = NULL, started_at = coalesce(started_at, ?) WHERE task_id = ?").run(new Date().toISOString(), task.id);
+  const owner = (store().query("SELECT agent FROM task_assignments WHERE task_id = ?").get(task.id) as { agent: string } | null)?.agent;
+  if (owner && !blocked?.trim()) makeNow(owner, task.id);
+  if (owner && blocked?.trim()) store().query("UPDATE task_assignments SET now_at = NULL, started_at = coalesce(started_at, ?) WHERE task_id = ?").run(new Date().toISOString(), task.id);
+  if (owner && pr) store().query("UPDATE task_assignments SET now_pr = ?, now_pr_stage = ? WHERE task_id = ?").run(pr, prStage ?? null, task.id);
+  else if (owner && prStage) store().query("UPDATE task_assignments SET now_pr_stage = ? WHERE task_id = ?").run(prStage, task.id);
   return card(task.id);
 }
 
@@ -277,6 +279,10 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
           else if (["testing", "building", "merging"].includes(row.state)) st = "merging";
         }
         if (/\[parked\b/i.test(p.title ?? "") || /\[parked\b/i.test(t.subject)) st = "held";
+        // GitHub's own word: closed without merging is no work at all; merged is live.
+        const gh = ghState(p.number);
+        if (gh === "CLOSED") continue;
+        if (gh === "MERGED") st = "live";
         if (asksMe && !p.verdict) needsYou = true;
         work.push({ kind: "pr", thread: t.id, label: `${p.key}${p.title ? ` ${p.title}` : ""}`, state: asksMe && !p.verdict && st !== "live" ? "you" : st, at: t.updated_at, pr: p.number });
       }

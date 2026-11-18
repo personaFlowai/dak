@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.2
+
+- **A status line written for an engineer counts.** `dak status <ticket> … --pr N --pr-stage …` from the lead (or anyone) now sets the ticket's engineer's Now and Now PR; before, only the engineer's own line did, and the rest was silently dropped.
+- **The Board asks GitHub which PRs are open.** A PR closed without merging leaves the card; one merged outside the merge queue counts as live. Dak reads it with one `gh pr list` per repository (worktrees share one), every two minutes in the background, and when `dak board` or `dak pile` runs.
+
 ## 0.14.1
 
 - **Approved means the person approved that exact PR.** An agent's verdict on a PR sent to it no longer shows as Approved on the Board.

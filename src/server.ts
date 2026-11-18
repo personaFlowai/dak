@@ -29,6 +29,7 @@ import { DakError, type Verdict } from "./types";
 import { setMember, team } from "./team";
 import { addTask, assign, board } from "./board";
 import { clearLinearKey, linearKey, setLinearKey, syncLinear } from "./linear";
+import { refreshGhStates } from "./ghstate";
 // Embedded at compile time, so the single dak binary carries its own screens.
 import indexHtml from "../dist/ui/index.html" with { type: "text" };
 import appJs from "../dist/ui/app.js" with { type: "text" };
@@ -61,6 +62,8 @@ export function serve(port?: number) {
   const ticker = setInterval(() => {
     try { tickRunners(); } catch { /* never stop the server */ }
     if (++ticks % 3 === 0) try { tickSleepers(); } catch { /* same */ } // closed sessions: every 6 s is soon enough
+    // Which PRs GitHub has merged or closed, every two minutes (one gh call per repository).
+    if (ticks % 60 === 2 && !process.env.DAK_NO_GH) refreshGhStates().catch(() => {});
     // The Linear backlog while a key is set: what changed, every minute; everything, every half
     // hour. A failed read waits for the next.
     if (linearKey() && !process.env.DAK_NO_LINEAR) {
@@ -478,7 +481,7 @@ async function api(req: Request, url: URL): Promise<Response> {
       const b = await body();
       return json(assign(String(b.task ?? ""), b.agent ? String(b.agent) : null, { before: b.before ? String(b.before) : null, by: person(loadConfig()) }));
     }
-    if (method === "POST" && parts[1] === "sync") return json(await syncLinear());
+    if (method === "POST" && parts[1] === "sync") { await refreshGhStates().catch(() => 0); return json(linearKey() ? await syncLinear() : { count: 0 }); }
     if (method === "POST" && parts[1] === "tasks") { const b = await body(); return json(addTask(String(b.title ?? ""), { labels: Array.isArray(b.labels) ? b.labels.map(String) : [] }), 201); }
   }
   // The person's Linear key: kept in a private file, never returned.

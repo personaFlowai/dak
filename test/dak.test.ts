@@ -20,6 +20,7 @@ process.env.DAK_CURSOR_HOOKS = join(home, "cursor-hooks.json");
 // The server's wake ticker would take other tests' mail; the wake test drives it by hand.
 process.env.DAK_NO_WAKE = "1";
 process.env.DAK_NO_LINEAR = "1"; // never call Linear from a test
+process.env.DAK_NO_GH = "1"; // nor GitHub
 process.env.DAK_CLAUDE_SESSIONS = join(home, "claude-sessions");
 process.env.DAK_WAKE_GRACE_MS = "0";
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -1341,6 +1342,9 @@ describe("the Board", () => {
     expect(named.prs.find((p: any) => p.number === 7777)).toMatchObject({ now: true, stage: "changes" });
     expect(named.stage).toBe("changes");
     expect(dak("status", b.id, "x", "--pr-stage", "nonsense", "--for", "board-eng").code).not.toBe(0);
+    // The lead can write the line for the engineer: it still sets the engineer's Now and PR.
+    const byLead = dak("status", b.id, "proof running", "--pr", "7778", "--pr-stage", "proof", "--for", "atlas", "--json").json();
+    expect([byLead.now, byLead.prs.find((p: any) => p.number === 7778)?.stage]).toEqual([true, "proof"]);
     // A batch topic that carries this ticket's PR does not make it "needs you": only its own topic does.
     const batch = dak("send", "--to", "sam", "--from", "board-eng", "--diff", "d2.diff", "--subject", "Batch of three", "--json").json();
     expect(batch.thread.id).toBeTruthy();

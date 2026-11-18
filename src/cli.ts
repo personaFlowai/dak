@@ -16,6 +16,7 @@ import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, 
 import { DakError, type Message, type Verdict } from "./types";
 import { approvedSummary, verdictLabel } from "./verdicts";
 import { setMember, team } from "./team";
+import { refreshGhStates } from "./ghstate";
 import { addTask, assign, assignMany, board, next as nextTask, pileOf, setTaskStatus, unstart, type Card } from "./board";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
@@ -449,7 +450,7 @@ export async function main(argv: string[]): Promise<number> {
     case "pile": case "next": case "status": case "assign": case "board": case "task": {
       const who = values.for ?? values.from ?? whoami({ tool: detectTool(), where: process.cwd() });
       const line = (c: Card) => `${c.now ? "NOW " : "    "}${c.id.padEnd(11)} ${c.stage.padEnd(9)} ${c.title}${c.stage_note ? `  (${c.stage_note})` : ""}${c.agent && cmd === "board" ? `  @${c.agent}` : ""}`;
-      if (cmd === "pile") { const p = pileOf(who); out(json, p, () => p.length ? p.map((c, i) => `${String(i + 1).padStart(2)}. ${line(c)}`).join("\n") : `Nothing in ${who}'s pile.`); return 0; }
+      if (cmd === "pile") { await refreshGhStates(); const p = pileOf(who); out(json, p, () => p.length ? p.map((c, i) => `${String(i + 1).padStart(2)}. ${line(c)}`).join("\n") : `Nothing in ${who}'s pile.`); return 0; }
       if (cmd === "next") {
         const c = nextTask(who);
         out(json, c, () => c ? `Next for ${who}: ${c.id} ${c.title}${c.url ? `\n${c.url}` : ""}\nSay where you are with: dak status ${c.id} "what you're doing"` : `Nothing waiting in ${who}'s pile.`);
@@ -490,6 +491,7 @@ export async function main(argv: string[]): Promise<number> {
         out(json, t, () => `Added ${t.id}.`);
         return 0;
       }
+      await refreshGhStates(); // the CLI has no server's background read: ask GitHub now
       const b = board();
       const shown = values.for ? b.cards.filter((c) => c.agent === values.for) : b.cards;
       out(json, { ...b, cards: shown }, () => shown.map(line).join("\n") || "The Board is empty. Set the Linear key on the Board page.");
