@@ -455,7 +455,7 @@ export async function main(argv: string[]): Promise<number> {
       if (cmd === "status") {
         const [id, ...rest] = positionals;
         if (!id) throw new DakError("no_task", 'Which ticket? dak status REVA-3041 "fixing Cursor round 2" [--blocked "..."] [--stop]');
-        if (values.stop) { const c = unstart(id); out(json, c, () => `${c.id} is back in Up next.`); return 0; }
+        if (values.stop) { const c = unstart(id, who); out(json, c, () => `${c.id} is back in Up next: not Now, not started, no line or block.`); return 0; }
         const c = setTaskStatus(id, who, rest.join(" ") || readBody([], values), values.blocked);
         out(json, c, () => `${c.id}: ${c.stage}${c.stage_note ? ` (${c.stage_note})` : ""}`);
         return 0;

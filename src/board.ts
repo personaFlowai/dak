@@ -50,6 +50,8 @@ function ensure() {
     CREATE INDEX IF NOT EXISTS task_status_by_task ON task_status (task_id, at);`);
   const cols = new Set((store().query("PRAGMA table_info(task_assignments)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("now_at")) store().exec("ALTER TABLE task_assignments ADD COLUMN now_at TEXT"); // when it became its engineer's Now
+  const scols = new Set((store().query("PRAGMA table_info(task_status)").all() as { name: string }[]).map((c) => c.name));
+  if (!scols.has("kind")) store().exec("ALTER TABLE task_status ADD COLUMN kind TEXT"); // 'stop': the line and any block were cleared
 }
 
 // One Now per agent: making a ticket Now puts the agent's previous Now back in its pile.
@@ -181,10 +183,13 @@ export function next(agent: string): Card | null {
 }
 
 // Put a ticket back to Up next: not Now, not started. For a Now left behind by an old dak next.
-export function unstart(taskId: string): Card {
+// It also clears the engineer's last line and any block: the history keeps them, the card does not.
+export function unstart(taskId: string, by?: string): Card {
   ensure();
   const task = getTask(taskId);
+  const a = store().query("SELECT agent FROM task_assignments WHERE task_id = ?").get(task.id) as { agent: string } | null;
   store().query("UPDATE task_assignments SET now_at = NULL, started_at = NULL WHERE task_id = ?").run(task.id);
+  store().query("INSERT INTO task_status (task_id, agent, note, blocked, at, kind) VALUES (?,?,?,NULL,?,'stop')").run(task.id, by ?? a?.agent ?? "dak", "back to Up next", new Date().toISOString());
   return card(task.id);
 }
 
@@ -293,7 +298,8 @@ function cardsFor(tasks: Task[]): Card[] {
   const as = new Map((store().query("SELECT * FROM task_assignments").all() as any[]).map((r) => [r.task_id, r]));
   const st = new Map<string, any>();
   const lines = new Map<string, any[]>();
-  for (const r of store().query("SELECT * FROM task_status ORDER BY at").all() as any[]) { st.set(r.task_id, r); (lines.get(r.task_id) ?? lines.set(r.task_id, []).get(r.task_id)!).push(r); }
+  // The latest line is the ticket's status, unless it was a --stop, which clears it.
+  for (const r of store().query("SELECT * FROM task_status ORDER BY at, rowid").all() as any[]) { if (r.kind === "stop") st.delete(r.task_id); else st.set(r.task_id, r); (lines.get(r.task_id) ?? lines.set(r.task_id, []).get(r.task_id)!).push(r); }
   const q = new Map(queue({ all: true }).map((r) => [r.pr, r]));
   const works = workFor(tasks.map((t) => t.id));
   // An engineer who took tickets before Now existed (or never ran dak next) still has one: the

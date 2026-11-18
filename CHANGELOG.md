@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.6
+
+- `dak status <ticket> --stop` now also clears the engineer's last line and any block, so the ticket really is back in Up next (the history keeps them). Before, a blocked ticket stayed blocked after --stop.
+
 ## 0.13.5
 
 - **A blocked ticket shows the engineer's line and the reason:** the line as written, and "Blocked on …" under it (the line was stored but hidden).
