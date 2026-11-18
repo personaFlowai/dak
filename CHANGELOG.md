@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.7
+
+- **Checking comes only from Linear.** A ticket whose PRs are all merged is not finished (more of its work is often still to come), so it stays Up next or Now, with its PR history, until Linear moves it to Checking.
+
 ## 0.13.6
 
 - `dak status <ticket> --stop` now also clears the engineer's last line and any block, so the ticket really is back in Up next (the history keeps them). Before, a blocked ticket stayed blocked after --stop.

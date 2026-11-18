@@ -24,7 +24,7 @@ export interface Task {
 }
 // next: in a pile, not started. you: its own topic waits on the person, or it is blocked on them.
 // blocked: the engineer said what blocks it. review / changes / approved / merging: its own PRs.
-// checking: merged and live, but its Done-only-when test is not proven yet (Linear says when).
+// checking: Linear says Checking: shipped, its Done-only-when test not proven yet.
 export type Stage = "backlog" | "next" | "you" | "blocked" | "review" | "changes" | "approved" | "merging" | "checking" | "done";
 export interface Work { kind: "pr" | "doc" | "note"; thread: string; label: string; state: string; at: string }
 export interface Card extends Task {
@@ -278,9 +278,9 @@ function stageOf(task: Task, a: any, s: any, threads: Thread[], me: string, q: M
   const blocked = s?.blocked as string | null | undefined;
   let stage: Stage;
   if (task.state_type === "completed" || task.state_type === "canceled") stage = "done";
-  // Every PR it has is merged and live: it stays on the Board as Checking until Linear says Done,
-  // so merged work never vanishes before its test is proven. Linear's own "Checking" says so too.
-  else if ((prs.length && !open.length) || /check/i.test(task.state ?? "")) stage = "checking";
+  // Checking comes only from Linear's "Checking" (the lead sets it): merged PRs alone do not
+  // finish a ticket, since more of its work is often still to come.
+  else if (/check/i.test(task.state ?? "")) stage = "checking";
   // "Needs you" is only ever something you can open and answer: a topic of the ticket's own that
   // waits on you. An engineer saying it is blocked on you is Blocked, with their reason, until
   // they ask on Dak.
