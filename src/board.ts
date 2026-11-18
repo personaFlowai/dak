@@ -160,30 +160,42 @@ function workFor(ids: string[]): Map<string, Thread[]> {
 
 const RANK: Record<Stage, number> = { backlog: 0, next: 1, brief: 2, building: 3, review: 4, changes: 5, you: 6, approved: 7, merging: 8, live: 9, checking: 10, done: 11 };
 
+// Each PR's stage as its newest topic has it (a PR sent on its own topic and again in a batch).
+function latestPrStages(work: Work[]): Stage[] {
+  const by = new Map<string, Work>();
+  for (const w of work) if (w.kind === "pr") { const k = w.label.split(" ")[0]; const cur = by.get(k); if (!cur || w.at > cur.at) by.set(k, w); }
+  return [...by.values()].map((w) => w.state as Stage);
+}
+
+// A ticket's own work on a topic: the PRs whose title names it (a batch topic carries other
+// tickets' PRs too), or the topic itself when it carries no PR and its subject names the ticket.
 function stageOf(task: Task, a: any, threads: Thread[], me: string, q: Map<number, any>): { stage: Stage; note: string | null; work: Work[]; needs_you: boolean } {
   const work: Work[] = [];
   let needsYou = false;
   const prStagesSeen: Stage[] = [];
   let note: string | null = null;
+  const names = new RegExp(`(^|[^A-Za-z0-9])${task.id.replace(/[-]/g, "\\-")}(?![0-9])`, "i");
   for (const t of threads) {
     const full = getThread(t.id);
-    const prs = prStates(full.messages, [t.to]);
+    const all = prStates(full.messages, [t.to]);
     const waitingOnMe = t.status === "waiting" && t.to === me;
-    if (waitingOnMe) needsYou = true;
-    if (prs.length) {
+    if (all.length) {
+      const mine = all.filter((p) => names.test(p.title ?? "")) ;
+      const prs = mine.length ? mine : all.length === 1 && names.test(t.subject) ? all : [];
       for (const p of prs) {
         const row = p.number ? q.get(p.number) : null;
         let s: Stage = p.verdict === "approve" ? "approved" : p.verdict === "changes" ? "changes" : waitingOnMe ? "you" : "review";
         if (row) {
-          if (row.state === "deployed") s = "live";
-          else if (["merged", "migrated"].includes(row.state)) s = "live";
+          if (["deployed", "merged", "migrated"].includes(row.state)) s = "live";
           else if (["testing", "building", "merging", "failed", "held"].includes(row.state)) { s = "merging"; if (row.state === "failed" || row.state === "held") note = `stopped: ${row.note ?? row.state}`; }
         }
+        if (s === "you") needsYou = true;
         prStagesSeen.push(s);
         work.push({ kind: "pr", thread: t.id, label: `${p.key}${p.title ? ` ${p.title}` : ""}`, state: s, at: t.updated_at });
       }
-    } else {
-      const s = waitingOnMe ? "you" : t.status === "closed" ? "done" : "brief";
+    } else if (names.test(t.subject)) {
+      const s: Stage = waitingOnMe ? "you" : t.status === "closed" ? "done" : "brief";
+      if (s === "you") needsYou = true;
       work.push({ kind: full.messages.some((m) => m.attachments.some((x) => x.type === "doc" || x.type === "file")) ? "doc" : "note", thread: t.id, label: t.subject, state: s, at: t.updated_at });
     }
   }
@@ -192,14 +204,21 @@ function stageOf(task: Task, a: any, threads: Thread[], me: string, q: Map<numbe
   let stage: Stage;
   if (task.state_type === "completed" || task.state_type === "canceled") stage = "done";
   else if (task.state && /check/i.test(task.state)) stage = "checking";
-  else if (prStagesSeen.length) stage = prStagesSeen.reduce((lo, s) => (RANK[s] < RANK[lo] ? s : lo));
+  else if (prStagesSeen.length) stage = latestPrStages(work).reduce((lo, s) => (RANK[s] < RANK[lo] ? s : lo));
   else if (needsYou) stage = "you";
   else if (work.some((w) => w.state === "brief")) stage = "brief";
   else if (a?.started_at) stage = "building";
   else if (a) stage = "next";
+  else if (task.state_type === "started") stage = "building";
   else stage = "backlog";
-  if (stage === "you" || needsYou) needsYou = true;
-  return { stage, note, work: work.sort((x, y) => x.at.localeCompare(y.at)), needs_you: needsYou };
+  // A finished ticket never needs you, whatever an old topic still says.
+  if (stage === "done" || stage === "checking") needsYou = false;
+  // The same PR sent on two topics (its own, and a batch) counts once: as the newer topic has it.
+  const byKey = new Map<string, Work>();
+  for (const w of work) { const k = w.kind === "pr" ? w.label.split(" ")[0] : `${w.thread}|${w.label}`; const cur = byKey.get(k); if (!cur || w.at > cur.at) byKey.set(k, w); }
+  const unique = [...byKey.values()];
+  needsYou = needsYou && unique.some((w) => w.state === "you");
+  return { stage, note, work: unique.sort((x, y) => x.at.localeCompare(y.at)), needs_you: needsYou };
 }
 
 function cardsFor(tasks: Task[]): Card[] {

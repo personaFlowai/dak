@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1
+
+- **The Board links work per PR.** A PR counts for a ticket only when its own title names it (a batch topic carries other tickets' PRs too), and the same PR sent on two topics counts once. "Needs you" no longer lists finished tickets or tickets whose PRs only shared a topic with one waiting on you. A Linear ticket already started shows as Building.
+
 ## 0.11.0
 
 - **The Board** (left rail, and a tab on the phone): your backlog and every engineer's pile in one place. Drag a ticket from the Backlog onto an engineer to give it to them, drag inside a pile to reorder, drag back to the Backlog to take it away. The engineer gets it on their "Board: your pile" topic and Atlas gets an FYI. Filter by engineer, label or milestone, or search. Anything waiting on you is at the top. Every engineer shows, with what they are on or how long they have been idle.
