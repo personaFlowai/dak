@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+
+- **One Now per engineer.** `dak next` takes the top of an engineer's pile and makes it their Now; `dak status <ticket> "…"` makes that ticket their Now and puts the previous one back in Up next. Each pile reads top down: Now, Needs you, Blocked on you, Blocked, In review, Up next. Its header says "Now: REVA-x · last word 2h ago", or "Idle since …" when there is no Now.
+- **Blocked is blocked.** `--blocked "on what"` shows the ticket as Blocked (Blocked on you when the reason names you), never as in progress, and takes it off Now.
+- **"Needs you" only when there is something to answer:** a Dak topic of the ticket's own (its subject names the ticket) waiting on you. A batch topic no longer marks every ticket in it, and an engineer saying it is blocked on you is "Blocked on you" with their reason until they ask on Dak.
+- **Stages come from Dak's facts** (verdicts on the ticket's own topics, the merge queue, merged and live). Linear only takes a ticket off when it is Done or Cancelled there; its "In Progress" and "Checking" no longer set the stage. "Building", "Brief", "Live" and "Checking" are gone as stages; a ticket whose PRs are all live is done.
+
 ## 0.12.1
 
 - **Setting up the Board in bulk:** `dak assign --file plan.txt` takes one `<ticket> <agent>` per line, in pile order. Every line is checked first (a bad ticket or agent changes nothing), then each agent gets one message listing what it got, and the lead one summary, instead of one message per ticket. `--quiet` tells nobody.

@@ -444,7 +444,7 @@ export async function main(argv: string[]): Promise<number> {
     // The Board from the command line: your pile, the next ticket, a status line, assigning.
     case "pile": case "next": case "status": case "assign": case "board": case "task": {
       const who = values.for ?? values.from ?? whoami({ tool: detectTool(), where: process.cwd() });
-      const line = (c: Card) => `${c.id.padEnd(11)} ${c.stage.padEnd(9)} ${c.title}${c.stage_note ? `  (${c.stage_note})` : ""}${c.agent && cmd === "board" ? `  @${c.agent}` : ""}`;
+      const line = (c: Card) => `${c.now ? "NOW " : "    "}${c.id.padEnd(11)} ${c.stage.padEnd(9)} ${c.title}${c.stage_note ? `  (${c.stage_note})` : ""}${c.agent && cmd === "board" ? `  @${c.agent}` : ""}`;
       if (cmd === "pile") { const p = pileOf(who); out(json, p, () => p.length ? p.map((c, i) => `${String(i + 1).padStart(2)}. ${line(c)}`).join("\n") : `Nothing in ${who}'s pile.`); return 0; }
       if (cmd === "next") {
         const c = nextTask(who);

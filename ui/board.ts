@@ -14,14 +14,16 @@ export async function loadBoard() {
   try { S.board = await api<BoardData>("/board"); S.boardError = ""; } catch (e: any) { S.boardError = e.message ?? "Could not load the Board."; }
 }
 
-const STAGES: [string, string][] = [["next", "Up next"], ["brief", "Brief"], ["building", "Building"], ["review", "In review"], ["you", "Needs you"],
-  ["changes", "Changes"], ["approved", "Approved"], ["merging", "Merging"], ["live", "Live"], ["checking", "Checking"]];
-const SNAME: Record<string, string> = Object.fromEntries([["backlog", "Backlog"], ...STAGES, ["done", "Done"]]);
+const STAGES: [string, string][] = [["next", "Up next"], ["you", "Needs you"], ["blocked", "Blocked"], ["review", "In review"],
+  ["changes", "Changes asked"], ["approved", "Approved"], ["merging", "Merging"]];
+const SNAME: Record<string, string> = Object.fromEntries([["backlog", "Backlog"], ...STAGES, ["done", "Done"], ["live", "Live"]]);
 
-// A ring that fills as a ticket moves, as Linear draws status; a check once it is finished.
+// A ring that fills as a ticket moves, as Linear draws status; a check once it is finished; a bar
+// across it when it is blocked.
 function glyph(s: string): string {
-  const c = s === "you" ? "var(--accent)" : ["approved", "live", "done", "checking"].includes(s) ? "var(--add)" : s === "changes" ? "var(--warn-text, #9a5b00)" : "var(--text3)";
-  const frac = ({ backlog: -1, next: 0, brief: .15, building: .35, review: .55, you: .55, changes: .45, approved: .8, merging: .9, live: 1, checking: 1, done: 1 } as Record<string, number>)[s] ?? 0;
+  const c = s === "you" ? "var(--accent)" : ["approved", "live", "done"].includes(s) ? "var(--add)" : ["changes", "blocked"].includes(s) ? "var(--warn-text, #9a5b00)" : "var(--text3)";
+  if (s === "blocked") return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4"/><path d="M3.6 7h6.8" stroke="${c}" stroke-width="1.6"/></svg>`;
+  const frac = ({ backlog: -1, next: 0, you: .5, review: .55, changes: .45, approved: .8, merging: .9, live: 1, done: 1 } as Record<string, number>)[s] ?? 0;
   if (frac < 0) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="${c}" stroke-width="1.4" stroke-dasharray="2 2"/></svg>`;
   if (frac >= 1) return `<svg class="g" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="${c}"/><path d="M4.3 7.2l1.8 1.8 3.6-3.8" fill="none" stroke="#fff" stroke-width="1.5"/></svg>`;
   const a = frac * 2 * Math.PI, x = 7 + 3.2 * Math.sin(a), y = 7 - 3.2 * Math.cos(a), big = frac > .5 ? 1 : 0;
@@ -61,8 +63,8 @@ function card(c: Card, who: string | null): string {
   const prs = c.work.filter((w) => w.kind === "pr").length;
   const meta = [who ? `<span class="bwho">${mark(c.agent!, "sm")}${esc(who)}</span>` : "", ...c.labels.slice(0, who ? 1 : 2).map(lab),
     prs ? `<span class="bprs">${I.pr}${prs}</span>` : ""].join("");
-  return `<article class="bcard ${S.boardOpen === c.id ? "on" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" tabindex="0">
-    <div class="bc-top">${c.needs_you ? `<span class="bdot" title="Needs you"></span>` : ""}<code>${esc(c.id)}</code><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span></div>
+  return `<article class="bcard ${S.boardOpen === c.id ? "on" : ""} ${c.now ? "now" : ""}" draggable="${onPhone() ? "false" : "true"}" data-card="${esc(c.id)}" tabindex="0">
+    <div class="bc-top">${c.now ? `<span class="bnow">Now</span>` : ""}${c.needs_you ? `<span class="bdot" title="Needs you"></span>` : ""}<code>${esc(c.id)}</code><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span></div>
     <p class="bc-title">${esc(c.title)}</p>
     ${c.stage_note ? `<p class="bc-note">${esc(c.stage_note)}</p>` : ""}
     ${meta ? `<div class="bc-meta">${meta}</div>` : ""}</article>`;
@@ -114,7 +116,7 @@ function panel(c: Card, eng: { name: string; label: string }[]): string {
   const who = c.agent ? eng.find((e) => e.name === c.agent)?.label ?? c.agent : null;
   const assign = `<label class="popup"><select data-board-assign="${esc(c.id)}" aria-label="Who has it"><option value="none" ${c.agent ? "" : "selected"}>Backlog: nobody</option>
     ${eng.map((e) => `<option value="${esc(e.name)}" ${c.agent === e.name ? "selected" : ""}>${esc(e.label)}</option>`).join("")}</select></label>`;
-  const since = c.status?.at ?? c.started_at ?? c.assigned_at;
+  const since = c.last_word ?? c.assigned_at;
   const work = c.work.length ? c.work.map((w) => `<button class="bp-work" data-topic="${esc(w.thread)}">${w.kind === "pr" ? I.pr : I.doc}<span>${esc(w.label)}</span><i class="bstage">${glyph(w.state)}${SNAME[w.state] ?? w.state}</i></button>`).join("")
     : `<p class="bp-empty">Nothing linked yet. A Dak topic or PR whose subject or title names ${esc(c.id)} shows here.</p>`;
   const hist = c.history.length ? c.history.slice().reverse().map((h) => `<li><span>${esc(h.what)}</span><time title="${esc(fullWhen(h.at))}">${when(h.at)}</time></li>`).join("") : "";
@@ -123,7 +125,7 @@ function panel(c: Card, eng: { name: string; label: string }[]): string {
     <div class="bp-body">
       <h2>${esc(c.title)}</h2>
       <dl class="bp-facts">
-        <dt>Stage</dt><dd><span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span>${since ? ` <span class="dim">since ${when(since)}</span>` : ""}</dd>
+        <dt>Stage</dt><dd>${c.now ? `<span class="bnow">Now</span>` : ""}<span class="bstage">${glyph(c.stage)}${SNAME[c.stage] ?? c.stage}</span>${since ? ` <span class="dim">last word ${when(since)}</span>` : ""}</dd>
         <dt>Engineer</dt><dd>${assign}${c.agent ? ` <button class="link" data-board-top="${esc(c.id)}">Move to top</button>` : ""}</dd>
         ${c.state ? `<dt>Linear</dt><dd>${esc(c.state)}</dd>` : ""}
         ${c.milestone ? `<dt>Milestone</dt><dd>${esc(c.milestone)}</dd>` : ""}
@@ -144,21 +146,31 @@ export function boardView(): string {
   const shownEng = f.agent ? eng.filter((e) => e.name === f.agent) : eng;
   const pile = (n: string) => list.filter((c) => c.agent === n && c.stage !== "done").sort((x, y) => (x.position ?? 0) - (y.position ?? 0));
   let main: string;
+  // Each pile reads top down: what the engineer is on Now, what needs you or is blocked, what is in
+  // review, then what is up next. An engineer with no Now says how long it has been idle.
+  const onYou = (c: Card) => /pratik|\byou\b/i.test(c.status?.blocked ?? "");
+  const GROUPS: [string, (c: Card) => boolean][] = [["Needs you", (c) => c.stage === "you"], ["Blocked on you", (c) => c.stage === "blocked" && onYou(c)],
+    ["Blocked", (c) => c.stage === "blocked" && !onYou(c)],
+    ["In review", (c) => ["review", "changes", "approved", "merging"].includes(c.stage)], ["Up next", (c) => c.stage === "next"]];
+  const since = (iso: string | null) => (iso ? when(iso) : "");
   if (S.boardView === "piles") {
     main = `<section class="bpiles">${shownEng.map((e) => {
       const p = pile(e.name);
-      const on = p.find((c) => ["building", "review", "you", "changes", "merging"].includes(c.stage));
-      const sub = on ? `On ${esc(on.id)} · ${SNAME[on.stage]}` : `<span class="bidle">${e.last ? `Idle since ${when(e.last)}` : "Idle"}</span>`;
+      const now = p.find((c) => c.now);
+      const rest = p.filter((c) => c !== now);
+      const lastWord = p.map((c) => c.last_word).filter(Boolean).sort().at(-1) as string | undefined;
+      const sub = now ? `Now: ${esc(now.id)} · last word ${since(now.last_word)}` : `<span class="bidle">Idle${lastWord || e.last ? ` since ${since(lastWord ?? e.last)}` : ""}</span>`;
+      const groups = GROUPS.map(([name, f]) => { const cs = rest.filter(f); return cs.length ? `<h4 class="bgh">${name} <i>${cs.length}</i></h4>${cs.map((c) => card(c, null)).join("")}` : ""; }).join("");
       return `<div class="bpile bcol" data-drop="${esc(e.name)}"><header>${mark(e.name, "sm")}<div><b>${esc(e.label)}</b><span>${sub}</span></div><i>${p.length}</i></header>
-        <div class="bpl">${p.map((c) => card(c, null)).join("") || `<p class="bempty">Drop a ticket here</p>`}</div></div>`;
+        <div class="bpl">${now ? card(now, null) : ""}${groups || (now ? "" : `<p class="bempty">Drop a ticket here</p>`)}</div></div>`;
     }).join("")}</section>`;
   } else {
-    const inPiles = list.filter((c) => c.agent && (!f.agent || c.agent === f.agent));
+    const inPiles = list.filter((c) => c.agent && c.stage !== "done" && (!f.agent || c.agent === f.agent));
     const label = (n: string) => eng.find((e) => e.name === n)?.label ?? n;
-    main = `<section class="bpiles">${STAGES.map(([k, name]) => {
-      const cs = inPiles.filter((c) => c.stage === k);
-      return cs.length ? `<div class="bpile"><header>${glyph(k)}<div><b>${name}</b></div><i>${cs.length}</i></header><div class="bpl">${cs.map((c) => card(c, label(c.agent!))).join("")}</div></div>` : "";
-    }).join("") || `<p class="bempty">Nothing in a pile yet. Drag a ticket from the backlog onto an engineer.</p>`}</section>`;
+    const cols: [string, string, Card[]][] = [["now", "Now", inPiles.filter((c) => c.now)], ...STAGES.filter(([k]) => k !== "next").map(([k, n]) => [k, n, inPiles.filter((c) => !c.now && c.stage === k)] as [string, string, Card[]]),
+      ["next", "Up next", inPiles.filter((c) => !c.now && c.stage === "next")]];
+    main = `<section class="bpiles">${cols.map(([k, name, cs]) => cs.length ? `<div class="bpile"><header>${k === "now" ? `<span class="bnow">Now</span>` : glyph(k)}<div><b>${name}</b></div><i>${cs.length}</i></header><div class="bpl">${cs.map((c) => card(c, label(c.agent!))).join("")}</div></div>` : "").join("")
+      || `<p class="bempty">Nothing in a pile yet. Drag a ticket from the backlog onto an engineer.</p>`}</section>`;
   }
   const open = S.boardOpen ? b.cards.find((c) => c.id === S.boardOpen) : null;
   const synced = b.linear.connected ? `Linear synced ${b.synced_at ? when(b.synced_at) : "not yet"} · <button class="link" data-board-sync>Refresh</button> · <button class="link" data-linear-disconnect>Disconnect</button>` : "";

@@ -1310,9 +1310,19 @@ describe("the Board", () => {
     expect(atlas[0]?.quiet).toBe(true);
     // Next takes the top of the pile and starts it; a status line sets the note.
     const nx = dak("next", "--for", "board-eng", "--json").json();
-    expect([nx.id, nx.stage]).toEqual([b.id, "building"]);
+    expect([nx.id, nx.stage, nx.now]).toEqual([b.id, "next", true]);
     const st = dak("status", b.id, "wiring the export", "--for", "board-eng", "--json").json();
-    expect(st.stage_note).toBe("wiring the export");
+    expect([st.stage_note, st.now]).toEqual(["wiring the export", true]);
+    // A line on another ticket makes that one Now; one Now per engineer.
+    dak("status", a.id, "looking at the photo check", "--for", "board-eng");
+    let pile = dak("pile", "--for", "board-eng", "--json").json();
+    expect(pile.filter((c: any) => c.now).map((c: any) => c.id)).toEqual([a.id]);
+    // Blocked is blocked, never Now; blocked on the person is "you".
+    const bl = dak("status", a.id, "need the photo rules", "--blocked", "Pratik's call on the rules", "--for", "board-eng", "--json").json();
+    expect([bl.stage, bl.now, bl.needs_you]).toEqual(["blocked", false, false]); // nothing on Dak to answer yet
+    const bl2 = dak("status", a.id, "waiting on the vendor", "--blocked", "the vendor's API key", "--for", "board-eng", "--json").json();
+    expect([bl2.stage, bl2.now]).toEqual(["blocked", false]);
+    dak("status", b.id, "wiring the export", "--for", "board-eng");
     // A topic naming the ticket is its work; a PR waiting on the person makes it "you", approval "approved".
     const { thread } = dak("send", "--to", "sam", "--from", "board-eng", "--diff", "d2.diff", "--subject", `${b.id}: the export`, "--json").json();
     let card = dak("board", "--json").json().cards.find((c: any) => c.id === b.id);
@@ -1321,6 +1331,9 @@ describe("the Board", () => {
     card = dak("board", "--json").json().cards.find((c: any) => c.id === b.id);
     expect(card.stage).toBe("approved");
     // Back to the backlog.
+    // A batch topic that carries this ticket's PR does not make it "needs you": only its own topic does.
+    const batch = dak("send", "--to", "sam", "--from", "board-eng", "--diff", "d2.diff", "--subject", "Batch of three", "--json").json();
+    expect(batch.thread.id).toBeTruthy();
     dak("assign", a.id, "none");
     expect(dak("pile", "--for", "board-eng", "--json").json().map((c: any) => c.id)).toEqual([b.id]);
     expect(dak("assign", a.id, "nobody-here").code).not.toBe(0);
@@ -1345,7 +1358,7 @@ describe("the Board", () => {
     expect((await syncLinear(fake as any)).count).toBe(2);
     const cards = dak("board", "--json").json().cards;
     expect(cards.find((c: any) => c.id === "REVA-9001")).toMatchObject({ labels: ["attendance"], milestone: "M21", stage: "backlog" });
-    expect(cards.find((c: any) => c.id === "REVA-9002").stage).toBe("checking");
+    expect(cards.find((c: any) => c.id === "REVA-9002").stage).toBe("backlog"); // Linear's own status no longer sets the stage; only Done takes it off
     clearLinearKey();
   });
 });
