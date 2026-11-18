@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.4
+
+- `dak status <ticket> --stop` puts a ticket back to Up next: it stops being its engineer's Now and is no longer started. For a Now left behind by an old `dak next`.
+
 ## 0.13.3
 
 - **Fold the backlog away.** The arrow in the Backlog's header folds it to a slim strip (it still takes a dropped ticket), so the piles get the room; tap the strip to open it. Dak remembers which way you left it.

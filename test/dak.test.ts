@@ -1323,6 +1323,10 @@ describe("the Board", () => {
     const bl2 = dak("status", a.id, "waiting on the vendor", "--blocked", "the vendor's API key", "--for", "board-eng", "--json").json();
     expect([bl2.stage, bl2.now]).toEqual(["blocked", false]);
     dak("status", b.id, "wiring the export", "--for", "board-eng");
+    // --stop puts it back to Up next and clears Now.
+    const stopped = dak("status", b.id, "--stop", "--json").json();
+    expect([stopped.stage, stopped.now, stopped.started_at]).toEqual(["next", false, null]);
+    dak("status", b.id, "wiring the export", "--for", "board-eng");
     // A topic naming the ticket is its work; a PR waiting on the person makes it "you", approval "approved".
     const { thread } = dak("send", "--to", "sam", "--from", "board-eng", "--diff", "d2.diff", "--subject", `${b.id}: the export`, "--json").json();
     let card = dak("board", "--json").json().cards.find((c: any) => c.id === b.id);

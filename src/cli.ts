@@ -16,7 +16,7 @@ import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, 
 import { DakError, type Message, type Verdict } from "./types";
 import { approvedSummary, verdictLabel } from "./verdicts";
 import { setMember, team } from "./team";
-import { addTask, assign, assignMany, board, next as nextTask, pileOf, setTaskStatus, type Card } from "./board";
+import { addTask, assign, assignMany, board, next as nextTask, pileOf, setTaskStatus, unstart, type Card } from "./board";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
 import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
@@ -48,7 +48,8 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak show <thread>                              the whole thread
   dak pile [--for name]                          your tickets on the Board, in order
   dak next                                       take the top of your pile (marks it started)
-  dak status <ticket> "what you're doing" [--blocked "on what"]   your one line on a ticket
+  dak status <ticket> "what you're doing" [--blocked "on what"]   your one line on a ticket (makes it your Now)
+  dak status <ticket> --stop                     back to Up next: not Now, not started
   dak assign <ticket> <agent|none> [--before <ticket>] [--quiet]  put a ticket in an agent's pile
   dak assign --file plan.txt [--quiet]           many at once: "<ticket> <agent>" per line, in pile order;
                                                  each agent gets one message listing its tickets
@@ -453,7 +454,8 @@ export async function main(argv: string[]): Promise<number> {
       }
       if (cmd === "status") {
         const [id, ...rest] = positionals;
-        if (!id) throw new DakError("no_task", 'Which ticket? dak status REVA-3041 "fixing Cursor round 2" [--blocked "..."]');
+        if (!id) throw new DakError("no_task", 'Which ticket? dak status REVA-3041 "fixing Cursor round 2" [--blocked "..."] [--stop]');
+        if (values.stop) { const c = unstart(id); out(json, c, () => `${c.id} is back in Up next.`); return 0; }
         const c = setTaskStatus(id, who, rest.join(" ") || readBody([], values), values.blocked);
         out(json, c, () => `${c.id}: ${c.stage}${c.stage_note ? ` (${c.stage_note})` : ""}`);
         return 0;

@@ -180,6 +180,14 @@ export function next(agent: string): Card | null {
   return card(r.task_id);
 }
 
+// Put a ticket back to Up next: not Now, not started. For a Now left behind by an old dak next.
+export function unstart(taskId: string): Card {
+  ensure();
+  const task = getTask(taskId);
+  store().query("UPDATE task_assignments SET now_at = NULL, started_at = NULL WHERE task_id = ?").run(task.id);
+  return card(task.id);
+}
+
 // The engineer's one line: what they are doing on a ticket, and what blocks it.
 export function setTaskStatus(taskId: string, agent: string, note: string, blocked?: string | null): Card {
   ensure();
