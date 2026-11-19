@@ -65,15 +65,15 @@ Without the Mac app, `dak serve` and open http://127.0.0.1:7474.
 
 ```sh
 # A PR, in chapters
-dak send --to you --from atlas --pr 2396 --chapters chapters.json "Ready for your glance."
-dak send --to you --from atlas --base main --chapters chapters.json     # this branch against main
+dak send --to you --from lead --pr 2396 --chapters chapters.json "Ready for your glance."
+dak send --to you --from lead --base main --chapters chapters.json     # this branch against main
 
 # A doc to review, a file, a link
-dak send --to you --from mitra --doc docs/brief.md "Two open questions at the end."
-dak send --to zari --from grok --file cut-3.mp4 "Cut 3 is ready"
+dak send --to you --from ana --doc docs/brief.md "Two open questions at the end."
+dak send --to zoe --from grok --file cut-3.mp4 "Cut 3 is ready"
 
 # Wait for the answer (exit 0 with the reply, exit 2 on timeout)
-dak wait t_8f2c --for atlas --timeout 15m --json
+dak wait t_8f2c --for lead --timeout 15m --json
 ```
 
 What comes back:

@@ -13,7 +13,7 @@ export interface Draft { id: string; attachment_id: string; anchor: Anchor; body
 export interface Sel { att: string; file: string; side: "old" | "new"; start: number; end: number }
 export interface AgentRow { name: string; title?: string | null; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
 export interface AskTurn { q: string; a?: string; error?: string; context?: string; loading?: boolean; seconds?: number; by?: string }
-export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "waiting" | "team" | "board";
+export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "team" | "board" | "you" | "work" | "rules";
 
 export const me = boot.me;
 
@@ -90,7 +90,6 @@ export const S = {
   reviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; waiting_since: string; reviewing_since: string | null; size: PrSize | null;
     tier: string; rank: number | null; why: string | null; rank_by: string | null; type: string; blocks: string | null; hold: Hold | null }[], // everything waiting on you, in priority order
   heldReviews: [] as { thread_id: string; subject: string; from: string; pr: number | null; type: string; hold: Hold }[], // being reworked or parked: not counted
-  reviewFilter: local.get("reviewFilter", "") as string, // the merge queue's "Waiting on you": all, or one type
   search: { open: false, q: "", i: 0, hits: [] as any[] }, // ⌘K across every conversation
   newAtts: [] as { type: "file" | "link"; name: string; mime?: string; base64?: string; url?: string }[], // attached to the message being written
   linkOpen: false,
@@ -152,7 +151,7 @@ export const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&
 export const $ = <T extends HTMLElement = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T | null;
 
 // How a name reads: You; a session by its own title in Claude Code ("Team engineer (M21)"),
-// not the folder-and-code name Dak gave it; anyone else by name. Named readers (Atlas) keep theirs.
+// not the folder-and-code name Dak gave it; anyone else by name. Named readers (such as lead) keep theirs.
 export const name = (n: string) => {
   if (n === me) return "You";
   const a = S.agents.find((x) => x.name === n);

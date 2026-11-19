@@ -8,7 +8,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { dakHome, loadConfig } from "./config";
+import { dakHome, loadConfig, person } from "./config";
+import { hasOpenWork } from "./work";
 import { store, takeUnread } from "./store";
 import { brief } from "./hook";
 
@@ -82,6 +83,9 @@ export function tickSleepers(run = startRun, opts: { force?: boolean } = {}) {
     // Wait for the hooks first: a running session gets its mail at its next turn or wake.
     if (now - Date.parse(mail[0].created_at) < GRACE_MS) continue;
     if (sessionRunning(a.session_id)) continue;
+    // No work, no start: a closed agent is started for the person's own mail, or when it owns a
+    // piece of work to start from. Another agent's ping waits for the session's next turn.
+    if (!hasOpenWork(a.name) && !mail.some((m) => m.author === person(loadConfig()))) continue;
     run(a.name, a.session_id, a.where_);
   }
 }

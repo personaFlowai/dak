@@ -1,6 +1,7 @@
 /* Dak's screens. Layout: a source-list sidebar (one row per agent), and a
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
+import { P, setParked, loadWork, loadDecided, loadRules, youView, youSub, workView, workSub, rulesView, submitRule, deleteRule } from "./places";
 import { api, local } from "./api";
 import { loadTeam, teamCount, teamView } from "./team";
 import { boardSub, boardView, loadBoard, wireBoardDrag } from "./board";
@@ -15,7 +16,7 @@ import {
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending, layoutMargin, setDocActive } from "./doc";
-import { chatPane, currentVerdict, composer, askPane, canReply, attachBar, chip } from "./chat";
+import { chatPane, currentVerdict, composer, askPane, canReply, attachBar, attachButton, chip } from "./chat";
 import { I, TOOLS } from "./icons";
 import { findHits, findBar, hitKey, type Hit } from "./find";
 import { draftKey, forgetConvo } from "./convo";
@@ -35,10 +36,10 @@ async function loadList() {
     api<Record<string, string>>("/archives").catch(() => ({})),
     api<Record<string, string>>("/pins").catch(() => ({})),
   ]);
-  const [q, all] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => [])]);
+  const [q, all] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => []), loadWork(), loadDecided()]);
   // Held rows (being reworked, parked) are listed apart and never counted as waiting on you.
   S.queue = q; S.reviews = all.filter((r) => !r.hold); S.heldReviews = all.filter((r) => r.hold) as typeof S.heldReviews;
-  if (S.view === "queue" || S.view === "waiting") renderMain();
+  if (["queue", "you", "work"].includes(S.view) && !document.activeElement?.matches("input, textarea, select")) renderMain();
   S.counts = { to: S.threads.filter((t) => t.unread && !isArchived(peerOf(t))).length };
   renderSide();
 }
@@ -190,19 +191,20 @@ function render() {
 function renderSide() {
   const review = S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "");
   $("#app")!.classList.toggle("phone", onPhone());
-  $("#app")!.classList.toggle("place", ["waiting", "queue", "settings", "compose"].includes(S.view));
+  $("#app")!.classList.toggle("place", ["queue", "settings", "compose", "you", "work", "rules", "team", "board"].includes(S.view));
+  $("#app")!.classList.toggle("rail-mini", !onPhone() && placesMini());
   $("#app")!.classList.toggle("side-closed", onPhone() ? !S.phoneList : S.focus && review ? !S.focusSide : !S.sideOpen);
   if (onPhone()) {
     // The phone is the Mac's frame folded into one screen at a time: the list screen is the
     // sidebar (agents, then one agent's topics), and the rail is a tab bar along the bottom,
     // shown on the list and on the places it leads to, not over a thread you are reading.
-    $("#app")!.classList.toggle("tabbar", S.phoneList || ["waiting", "queue"].includes(S.view));
+    $("#app")!.classList.toggle("tabbar", S.phoneList || ["queue", "you", "work", "rules"].includes(S.view));
     $("#rail")!.innerHTML = railView();
     const keepList = $("#tlist")?.scrollTop ?? $(".side .list")?.scrollTop ?? 0;
     $("#side")!.innerHTML = phoneListHead() + sideBody();
     const l = $("#tlist") ?? $(".side .list"); if (l) l.scrollTop = keepList;
   } else {
-    $("#rail")!.innerHTML = railView();
+    $("#rail")!.innerHTML = railView() + `<div class="splitter" data-split="places" title="Drag to resize; narrow it to show icons only"></div>`;
     $("#tabs")!.innerHTML = tabsView();
     const keepList = $("#tlist")?.scrollTop ?? $(".side .list")?.scrollTop ?? 0;
     const finding = document.activeElement?.id === "topic-find" ? ($<HTMLInputElement>("#topic-find")!.selectionStart ?? 0) : -1;
@@ -230,12 +232,13 @@ function renderMain() {
     chapter: $(".chapter.beside")?.dataset.key, code: $("#code-scroll")?.scrollTop ?? 0, notes: $(".notes-col > header")?.scrollTop ?? 0 };
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
   else if (S.view === "settings") main.innerHTML = toolbar("Settings") + settingsView();
+  else if (S.view === "you") main.innerHTML = toolbar("You", youSub()) + youView();
+  else if (S.view === "work") main.innerHTML = toolbar("Work", workSub()) + workView();
+  else if (S.view === "rules") main.innerHTML = toolbar("Rules", "Only you write these") + rulesView();
   else if (S.view === "board") main.innerHTML = toolbar("Board", boardSub()) + boardView();
   else if (S.view === "team") main.innerHTML = toolbar("Team", `${teamCount()} agent${teamCount() === 1 ? "" : "s"}`) + teamView();
   else if (S.view === "welcome") main.innerHTML = toolbar("Welcome to Dak") + welcomeView();
   else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", queueSummary()) + queueView();
-  else if (S.view === "waiting") main.innerHTML = toolbar("Waiting on you", waitingSummary()) + `<div class="pane-body"><div class="queue-page">${reviewGroup()}
-    <p class="qfoot">PRs, briefs and decisions waiting on you, in one order. Atlas sets the order and says what each answer releases; drag a row or change its priority, and your order wins.</p></div></div>`;
   else if (!S.data) main.innerHTML = toolbar("Dak") + `<div class="blank"><p>Choose a thread to read it.</p></div>`;
   else main.innerHTML = threadView();
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
@@ -307,6 +310,11 @@ function threadView(): string {
     // Reviewing already: the line under the name says so, and the bar offers to stop.
     ? onIt ? `<button class="btn" data-stop-reviewing="${t.id}" ${rv?.prs?.length ? `data-on-pr="${rv.prs.join(",")}"` : ""} title="You're reviewing${esc(rvWhat)} since ${esc(fullWhen(onIt))}. Tell ${esc(name(t.from))} you stopped for now; it stays waiting on you">Stop reviewing</button>`
       : `<button class="btn" data-reviewing="${t.id}" ${rvPr ? `data-on-pr="${rvPr}"` : ""} title="Tell ${esc(name(t.from))} you are reviewing ${rvPr ? `#${rvPr}` : "this"}">I'm reviewing${rvPr ? ` #${rvPr}` : ""}</button>` : "";
+  // Park: off your list until you unpark it, or the sender sends a new version or question.
+  const parked = S.heldReviews.find((r) => r.thread_id === t.id && r.hold.kind === "parked");
+  const parkBtn = t.to === me && t.status === "waiting" && !onPhone()
+    ? parked ? `<button class="btn" data-unpark="${t.id}" title="Back on your list">Unpark</button>`
+      : `<button class="btn" data-park="${t.id}" title="Off your list until you unpark it, or ${esc(name(t.from))} sends a new version or question">Park</button>` : "";
   // On the Mac the bar keeps only what you act on (I'm reviewing, Approve); where the topic
   // stands goes on the line under the name, and Done, Archive and GitHub go in the ⋯ menu.
   const statusWords = onIt ? { label: `You're reviewing${rvWhat}`, cls: "reviewing" } : st;
@@ -316,6 +324,8 @@ function threadView(): string {
     canApprove && multi && todo.length ? `<button class="mi ${S.confirmAll ? "warn" : ""}" data-approve-all>${I.check}${S.confirmAll ? `Tap again to approve ${todo.length} PRs` : `Approve all ${todo.length}${todo.length < prs.length ? " left" : ""}`}</button>` : "",
     phone && reviewingBtn && !onIt ? `<button class="mi" data-reviewing="${t.id}" ${rvPr ? `data-on-pr="${rvPr}"` : ""}>${I.person}I'm reviewing${rvPr ? ` #${rvPr}` : ""}</button>` : "",
     phone && reviewingBtn && onIt ? `<button class="mi" data-stop-reviewing="${t.id}" ${rv?.prs?.length ? `data-on-pr="${rv.prs.join(",")}"` : ""}>${I.close}Stop reviewing${rvWhat}</button>` : "",
+    phone && t.to === me && t.status === "waiting" ? (S.heldReviews.some((r) => r.thread_id === t.id && r.hold.kind === "parked")
+      ? `<button class="mi" data-unpark="${t.id}">${I.lineUp}Unpark</button>` : `<button class="mi" data-park="${t.id}">${I.archive}Park</button>`) : "",
     S.peer && !isPair(S.peer) && canReply(t) ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
     S.peer && !isPair(S.peer) ? `<button class="mi" data-${S.pins[S.peer] ? "unpin" : "pin"}="${esc(S.peer)}">${I.pin}${S.pins[S.peer] ? `Unpin ${esc(name(S.peer))}` : `Pin ${esc(name(S.peer))} to the top`}</button>` : "",
     S.peer ? `<button class="mi" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}">${archived ? `${I.lineUp}Back to the Inbox` : `${I.archive}Archive conversation`}</button>` : "",
@@ -326,7 +336,7 @@ function threadView(): string {
   const everyAtt = S.data!.messages.flatMap((m) => m.attachments.map((x) => ({ x, m })));
   const atts = everyAtt.filter(({ x }) => !x.hidden);
   const filesBtn = everyAtt.length ? `<div class="more-wrap files-wrap"><button class="icon-btn files-btn" data-files aria-expanded="${S.filesOpen}" aria-haspopup="dialog" title="Attachments on this topic" aria-label="Attachments, ${atts.length}">${I.clip}<span class="fcount">${atts.length}</span></button>${S.filesOpen ? filesPanel(atts, everyAtt.filter(({ x }) => x.hidden)) : ""}</div>` : "";
-  const right = `${phone ? "" : reviewingBtn}${approveBtn}${filesBtn}${more}`;
+  const right = `${parkBtn}${phone ? "" : reviewingBtn}${approveBtn}${filesBtn}${more}`;
   const standing = statusWords ? ` · <span class="tstand ${statusWords.cls}">${esc(statusWords.label)}</span>` : "";
   const about = agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
@@ -341,7 +351,7 @@ function threadView(): string {
   return head + withTopics(`<div class="split">${chatPane(t, true)}<div class="pane-body review">${reviewBody(a!)}</div></div>`);
 }
 
-// Who else is on the thread: " · Codex reviewing · Atlas watching".
+// Who else is on the thread: " · Codex reviewing · Lead watching".
 function roles(): string {
   const ps = ((S.data as any)?.participants ?? []) as Participant[];
   const verb: Record<string, string> = { reviewer: "reviewing", approver: "approves", watcher: "watching", author: "author", member: "member" };
@@ -378,7 +388,7 @@ const tierMenu = (kind: "pr" | "review", id: string | number, tier: string) =>
   `<label class="tier-pick ${tier}" title="Priority"><span>${TIER_WORD[tier] ?? tier}</span><select data-tier-${kind}="${esc(String(id))}" aria-label="Priority">${Object.entries(TIER_WORD).map(([k, w]) =>
     `<option value="${k}" ${k === tier ? "selected" : ""}>${w}</option>`).join("")}</select></label>`;
 
-// Who placed the row: Atlas's order, or yours (which Atlas's reordering leaves alone).
+// Who placed the row: an agent's order, or yours (which agents' reordering leaves alone).
 const placedBy = (by: string | null) => by === me ? `<span class="placed" title="You placed this; agents' reordering leaves it here">placed by you</span>` : "";
 
 function queueRow(r: QRow, pos?: number): string {
@@ -400,8 +410,6 @@ function queueRow(r: QRow, pos?: number): string {
       ${r.waiting_reason ? `<span class="qwait">${esc(r.waiting_reason)}</span>` : ""}${r.note ? `<span class="qnote">${esc(r.note)}</span>` : ""}${placedBy(r.rank_by)}</div></li>`;
 }
 
-const TYPE_WORD: Record<string, string> = { pr: "PR", brief: "Brief", decision: "Decision", tryit: "Try it" };
-
 // The head moved after the person approved: the merge script stops on that, so say what moved.
 function headMoved(r: (typeof S.queue)[number]): string {
   const h = r.head_moved;
@@ -410,49 +418,11 @@ function headMoved(r: (typeof S.queue)[number]): string {
   return `<div class="qmoved ${h.change === "content changed" ? "bad" : ""}"><b>Head moved since your approval</b> ${esc(h.from.slice(0, 7))} → ${esc(h.to.slice(0, 7))}: ${what}.</div>`;
 }
 
-function reviewRow(r: (typeof S.reviews)[number], pos: number): string {
-  // A decision is answered with a tap, not reviewed: no "I'm reviewing" for it.
-  const reviewable = r.type !== "decision" && r.type !== "tryit";
-  const action = r.reviewing_since ? `<b class="st reviewing">You're reviewing</b><button class="btn subtle" data-stop-reviewing="${esc(r.thread_id)}" title="Stopped for now; it stays on this list">Stop</button>`
-    : reviewable ? `<button class="btn" data-reviewing="${esc(r.thread_id)}" title="Tell ${esc(name(r.from))} you are on it">I'm reviewing</button>`
-    : `<button class="btn" data-topic="${esc(r.thread_id)}">Answer</button>`;
-  return `<li class="qrow review" draggable="true" data-drag-review="${esc(r.thread_id)}" data-tier="${r.tier}"><span class="qpos">${pos}</span>
-    <div class="qmain"><div class="qhead"><span class="rtype t-${r.type}">${TYPE_WORD[r.type] ?? esc(r.type)}</span>${prTitle(r.pr, r.subject, r.thread_id)}</div>
-      <div class="qmeta">${sizeLabel(r.size)}${r.size ? " · " : ""}From ${esc(name(r.from))} · waiting ${span(r.waiting_since)}</div>
-      ${r.blocks ? `<div class="qblocks">Blocks: ${esc(r.blocks)}</div>` : ""}${r.why ? `<div class="qwhy">${esc(r.why)}</div>` : ""}</div>
-    <div class="qside"><div class="qtop">${action}${tierMenu("review", r.thread_id, r.tier)}</div>
-      ${r.reviewing_since ? `<span>since ${when(r.reviewing_since)}</span>` : ""}${placedBy(r.rank_by)}</div></li>`;
-}
-
-/* Everything waiting on you, in one order across types: a brief that holds an engineer can
-   come before a PR. The chips filter by type; the order and tiers stay the same. */
-function reviewGroup(): string {
-  const f = S.reviewFilter;
-  const count = (t: string) => S.reviews.filter((r) => r.type === t).length;
-  const chips = ["pr", "brief", "decision", "tryit"].filter(count).map((t) =>
-    `<button class="chip-f ${f === t ? "on" : ""}" data-review-filter="${t}">${TYPE_WORD[t]}s <span>${count(t)}</span></button>`).join("");
-  const shown = f ? S.reviews.filter((r) => r.type === f) : S.reviews;
-  const list = shown.length ? `<ol class="qlist" data-drop="review">${tiered(shown, reviewRow).join("")}</ol>` : `<p class="qempty">Nothing is waiting on you.</p>`;
-  return `<section class="qgroup">
-    ${chips ? `<div class="chips-f"><button class="chip-f ${f ? "" : "on"}" data-review-filter="">All</button>${chips}</div>` : ""}${list}</section>
-    ${S.heldReviews.length ? `<section class="qgroup held"><h3>Not to review now <span class="count">${S.heldReviews.length}</span></h3>
-      <ol class="qlist">${S.heldReviews.map(heldRow).join("")}</ol></section>` : ""}`;
-}
-
 // A row someone said not to act on now: why, and when it comes back.
 const HOLD_WORD = { rework: "Being reworked", parked: "Parked" } as const;
 function holdLine(h: { kind: "rework" | "parked"; note: string | null; by: string | null }): string {
   const back = h.kind === "rework" ? "Comes back with its next version." : "Stays here until it is unparked.";
   return `<div class="qhold"><b>${HOLD_WORD[h.kind]}</b>${h.note ? `: ${esc(h.note)}` : ""}${h.by ? ` · ${esc(name(h.by))}` : ""}. ${back}</div>`;
-}
-function heldRow(r: (typeof S.heldReviews)[number]): string {
-  return `<li class="qrow review is-held"><div class="qmain"><div class="qhead"><span class="rtype t-${r.type}">${TYPE_WORD[r.type] ?? esc(r.type)}</span>${prTitle(r.pr, r.subject, r.thread_id)}</div>
-    <div class="qmeta">From ${esc(name(r.from))}</div>${holdLine(r.hold)}</div></li>`;
-}
-
-function waitingSummary(): string {
-  const n = (t: string) => S.reviews.filter((r) => r.type === t).length;
-  return [`${n("pr")} PRs`, `${n("brief")} briefs`, `${n("decision")} decisions`, ...(n("tryit") ? [`${n("tryit")} to try`] : [])].join(" · ");
 }
 
 function queueSummary(): string {
@@ -487,7 +457,7 @@ function queueView(): string {
     ${group("Approved, waiting their turn", "Nothing approved is waiting.", tiered(waiting, queueRow), waiting.length, "pr")}
     ${held.length ? `<section class="qgroup held"><h3>Parked or being reworked <span class="count">${held.length}</span></h3><ol class="qlist">${held.map((r) => queueRow(r)).join("")}</ol></section>` : ""}
     ${done.length ? group("Deployed today", "", done.map((r) => queueRow(r)), done.length) : ""}
-    <p class="qfoot">Drag rows to set the order, or change a row's priority; your order wins over Atlas's. Atlas's merge loop takes the next ready PR with <code>dak queue next</code>. "Approved by you" is read from your verdict on the PR's thread.</p>
+    <p class="qfoot">Drag rows to set the order, or change a row's priority; your order wins over the agents'. An agent's merge loop takes the next ready PR with <code>dak queue next</code>. "Approved by you" is read from your verdict on the PR's thread.</p>
   </div></div>`;
 }
 
@@ -599,11 +569,10 @@ function composeView(): string {
       <textarea id="c-body" rows="7" placeholder="First line is the subject">${esc(c.body)}</textarea>
       ${attachBar()}
       ${c.error ? `<p class="err">${esc(c.error)}</p>` : ""}
-      <div class="btns"><button type="button" class="btn" data-close-compose>Cancel</button><button type="button" class="btn primary" id="c-send" ${c.sending ? "disabled" : ""}>${c.sending ? "Sending" : "Send"}</button></div>
+      <div class="btns">${attachButton()}<span class="grow"></span><button type="button" class="btn" data-close-compose>Cancel</button><button type="button" class="btn primary" id="c-send" ${c.sending ? "disabled" : ""}>${c.sending ? "Sending" : "Send"}</button></div>
     </form></div>`;
   }
   const f = c.filter.trim().toLowerCase();
-  const waiting = (n: string) => S.threads.filter((t) => t.from === n && t.to === me && t.status === "waiting").length;
   // Who you have been talking to lately, newest first; anyone else turns up when you search.
   const lastWith = (n: string) => S.threads.filter((t) => t.from === n || t.to === n).reduce((m, t) => t.updated_at > m ? t.updated_at : m, "");
   const fortnight = new Date(Date.now() - 14 * 86_400_000).toISOString();
@@ -612,10 +581,9 @@ function composeView(): string {
   const match = (a: AgentRow) => !f || `${a.name} ${a.title ?? ""} ${a.about ?? ""} ${a.where ?? ""}`.toLowerCase().includes(f);
   const others = f ? S.agents.filter((a) => a.name !== me && !named.includes(a) && match(a)).slice(0, 20) : [];
   const row = (a: AgentRow) => {
-    const w = waiting(a.name);
     // Your agents read by role; another session by its folder, so two of them can be told apart.
     const what = a.about ?? (named.includes(a) ? TOOLS[a.tool ?? ""]?.label ?? "" : a.where ? a.where.split("/").slice(-2).join("/") : TOOLS[a.tool ?? ""]?.label ?? "");
-    const sub = [what, w ? `${w} waiting on you` : ""].filter(Boolean).join(" · ");
+    const sub = what;
     return `<button type="button" class="pick" data-to="${esc(a.name)}">${mark(a.name)}<span class="nm"><b>${esc(name(a.name))}</b><span>${esc(sub)}</span></span></button>`;
   };
   const mine = named.filter(match);
@@ -700,7 +668,7 @@ function welcomeView(): string {
     `<div class="conn"><span class="mark md">${mark}</span><span class="nm"><b>${label}</b><span>${on ? "Connected." : what}</span></span>
       <button class="btn ${on ? "" : "primary"}" data-connect="${on ? "off" : "on"}" data-tool="${id}" ${on ? "disabled" : ""}>${on ? `${I.check} Connected` : "Connect"}</button></div>`;
   return `<div class="pane-body"><div class="settings welcome">
-    <section><h2>1 · Who you are</h2><p class="lead">Agents send to you as <code>${esc(me)}</code>, for example <code>dak send --to ${esc(me)} --from atlas --pr 12</code>. Everything stays on this Mac.</p></section>
+    <section><h2>1 · Who you are</h2><p class="lead">Agents send to you as <code>${esc(me)}</code>, for example <code>dak send --to ${esc(me)} --from lead --pr 12</code>. Everything stays on this Mac.</p></section>
     <section><h2>2 · Connect your agents</h2><p class="lead">Connecting delivers your replies into their sessions and teaches them how to use Dak.</p>
       ${tool("claude", "Claude Code", s.claude_connected, TOOLS["claude-code"].mark, "Replies reach every session, even an idle one.")}
       ${tool("codex", "Codex", s.codex_connected, TOOLS.codex.mark, "Replies reach a session at its next turn. Codex asks once to trust Dak's hook.")}
@@ -937,6 +905,15 @@ document.addEventListener("input", (e) => {
   }
 });
 
+// The Rules page's two forms: a rule, or what an agent may do.
+document.addEventListener("submit", async (e) => {
+  const f = (e.target as HTMLElement).closest<HTMLFormElement>("form[data-rule-form]");
+  if (!f) return;
+  e.preventDefault();
+  try { await submitRule(f); } catch (err: any) { toast(err.message, S.cur ?? ""); }
+  renderMain();
+});
+
 document.addEventListener("change", async (e) => {
   const el = e.target as HTMLInputElement;
   if (el.dataset.hideTests !== undefined) { S.hideTests = el.checked; local.set("hideTests", S.hideTests); return; }
@@ -1044,7 +1021,7 @@ wireBoardDrag((task, agent, before) => { void assignCard(task, agent, before); }
 async function closeTabAndMove(id: string) {
   if (id === S.cur && S.view === "thread") rememberPane(id);
   const next = closeTab(id);
-  if (id === S.cur && S.view === "thread") { if (next) return openThread(next); S.view = "waiting"; return render(); }
+  if (id === S.cur && S.view === "thread") { if (next) return openThread(next); S.view = "you"; return render(); }
   $("#tabs")!.innerHTML = tabsView();
 }
 // Middle-click a tab to close it, as in a browser.
@@ -1124,7 +1101,7 @@ document.addEventListener("click", async (e) => {
     if (onPhone()) { S.phoneList = true; S.topicFind = ""; return render(); }
     if (!S.sideOpen) { S.sideOpen = true; local.set("sideOpen", true); }
     const level = S.sideLevel;
-    if (S.view !== "thread" && S.cur) { await openThread(S.cur); S.sideLevel = level; }
+    if (S.view !== "thread") { const go = S.cur ?? S.threads[0]?.id; if (go) { await openThread(go); S.sideLevel = level; } }
     return render();
   }
   if (d.sideBack !== undefined) { S.sideLevel = S.peer && isPair(S.peer) ? "pairs" : "agents"; return onPhone() ? render() : renderSide(); }
@@ -1184,8 +1161,18 @@ document.addEventListener("click", async (e) => {
   if (d.removeAtt !== undefined) { S.newAtts.splice(Number(d.removeAtt), 1); return renderMain(); }
   if (b.id === "c-send") return sendCompose();
   if (d.queue !== undefined) { S.view = "queue"; S.phoneList = false; return render(); }
-  if (d.waiting !== undefined) { S.view = "waiting"; S.phoneList = false; return render(); }
-  if (d.reviewFilter !== undefined) { S.reviewFilter = d.reviewFilter; local.set("reviewFilter", S.reviewFilter); return renderMain(); }
+  if (d.you !== undefined) { S.view = "you"; S.phoneList = false; return render(); }
+  if (d.park || d.unpark) {
+    // Parking leaves the topic waiting on you; it only leaves the count. The list reloads to show it.
+    try { await setParked(d.park || d.unpark!, !!d.park); } catch (err: any) { toast(err.message, S.cur ?? ""); }
+    await loadList(); return render();
+  }
+  if (d.parkedFold !== undefined) { P.parkedOpen = !P.parkedOpen; return renderMain(); }
+  if (d.workOpen) { P.open = P.open === d.workOpen ? null : d.workOpen; return renderMain(); }
+  if (d.workClose !== undefined) { P.open = null; return renderMain(); }
+  if (d.work !== undefined) { S.view = "work"; S.phoneList = false; render(); await loadWork(); return renderMain(); }
+  if (d.rules !== undefined) { S.view = "rules"; S.phoneList = false; render(); await loadRules(); return renderMain(); }
+  if (d.ruleDel) { await deleteRule(d.ruleDel); return renderMain(); }
   if (d.reviewing || d.stopReviewing) {
     // "I'm on it" (or "stopped for now"): the sender hears through Dak, and the PR stays waiting on you.
     const id = d.reviewing || d.stopReviewing!;
@@ -1245,8 +1232,9 @@ document.addEventListener("click", async (e) => {
   }
   if (d.teamEdit) { S.teamEdit = S.teamEdit === d.teamEdit ? null : d.teamEdit; return renderMain(); }
   if (d.teamSave) {
-    const fields: Record<string, string> = {};
+    const fields: Record<string, string | boolean> = {};
     document.querySelectorAll<HTMLInputElement>("[data-team-field]").forEach((el) => { fields[el.dataset.teamField!] = el.value; });
+    const lead = $<HTMLInputElement>("[data-team-lead]"); if (lead) fields.lead = lead.checked;
     await api(`/team/${encodeURIComponent(d.teamSave)}`, { method: "PUT", body: fields });
     S.teamEdit = null; await loadTeam(); return renderMain();
   }
@@ -1506,6 +1494,7 @@ document.addEventListener("mousedown", (e) => { if ((e.target as HTMLElement).cl
 document.addEventListener("scroll", () => { if (pending) readSelection(); }, true);
 
 document.addEventListener("keydown", (e) => {
+  if (S.view === "work" && e.key === "Escape" && P.open) { e.preventDefault(); P.open = null; return renderMain(); }
   if (S.view === "board" && e.key === "Escape" && (S.boardOpen || S.boardMenu)) { e.preventDefault(); if (S.boardMenu) S.boardMenu = null; else S.boardOpen = null; return renderMain(); }
   if ((S.moreOpen || S.filesOpen) && e.key === "Escape") { e.preventDefault(); S.moreOpen = false; S.filesOpen = false; return renderMain(); }
   if (S.peek && e.key === "Escape") { e.preventDefault(); closePeek(); return renderMain(); }
@@ -1577,10 +1566,13 @@ document.addEventListener("keydown", (e) => {
 
 const WIDTHS: Record<string, { min: number; max: number; def: number; invert?: boolean }> = {
   side: { min: 200, max: 420, def: 264 }, chat: { min: 280, max: 620, def: 340 },
-  rail: { min: 170, max: 380, def: 232 }, notes: { min: 260, max: 600, def: 380 }, margin: { min: 220, max: 460, def: 280, invert: true },
+  rail: { min: 170, max: 380, def: 232 }, places: { min: 180, max: 320, def: 232 }, notes: { min: 260, max: 600, def: 380 }, margin: { min: 220, max: 460, def: 280, invert: true },
 };
+const PLACES_SNAP = 140, PLACES_MINI = 56;
+const placesMini = () => local.get("placesMini", false);
 const setWidth = (k: string, px: number) => document.documentElement.style.setProperty(`--${k}-w`, `${px}px`);
 for (const [k, v] of Object.entries(local.get("widths", {} as Record<string, number>))) if (WIDTHS[k]) setWidth(k, v);
+if (placesMini()) setWidth("places", PLACES_MINI);
 
 document.addEventListener("pointerdown", (e) => {
   const sp = (e.target as HTMLElement).closest<HTMLElement>(".splitter");
@@ -1592,13 +1584,24 @@ document.addEventListener("pointerdown", (e) => {
   sp.classList.add("active"); document.body.classList.add("resizing");
   let w = startW;
   const move = (ev: PointerEvent) => {
-    w = Math.round(Math.min(cfg.max, Math.max(cfg.min, startW + (cfg.invert ? start - ev.clientX : ev.clientX - start))));
+    const raw = startW + (cfg.invert ? start - ev.clientX : ev.clientX - start);
+    // The places list snaps to icons only when dragged narrower than its labels can live with.
+    if (k === "places") {
+      const mini = raw < PLACES_SNAP;
+      w = mini ? PLACES_MINI : Math.round(Math.min(cfg.max, Math.max(cfg.min, raw)));
+      setWidth(k, w);
+      // Only a class changes mid-drag: redrawing the list would drop the splitter being dragged.
+      if (mini !== placesMini()) { local.set("placesMini", mini); $("#app")!.classList.toggle("rail-mini", mini); }
+      return;
+    }
+    w = Math.round(Math.min(cfg.max, Math.max(cfg.min, raw)));
     setWidth(k, w);
   };
   const up = () => {
     sp.removeEventListener("pointermove", move); sp.removeEventListener("pointerup", up);
     sp.classList.remove("active"); document.body.classList.remove("resizing");
-    local.set("widths", { ...local.get("widths", {}), [k]: w });
+    // Icons only keeps the last full width, so dragging it back out returns to where it was.
+    if (!(k === "places" && placesMini())) local.set("widths", { ...local.get("widths", {}), [k]: w });
     postControls();
   };
   sp.addEventListener("pointermove", move); sp.addEventListener("pointerup", up);
@@ -1607,6 +1610,7 @@ document.addEventListener("dblclick", (e) => {
   const sp = (e.target as HTMLElement).closest<HTMLElement>(".splitter");
   if (!sp) return;
   const k = sp.dataset.split!;
+  if (k === "places" && placesMini()) { local.set("placesMini", false); $("#app")!.classList.remove("rail-mini"); }
   setWidth(k, WIDTHS[k].def);
   const saved = local.get("widths", {} as Record<string, number>); delete saved[k]; local.set("widths", saved);
 });
@@ -1714,10 +1718,10 @@ function updateNavButtons() {
    yours, so an agent's reordering leaves it alone. */
 let dragging: HTMLElement | null = null;
 document.addEventListener("dragstart", (e) => {
-  const row = (e.target as HTMLElement).closest<HTMLElement>("[data-drag-pr], [data-drag-review]");
+  const row = (e.target as HTMLElement).closest<HTMLElement>("[data-drag-pr]");
   if (!row) return;
   dragging = row; row.classList.add("dragging");
-  e.dataTransfer?.setData("text/plain", row.dataset.dragPr ?? row.dataset.dragReview ?? "");
+  e.dataTransfer?.setData("text/plain", row.dataset.dragPr ?? "");
 });
 document.addEventListener("dragover", (e) => {
   if (!dragging) return;
@@ -1740,22 +1744,19 @@ document.addEventListener("dragend", async () => {
   const near = rows[i - 1] ?? rows[i + 1]; // the row above it, or below when it is now first
   const tier = near && near.dataset.tier !== row.dataset.tier ? near.dataset.tier : undefined;
   try {
-    if (list.dataset.drop === "pr") {
+    {
       const prs = [...list.querySelectorAll<HTMLElement>("[data-drag-pr]")].map((x) => Number(x.dataset.dragPr));
       // A pair moves as one: its other half follows its first.
       const withMates = prs.flatMap((p) => { const r = S.queue.find((x) => x.pr === p); return r?.pair_id ? S.queue.filter((x) => x.pair_id === r.pair_id).map((x) => x.pr) : [p]; });
       if (tier) await api(`/queue/${row.dataset.dragPr}/priority`, { method: "PUT", body: { tier, by: me } });
       await api("/queue/order", { method: "PUT", body: { prs: withMates, by: me } });
-    } else {
-      if (tier) await api(`/reviews/${row.dataset.dragReview}/priority`, { method: "PUT", body: { tier, by: me } });
-      await api("/reviews/order", { method: "PUT", body: { threads: [...list.querySelectorAll<HTMLElement>("[data-drag-review]")].map((x) => x.dataset.dragReview), by: me } });
     }
   } catch (err: any) { toast(err.message ?? "Could not save that order.", S.cur ?? ""); }
   await loadList(); renderMain();
 });
 
 // The queue's "for 6 min" and "about 4 min left" move with the clock.
-setInterval(() => { if ((S.view === "queue" || S.view === "waiting") && !document.hidden) renderMain(); }, 30_000);
+setInterval(() => { if (S.view === "queue" && !document.hidden) renderMain(); }, 30_000);
 
 function listen() {
   const es = new EventSource(`/v1/events?token=${(window as any).DAK.token}`);
@@ -1770,11 +1771,10 @@ function listen() {
   seen = new Set(mine.map((t) => `${t.id}:${t.updated_at}`));
   const fromHash = location.hash.slice(1);
   // The app opens on a fresh page, so the last conversation comes from this Mac's memory, not the URL.
-  const target = mine.find((t) => t.id === fromHash) ?? [...mine, ...S.others].find((t) => t.id === local.get("last", ""));
-  const first = target?.id ?? (S.threads[0] ? topicFor(peerOf(S.threads[0])) : null);
-  if (first) await openThread(first);
-  else { if (!local.get("welcomed", false)) S.view = "welcome"; render(); }
-  // A phone opens on the list, merge queue first, unless the link named a thread.
-  if (onPhone() && !mine.some((t) => t.id === fromHash)) { S.view = "waiting"; S.phoneList = true; render(); }
+  const target = mine.find((t) => t.id === fromHash);
+  // Dak opens on You, what waits on you, unless the link named a topic.
+  if (target) await openThread(target.id);
+  else { S.view = local.get("welcomed", false) || mine.length ? "you" : "welcome"; render(); }
+  if (onPhone() && !target) { S.view = "you"; S.phoneList = false; render(); }
   listen();
 })();

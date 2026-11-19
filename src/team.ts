@@ -11,24 +11,33 @@ import { DakError } from "./types";
 export type MemberKind = "person" | "local" | "cloud" | "bot";
 export interface TeamMember {
   name: string; // the address: what @mentions and --to use
-  display: string | null; // what the person calls it ("Atlas")
+  display: string | null; // what the person calls it ("Lead")
   role: string | null; // "CTO", "Head of product"
-  area: string | null; // what it owns: "Registers", "the Reva page"
-  can: string | null; // "writes code in jewel-saas"
+  area: string | null; // what it owns: "Billing", "the settings page"
+  can: string | null; // "writes code in my-app"
   cannot: string | null; // "no repo access", "drafts only"
   kind: MemberKind;
   tool: string | null; // claude-code, codex, cursor, grok, http
   via: string | null; // for a bot: the door key it speaks through
   last_seen: string | null;
   listening: boolean;
-  reader: boolean; // a named reader in Dak's settings ("atlas"), not a session found by its folder
+  reader: boolean; // a named reader in Dak's settings ("lead"), not a session found by its folder
   carded: boolean; // the person has written this member's card
+  lead: boolean; // the one member the person marked Lead: the Board's notes on assignments go to them
 }
-export type MemberFields = Partial<Pick<TeamMember, "display" | "role" | "area" | "can" | "cannot">>;
+export type MemberFields = Partial<Pick<TeamMember, "display" | "role" | "area" | "can" | "cannot" | "lead">>;
 
 function ensure() {
   store().exec(`CREATE TABLE IF NOT EXISTS team (name TEXT PRIMARY KEY, display TEXT, role TEXT, area TEXT, can TEXT, cannot TEXT, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS door_bots (name TEXT PRIMARY KEY, agent TEXT NOT NULL, at TEXT NOT NULL)`);
+  const cols = new Set((store().query("PRAGMA table_info(team)").all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("lead")) store().exec("ALTER TABLE team ADD COLUMN lead INTEGER");
+}
+
+// The member the person marked Lead, if any. Dak has no idea of a lead by name: the person says who.
+export function leadName(): string | null {
+  ensure();
+  return (store().query("SELECT name FROM team WHERE lead = 1 LIMIT 1").get() as { name: string } | null)?.name ?? null;
 }
 
 export function team(opts: { all?: boolean } = {}): TeamMember[] {
@@ -36,7 +45,7 @@ export function team(opts: { all?: boolean } = {}): TeamMember[] {
   const cfg = loadConfig();
   const byName = new Map<string, TeamMember>();
   const blank = (name: string, kind: MemberKind): TeamMember =>
-    ({ name, display: null, role: null, area: null, can: null, cannot: null, kind, tool: null, via: null, last_seen: null, listening: false, reader: false, carded: false });
+    ({ name, display: null, role: null, area: null, can: null, cannot: null, kind, tool: null, via: null, last_seen: null, listening: false, reader: false, carded: false, lead: false });
   for (const a of agents({ all: opts.all })) {
     const m = blank(a.name, a.kind === "person" ? "person" : a.tool === "grok" || a.tool === "http" ? "cloud" : "local");
     Object.assign(m, { tool: a.tool, last_seen: a.last_seen, listening: a.listening, display: a.title ?? null, role: a.about ?? null, reader: a.reader });
@@ -52,6 +61,7 @@ export function team(opts: { all?: boolean } = {}): TeamMember[] {
     const m = byName.get(r.name);
     if (!m) continue; // a member that left: kept in the table, not listed
     m.carded = true;
+    m.lead = r.lead === 1;
     for (const f of ["display", "role", "area", "can", "cannot"] as const) if (r[f] !== null) m[f] = r[f];
   }
   // The plain list keeps it to the team you would recognise: readers, anyone with a card, agents
@@ -78,8 +88,11 @@ export function setMember(name: string, fields: MemberFields): TeamMember {
   const cur = (store().query("SELECT * FROM team WHERE name = ?").get(n) as any) ?? {};
   const next = { display: cur.display ?? null, role: cur.role ?? null, area: cur.area ?? null, can: cur.can ?? null, cannot: cur.cannot ?? null };
   for (const f of ["display", "role", "area", "can", "cannot"] as const) { const v = clean(fields[f]); if (v !== undefined) next[f] = v; }
-  store().query("INSERT OR REPLACE INTO team (name, display, role, area, can, cannot, updated_at) VALUES (?,?,?,?,?,?,?)")
-    .run(n, next.display, next.role, next.area, next.can, next.cannot, new Date().toISOString());
+  // One lead at most: marking one clears whoever was lead before.
+  const lead = fields.lead === undefined ? cur.lead ?? null : fields.lead ? 1 : null;
+  if (lead) store().query("UPDATE team SET lead = NULL WHERE name != ?").run(n);
+  store().query("INSERT OR REPLACE INTO team (name, display, role, area, can, cannot, lead, updated_at) VALUES (?,?,?,?,?,?,?,?)")
+    .run(n, next.display, next.role, next.area, next.can, next.cannot, lead, new Date().toISOString());
   return team({ all: true }).find((m) => m.name === n)!;
 }
 
@@ -93,7 +106,7 @@ export function memberNames(): string[] {
   return [...names];
 }
 
-// The @names in a message that are on the team: "@atlas, can you" → ["atlas"]. Case does not
+// The @names in a message that are on the team: "@lead, can you" → ["lead"]. Case does not
 // matter; an @word that is nobody (an email, a decorator, "@types/node") is left alone.
 export function mentionsIn(text: string, members: string[]): string[] {
   const known = new Set(members);

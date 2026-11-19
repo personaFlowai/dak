@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.15.4
+
+- The Inbox shows what is new, not what waits on you. Agent rows say "3 new" instead of "2 waiting on you"; the topic list is Open and Done; a tab's dot means unread. What needs your answer lives on the You page only, so a parked topic no longer shows up as waiting in the Inbox.
+- The old Waiting page is gone; the You page replaced it.
+
+## 0.15.3
+
+- **A Lead on Team.** Mark one member as Lead on the Team page (or `dak team set <name> --lead`). The Board's notes on assignments go to whoever is lead, and to nobody when no one is. Before, they went to a member with one fixed name.
+- **Blocked on you** reads your own Dak name in an engineer's blocked line, not a fixed one.
+- Examples, help text and tests use generic names throughout.
+
+## 0.15.2
+
+- **A Work skill.** `skills/dak-work/SKILL.md` says what a piece of work is, what counts as one (and what does not), how to create and move one, what proof is, and the rules Dak keeps. Connecting Claude Code installs it as its own skill beside the Dak one; Codex gets it in Dak's section of AGENTS.md. `dak skill work` prints it to hand to an agent in any other tool (`--plain` drops the front matter).
+
+## 0.15.1
+
+- **Park a topic.** Park from a row on You, or from the topic's own bar. A parked topic leaves your count and goes to a folded "Parked" section at the bottom of You, with an Unpark button. It comes back by itself when the sender sends a new version or a new question; a plain reply does not bring it back. The sender gets a quiet update saying it is parked, which never wakes their session. Only you can park; an agent still marks its own work "being reworked".
+- **Drag the places list.** Its edge resizes it. Drag it narrower than its labels and it snaps to icons only, keeping the counts as badges; drag it back out for the labels. The sidebar button again hides only the agents list in a conversation.
+
+## 0.15.0
+
+- **You, Work and Rules.** The sidebar is now a labelled list, wider and in larger type: You, Work and Rules first, then Inbox, Between agents and Team. Dak opens on You.
+- **You** lists everything that waits on you in one order, each with what it holds up and, for work made in Dak, the proof the gate checked. Below it is what you decided, which every agent can read with `dak decisions`.
+- **Work** shows every piece of work with its one owner and its state, grouped by owner, with Shipping (the merge queue) at the top. Each open PR of a ticket on the Board is a piece already. Agents add the rest (a mock, research, a doc) with `dak work add`. The Board and the full merge queue are linked from Work rather than from the sidebar.
+- **Rules** is a list only you write. Agents read it with `dak rules`, and the server refuses a change from anyone else. It holds your own rules and what each agent may do without asking.
+- **Four rules Dak keeps in code:**
+  - Only you approve.
+  - `dak work done` is refused without `--proof`.
+  - `dak work ready` reaches you only with proof and the topic that briefs it. Otherwise it goes back to its owner with what is missing.
+  - Dak starts a closed session on its own only for your own mail, or when the agent owns a piece of work. Another agent's ping waits for that session's next turn.
+
 ## 0.14.4
 
 - **The Board shows each engineer's own logo again,** centred in its box at the sidebar's size. A style meant for the pile header's text had pushed it into the box's corner; the initials from 0.14.3 are gone.
@@ -37,7 +69,7 @@
 ## 0.13.5
 
 - **A blocked ticket shows the engineer's line and the reason:** the line as written, and "Blocked on …" under it (the line was stored but hidden).
-- **An engineer with no Now but something blocked or waiting on you** reads "Waiting: REVA-x, blocked on …" in the pile's header, not "Idle".
+- **An engineer with no Now but something blocked or waiting on you** reads "Waiting: ENG-x, blocked on …" in the pile's header, not "Idle".
 
 ## 0.13.4
 
@@ -57,7 +89,7 @@
 
 ## 0.13.0
 
-- **One Now per engineer.** `dak next` takes the top of an engineer's pile and makes it their Now; `dak status <ticket> "…"` makes that ticket their Now and puts the previous one back in Up next. Each pile reads top down: Now, Needs you, Blocked on you, Blocked, In review, Up next. Its header says "Now: REVA-x · last word 2h ago", or "Idle since …" when there is no Now.
+- **One Now per engineer.** `dak next` takes the top of an engineer's pile and makes it their Now; `dak status <ticket> "…"` makes that ticket their Now and puts the previous one back in Up next. Each pile reads top down: Now, Needs you, Blocked on you, Blocked, In review, Up next. Its header says "Now: ENG-x · last word 2h ago", or "Idle since …" when there is no Now.
 - **Blocked is blocked.** `--blocked "on what"` shows the ticket as Blocked (Blocked on you when the reason names you), never as in progress, and takes it off Now.
 - **"Needs you" only when there is something to answer:** a Dak topic of the ticket's own (its subject names the ticket) waiting on you. A batch topic no longer marks every ticket in it, and an engineer saying it is blocked on you is "Blocked on you" with their reason until they ask on Dak.
 - **Stages come from Dak's facts** (verdicts on the ticket's own topics, the merge queue, merged and live). Linear only takes a ticket off when it is Done or Cancelled there; its "In Progress" and "Checking" no longer set the stage. "Building", "Brief", "Live" and "Checking" are gone as stages; a ticket whose PRs are all live is done.
@@ -65,7 +97,7 @@
 ## 0.12.1
 
 - **Setting up the Board in bulk:** `dak assign --file plan.txt` takes one `<ticket> <agent>` per line, in pile order. Every line is checked first (a bad ticket or agent changes nothing), then each agent gets one message listing what it got, and the lead one summary, instead of one message per ticket. `--quiet` tells nobody.
-- **Assignments name who made them:** `--from`, else the session's own name, so Atlas's assignments say Atlas. The lead is not sent an FYI about its own assignments.
+- **Assignments name who made them:** `--from`, else the session's own name, so the lead's assignments name the lead. The lead is not sent an FYI about its own assignments.
 
 ## 0.12.0
 
@@ -79,7 +111,7 @@
 
 ## 0.11.0
 
-- **The Board** (left rail, and a tab on the phone): your backlog and every engineer's pile in one place. Drag a ticket from the Backlog onto an engineer to give it to them, drag inside a pile to reorder, drag back to the Backlog to take it away. The engineer gets it on their "Board: your pile" topic and Atlas gets an FYI. Filter by engineer, label or milestone, or search. Anything waiting on you is at the top. Every engineer shows, with what they are on or how long they have been idle.
+- **The Board** (left rail, and a tab on the phone): your backlog and every engineer's pile in one place. Drag a ticket from the Backlog onto an engineer to give it to them, drag inside a pile to reorder, drag back to the Backlog to take it away. The engineer gets it on their "Board: your pile" topic and the lead gets an FYI. Filter by engineer, label or milestone, or search. Anything waiting on you is at the top. Every engineer shows, with what they are on or how long they have been idle.
 - **Your Linear backlog, read only.** Paste a Linear personal API key on the Board: Dak keeps it in a private file (mode 600), sends it only to Linear, and copies open tickets (title, labels, milestone, status) every five minutes. Tickets without Linear can be made in Dak (`dak task add`).
 - **Stages from facts.** A ticket's work is any Dak topic or PR that names it. Its stage (Brief, Building, In review, Needs you, Changes, Approved, Merging, Live, Checking, Done) comes from your verdicts, the merge queue and Linear's status first, and from the engineer's own line only where nothing else says more.
 - **For engineers:** `dak next` takes the top of their pile, `dak status <ticket> "…" [--blocked "…"]` is their one line, `dak pile` lists theirs, `dak board` shows everything, `dak assign <ticket> <agent>`.
@@ -198,7 +230,7 @@ The first step towards Dak as the one place a team of people and agents works to
 - Moving between topics keeps the side pane closed if you closed it.
 
 ## 0.4.0
-From a day of Atlas coordinating ten engineers:
+From a day of one lead agent coordinating ten engineers:
 - `dak route set <person> --from-group <group> --via <agent>`: a group's PRs and briefs to the person go to the agent first, with a note. Replies, notes and questions are not routed.
 - `dak queue set <pr|thread> --rework "why"`: greyed out below the rest, skipped by `queue next`, back by itself with the next version.
 - A `parked` state: open but parked by the person's choice, out of the review count until `dak queue unpark`.
@@ -208,7 +240,7 @@ From a day of Atlas coordinating ten engineers:
 - `--range base..head` on send, add and reply: a reviewer runner reviews only a stacked PR's own commits.
 - A read-only sandbox's inbox check exits quietly instead of failing on SQLITE_READONLY.
 - Reviewer workspaces (temp folders, `wt-NNNN`) are hidden from `dak agents`; `--all` shows them.
-- `--type tryit --ticket REVA-123`: Works / Something's wrong; Works comes back with the ticket to close.
+- `--type tryit --ticket ENG-123`: Works / Something's wrong; Works comes back with the ticket to close.
 
 ## 0.3.10
 - Phone: an open file now replaces the page instead of floating over it, so nothing on it is a fixed layer. iPhone still sent a tap on the floating sheet's X to Mark reviewed on some files. Closing puts the page back where it was.

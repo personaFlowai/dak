@@ -12,7 +12,7 @@ import type { ReadMark } from "../src/store";
 
 export type Topic = { thread: Thread; messages: Message[]; participants?: Participant[]; reads?: ReadMark[] };
 
-// Who a thread is with, from your side. A thread between two agents belongs to the pair, "atlas+mitra".
+// Who a thread is with, from your side. A thread between two agents belongs to the pair, "lead+ana".
 // A thread you were added to (as reviewer, approver, watcher) belongs with whoever started it.
 export const peerOf = (t: Pick<Thread, "to" | "from"> & { participants?: string[] }) =>
   t.to === me ? t.from : t.from === me ? t.to : t.participants?.includes(me) ? t.from : [t.from, t.to].sort().join("+");
@@ -30,7 +30,7 @@ export function isArchived(peer: string): boolean {
 
 const archiveBtn = (peer: string) => `<button class="arch icon-btn" data-archive="${esc(peer)}" title="Archive (E)" aria-label="Archive this conversation">${I.archive}</button>`;
 
-export interface Peer { name: string; latest: Summary; waiting: number; unread: number; topics: number }
+export interface Peer { name: string; latest: Summary; unread: number; topics: number }
 
 // The sidebar rows: one per agent, newest first. Only your own threads count.
 export function peers(): Peer[] {
@@ -38,9 +38,8 @@ export function peers(): Peer[] {
   for (const t of S.threads) {
     if (!onThread(t)) continue;
     const n = peerOf(t);
-    const p = by.get(n) ?? { name: n, latest: t, waiting: 0, unread: 0, topics: 0 };
+    const p = by.get(n) ?? { name: n, latest: t, unread: 0, topics: 0 };
     if (t.updated_at > p.latest.updated_at) p.latest = t;
-    if (t.to === me && t.status === "waiting") p.waiting++;
     p.unread += t.unread;
     p.topics++;
     by.set(n, p);
@@ -75,9 +74,9 @@ export function peerList(): string {
 function peerRow(p: Peer): string {
   {
     const about = agentOf(p.name)?.about;
-    // The row names what needs you, not whatever moved last (a topic just closed, say).
+    // The Inbox says what is new, not what needs you: that is the You page's job.
     const shown = S.threads.find((t) => t.id === topicFor(p.name)) ?? p.latest;
-    const state = p.waiting ? `<span class="you">${p.waiting} waiting on you</span>` : p.topics > 1 ? `${p.topics} topics` : "";
+    const state = p.unread ? `<span class="new">${p.unread} new</span>` : p.topics > 1 ? `${p.topics} topics` : "";
     return `<div class="row-wrap" role="listitem"><button class="item ${p.unread ? "unread" : ""}" data-peer="${esc(p.name)}" aria-current="${S.view === "thread" && S.peer === p.name}">
       <span class="top">${mark(p.name, "sm")}<span class="who">${esc(name(p.name))}</span><time>${when(p.latest.updated_at)}</time></span>
       <span class="subj">${esc(shown.subject)}</span>
@@ -102,10 +101,10 @@ export function archivedList(): string {
   return `<button class="side-head sub fold" data-show-archived aria-expanded="${S.showArchived}">${I.next}Archived <span class="count">${names.length}</span></button>${rows}`;
 }
 
-// The topic to open when you click an agent: the newest one waiting on you, else the newest open one.
+// The topic to open when you click an agent: the newest unread one, else the newest open one.
 export function topicFor(peer: string): string | null {
   const mine = everyThread().filter((t) => peerOf(t) === peer);
-  return (mine.find((t) => t.to === me && t.status === "waiting") ?? mine.find((t) => t.status !== "closed") ?? mine[0])?.id ?? null;
+  return (mine.find((t) => t.unread) ?? mine.find((t) => t.status !== "closed") ?? mine[0])?.id ?? null;
 }
 
 // Load every topic with the current agent (the newest S.topicCap of them), reusing
@@ -175,11 +174,10 @@ export function timeline(render: (m: Message, topic: Topic) => string): string {
   return out.join("");
 }
 
-// This agent's open topics in one order everywhere: waiting on you first, then newest.
+// This agent's open topics, newest first.
 export function openTopics(): Summary[] {
-  const waiting = (t: Summary) => t.to === me && t.status === "waiting";
   return everyThread().filter((t) => peerOf(t) === S.peer && (t.status !== "closed" || t.id === S.cur))
-    .sort((a, b) => Number(waiting(b)) - Number(waiting(a)) || b.updated_at.localeCompare(a.updated_at));
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 }
 
 // Which topic your reply goes on: a quiet label, defaulting to the topic you are on. Clicking it

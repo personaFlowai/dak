@@ -74,7 +74,7 @@ export function tickRunners(run = runOnce) {
    review to the PR's own commits: the runner reads that range's diff here, and findings outside
    it are not asked for. Set with dak send/add/reply --range. */
 export function setRange(threadId: string, range: string | null) {
-  if (range !== null && !/^[\w./@^~-]+\.\.\.?[\w./@^~-]+$/.test(range)) throw new DakError("bad_range", "--range is base..head, such as origin/reva-2440..HEAD.");
+  if (range !== null && !/^[\w./@^~-]+\.\.\.?[\w./@^~-]+$/.test(range)) throw new DakError("bad_range", "--range is base..head, such as origin/eng-2440..HEAD.");
   store().exec("CREATE TABLE IF NOT EXISTS review_range (thread_id TEXT PRIMARY KEY, range TEXT NOT NULL)");
   if (range === null) store().query("DELETE FROM review_range WHERE thread_id = ?").run(threadId);
   else store().query("INSERT INTO review_range VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET range = excluded.range").run(threadId, range);

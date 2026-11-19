@@ -146,6 +146,7 @@ export function composer(t: Thread, docked = false): string {
     <textarea id="message" rows="3" aria-label="${esc(hint)}" placeholder="${esc(S.newTopic ? "First line is the subject" : hint)}">${esc(S.message[key] ?? "")}</textarea>
     ${attachBar()}
     <div class="row">
+      ${attachButton()}
       ${opts.length ? `<label class="popup ${v ? `v-${v}` : ""}" title="What your reply says about the work"><select id="verdict" aria-label="Verdict">${opts.map(([k, l]) => `<option value="${k}" ${(v ?? "") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
       ${gh ? `<label class="check" title="Also post this review and its line comments on GitHub"><input type="checkbox" id="github" ${S.github[t.id] ? "checked" : ""}> GitHub</label>` : ""}
       <span class="aside">${S.sendError ? `<span class="err">${esc(S.sendError)}</span>` : S.sendNote ? esc(S.sendNote) : n ? `${n} comment${n === 1 ? "" : "s"} attached` : ""}</span>
@@ -178,12 +179,13 @@ export function askPane(t: Thread): string {
     </form></div>`;
 }
 
-// Attachments on a new message or reply: files and links, each removable before sending.
+// Files on a new message or reply, each removable before sending. The chips sit above the
+// text's bottom row; the paperclip that adds them sits in that row, beside Send.
 export function attachBar(): string {
+  if (!S.newAtts.length) return "";
   const list = S.newAtts.map((a, i) => `<span class="att-chip ${(a as any).mime?.startsWith("image/") ? "img" : ""}">${(a as any).mime?.startsWith("image/") ? `<img src="data:${esc((a as any).mime)};base64,${(a as any).base64}" alt="">` : ""}${esc(a.name)}<button type="button" class="x" data-remove-att="${i}" aria-label="Remove">×</button></span>`).join("");
-  return `<div class="attach">${list}
-    <label class="chip-f" title="Attach a file">＋ File<input type="file" id="att-file" hidden multiple></label>
-    ${S.linkOpen ? `<span class="link-in"><input class="input" id="att-link" placeholder="https://linear.app/…" autocomplete="off"><button type="button" class="btn" data-add-link>Add</button></span>`
-      : `<button type="button" class="chip-f" data-open-link>＋ Link</button>`}</div>`;
+  return `<div class="attach">${list}</div>`;
 }
+export const attachButton = () =>
+  `<label class="icon-btn attach-btn" title="Attach a file" aria-label="Attach a file">${I.clip}<input type="file" id="att-file" hidden multiple></label>`;
 

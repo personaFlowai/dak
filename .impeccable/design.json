@@ -367,7 +367,7 @@
       "kind": "input",
       "refersTo": "input",
       "description": "Inputs and textareas; focus shifts the border toward red with a red-tint halo.",
-      "html": "<input class=\"ds-input\" placeholder=\"Reply to Atlas\">",
+      "html": "<input class=\"ds-input\" placeholder=\"Reply to Ana\">",
       "css": ".ds-input{width:100%;border:1px solid var(--line,rgba(0,0,0,.1));border-radius:6px;background:var(--win,#fff);padding:6px 9px;font:13px/1.45 -apple-system,system-ui,sans-serif;color:var(--text,#1d1d1f);outline:none}.ds-input:focus{border-color:color-mix(in srgb,var(--red,#1f6f8b) 55%,var(--line,rgba(0,0,0,.1)));box-shadow:0 0 0 3px var(--red-tint,rgba(31,111,139,.08))}"
     },
     {
@@ -406,7 +406,7 @@
       "kind": "custom",
       "refersTo": "composer",
       "description": "Floating reply box with verdict pop-up and the red Send.",
-      "html": "<form class=\"ds-composer\"><textarea placeholder=\"Reply to Atlas\"></textarea><div class=\"ds-crow\"><select><option>Comment</option><option>Approve</option><option>Request changes</option></select><span></span><button type=\"button\">Send</button></div></form>",
+      "html": "<form class=\"ds-composer\"><textarea placeholder=\"Reply to Ana\"></textarea><div class=\"ds-crow\"><select><option>Comment</option><option>Approve</option><option>Request changes</option></select><span></span><button type=\"button\">Send</button></div></form>",
       "css": ".ds-composer{display:grid;gap:8px;width:320px;padding:8px;border-radius:10px;background:var(--win,#fff);box-shadow:0 0 0 .5px var(--line,rgba(0,0,0,.1)),0 1px 2px rgba(0,0,0,.06),0 8px 24px -12px rgba(0,0,0,.18);font-family:-apple-system,system-ui,sans-serif}.ds-composer textarea{border:0;outline:none;resize:none;min-height:56px;padding:4px 6px;background:transparent;font:13px/1.45 inherit;color:var(--text,#1d1d1f)}.ds-crow{display:flex;align-items:center;gap:10px}.ds-crow span{flex:1}.ds-crow select{height:28px;padding:0 10px;border:0;border-radius:6px;font-size:13px;background:var(--win,#fff);box-shadow:0 0 0 .5px var(--line,rgba(0,0,0,.1)),0 1px 1.5px rgba(0,0,0,.08)}.ds-crow button{height:28px;padding:0 12px;border:0;border-radius:6px;font-weight:500;font-size:13px;color:#fff;background:var(--red,#1f6f8b)}.ds-crow button:hover{background:var(--red-hover,#185c74)}"
     }
   ],

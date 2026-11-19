@@ -3,7 +3,7 @@
    engineer with Linear-style cards. Drag a backlog row (or a card) onto an engineer to give it to
    them; drag inside a pile to reorder; drag to the backlog to take it away. Tapping a card opens
    its panel on the right: the ticket, who has it, where it stands, its work, and its history. */
-import { S, esc, mark, when, fullWhen, onPhone } from "./state";
+import { S, esc, mark, me, when, fullWhen, onPhone } from "./state";
 import { api } from "./api";
 import { I } from "./icons";
 import type { Card } from "../src/board";
@@ -170,7 +170,8 @@ export function boardView(): string {
   let main: string;
   // Each pile reads top down: what the engineer is on Now, what needs you or is blocked, what is in
   // review, then what is up next. An engineer with no Now says how long it has been idle.
-  const onYou = (c: Card) => /pratik|\byou\b/i.test(c.status?.blocked ?? "");
+  // Blocked on you: the line names you, by your Dak name or as "you".
+  const onYou = (c: Card) => new RegExp(`\\b(${me.replace(/[^\w-]/g, "")}|you)\\b`, "i").test(c.status?.blocked ?? "");
   const GROUPS: [string, (c: Card) => boolean][] = [["Needs you", (c) => c.stage === "you"], ["Blocked on you", (c) => c.stage === "blocked" && onYou(c)],
     ["Blocked", (c) => c.stage === "blocked" && !onYou(c)],
     ["In review", (c) => ["building", "cursor", "review", "changes", "proof", "approved", "merging", "held"].includes(c.stage)], ["Checking", (c) => c.stage === "checking"], ["Up next", (c) => c.stage === "next"]];

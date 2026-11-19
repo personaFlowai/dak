@@ -10,11 +10,11 @@ import { store, createThread, getThread, addMessage } from "./store";
 import { queue } from "./queue";
 import { prStates } from "./verdicts";
 import { ghState } from "./ghstate";
-import { team } from "./team";
+import { leadName, team } from "./team";
 import { DakError, type Thread } from "./types";
 
 export interface Task {
-  id: string; // "REVA-3041" for a Linear ticket, "T-<n>" for one made in Dak
+  id: string; // "ENG-3041" for a Linear ticket, "T-<n>" for one made in Dak
   source: "linear" | "dak";
   title: string; url: string | null;
   labels: string[]; milestone: string | null; project: string | null; team: string | null;
@@ -107,7 +107,7 @@ export function getTask(id: string): Task {
 /* ---------- assigning, ordering, starting ---------- */
 
 // Put a ticket in an agent's pile (or back in the backlog with agent null), before another one
-// or at the end. The agent gets a Dak message saying so; Atlas, when there is one, an FYI.
+// or at the end. The agent gets a Dak message saying so; the lead the person marked on Team, if any, an FYI.
 export function assign(taskId: string, agent: string | null, opts: { before?: string | null; by?: string; quiet?: boolean } = {}): Card {
   place(taskId, agent, opts);
   return card(getTask(taskId).id);
@@ -161,13 +161,13 @@ export function assignMany(lines: { task: string; agent: string | null }[], by: 
       const list = tasks.slice(0, 25).map((t, i) => `${i + 1}. ${t.id} ${t.title}`).join("\n");
       onTopic(agent, by, "Board: your pile", `${by} put ${tasks.length} ticket${tasks.length === 1 ? "" : "s"} in your pile:\n\n${list}${tasks.length > 25 ? `\n…and ${tasks.length - 25} more (\`dak pile\`)` : ""}\n\nTake them in order with \`dak next\`; say where you are with \`dak status <ticket> "…"\`.`, false);
     }
-    const lead = team({ all: true }).find((m) => m.name === "atlas" && m.kind !== "person");
-    if (lead && lead.name !== by && got.size) onTopic(lead.name, by, "Board: assignments", `${by} set up the Board: ${[...got].map(([a, t]) => `${a} ${t.length}`).join(", ")}.`, true);
+    const lead = leadName();
+    if (lead && lead !== by && got.size) onTopic(lead, by, "Board: assignments", `${by} set up the Board: ${[...got].map(([a, t]) => `${a} ${t.length}`).join(", ")}.`, true);
   }
   return { assigned: lines.length, agents: Object.fromEntries([...got].map(([a, t]) => [a, t.length])) };
 }
 
-// One standing topic per agent for its pile, and one for Atlas's FYIs, so assigning ten tickets is
+// One standing topic per agent for its pile, and one for the lead's FYIs, so assigning ten tickets is
 // ten messages on one topic, not ten new topics in everyone's list.
 function onTopic(to: string, from: string, subject: string, body: string, quiet: boolean) {
   const t = store().query("SELECT id FROM threads WHERE to_reader = ? AND from_name = ? AND subject = ? ORDER BY created_at DESC LIMIT 1").get(to, from, subject) as { id: string } | null;
@@ -180,8 +180,8 @@ function tellAssigned(task: Task, agent: string, by: string) {
   const link = task.url ? `\n${task.url}` : "";
   onTopic(agent, by, "Board: your pile", `You're on ${task.id}: ${task.title}. It's #${place} in your pile.${link}\n\nTake it when it's next: \`dak next\` gives you the top of your pile. Say where you are with \`dak status ${task.id} "what you're doing"\`.`, false);
   // The lead hears about it, unless the lead is the one who assigned it.
-  const lead = team({ all: true }).find((m) => m.name === "atlas" && m.kind !== "person");
-  if (lead && lead.name !== agent && lead.name !== by) onTopic(lead.name, by, "Board: assignments", `${by} gave ${task.id} (${task.title}) to ${agent}, #${place} in their pile.`, true);
+  const lead = leadName();
+  if (lead && lead !== agent && lead !== by) onTopic(lead, by, "Board: assignments", `${by} gave ${task.id} (${task.title}) to ${agent}, #${place} in their pile.`, true);
 }
 
 // The next ticket in an agent's pile that has not started; taking it marks it started.
@@ -234,7 +234,7 @@ function workFor(ids: string[]): Map<string, Thread[]> {
   for (const id of ids) {
     const r = re(id);
     const hit = new Set(titles.filter((x) => x.title && r.test(x.title)).map((x) => x.thread_id));
-    // Dak's own "Board: ..." topics (an agent's pile, Atlas's FYIs) are about the Board, not work on a ticket.
+    // Dak's own "Board: ..." topics (an agent's pile, the lead's FYIs) are about the Board, not work on a ticket.
     const ours = (subject: string) => subject.startsWith("Board: ");
     const list = rows.filter((t) => (r.test(t.subject) || hit.has(t.id)) && !ours(t.subject)).map((t) => ({ id: t.id, to: t.to_reader, from: t.from_name, subject: t.subject, kind: t.kind, status: t.status, created_at: t.created_at, updated_at: t.updated_at }) as Thread);
     out.set(id, [...new Map(list.map((t) => [t.id, t])).values()]);

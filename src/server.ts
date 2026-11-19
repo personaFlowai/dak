@@ -4,7 +4,7 @@ import { tickRunners } from "./reviewer";
 import { closePhone, cookieKey, isPhoneKey, openPhone, phoneHost, phoneMayNot, phoneStatus } from "./phone";
 import { recentWakes, settleWakes, tickSleepers } from "./sleeper";
 import { next, queue, queueStamp, removeQueue, setQueue } from "./queue";
-import { describeReview, orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
+import { park, describeReview, orderQueue, orderReviews, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf } from "./priority";
 import type { Participant } from "./types";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -28,6 +28,8 @@ import { agents, touch } from "./presence";
 import { DakError, type Verdict } from "./types";
 import { setMember, team } from "./team";
 import { addTask, assign, board } from "./board";
+import { addWork, getWork, listWork, moveWork, reassignWork } from "./work";
+import { addPermission, addRule, removeRule, rules } from "./rules";
 import { clearLinearKey, linearKey, setLinearKey, syncLinear } from "./linear";
 import { refreshGhStates } from "./ghstate";
 // Embedded at compile time, so the single dak binary carries its own screens.
@@ -194,7 +196,7 @@ async function outside(req: Request, url: URL): Promise<Response> {
   if (parts[0] === "send" && req.method === "POST") {
     const b = await body();
     const atts = b.link ? [{ type: "link", name: String(b.link), meta: { url: String(b.link) } } as any] : [];
-    // To the person by default; to any agent by name ("zari", "atlas"), so a remote agent can
+    // To the person by default; to any agent by name ("zoe", "lead"), so a remote agent can
     // work with the team directly. It still reads only its own threads.
     const to = b.to ? String(b.to).toLowerCase() : me;
     if (to !== me && loadConfig().readers.some((r) => r.name === to && r.kind === "person")) throw new DakError("not_allowed", "An outside agent writes to the person or to agents.", 403);
@@ -360,6 +362,11 @@ async function api(req: Request, url: URL): Promise<Response> {
     const { b, who } = await by();
     return json(orderReviews((b.threads ?? []).map(String), who, { tier: tierOf(b.tier) }));
   }
+  if (parts[0] === "reviews" && parts[1] && parts[2] === "park" && method === "POST") {
+    const { b, who } = await by();
+    if (who !== person(loadConfig())) throw new DakError("not_yours", "Only the person parks a topic from their list. An agent says it is being reworked with dak queue set --rework.", 403);
+    return json({ thread_id: park(parts[1], b.park !== false, b.note ? String(b.note).trim() || null : null, who) });
+  }
   if (parts[0] === "reviews" && parts[1] && parts[2] === "priority" && method === "PUT") {
     const { b, who } = await by();
     if (b.tier || b.why) prioritizeReview(parts[1], who, { tier: tierOf(b.tier), why: b.why });
@@ -474,6 +481,24 @@ async function api(req: Request, url: URL): Promise<Response> {
       body: String(b.note ?? ""), attachments: [{ type: "pr", name: meta.number ? `PR #${meta.number}` : "Changes", meta }] }), 201);
   }
 
+  // Work: every piece with its owner and state; the rules it moves by are in src/work.ts.
+  if (parts[0] === "work") {
+    const by = () => person(loadConfig());
+    if (method === "GET" && !parts[1]) return json(listWork({ owner: q.get("owner") ?? undefined, open: q.get("all") !== "1" }));
+    if (method === "POST" && !parts[1]) { const b = await body(); return json(addWork({ title: String(b.title ?? ""), kind: b.kind, owner: String(b.owner ?? ""), ticket: b.ticket ?? null, by: String(b.by ?? by()), thread_id: b.topic ?? null }), 201); }
+    if (method === "POST" && parts[1] && parts[2] === "move") { const b = await body(); return json(moveWork(parts[1], String(b.state ?? ""), String(b.by ?? by()), { proof: b.proof ?? null, blocked: b.blocked ?? null, thread_id: b.topic ?? null })); }
+    if (method === "POST" && parts[1] && parts[2] === "give") { const b = await body(); return json(reassignWork(parts[1], String(b.owner ?? ""), String(b.by ?? by()))); }
+    if (method === "GET" && parts[1]) return json(getWork(parts[1]));
+  }
+  // Rules: the person's list. Four are kept by Dak in code; only the person adds or removes the rest.
+  if (parts[0] === "rules") {
+    if (method === "GET") return json(rules());
+    const b = method === "POST" ? await body() : {} as any;
+    const by = String(b.by ?? "");
+    if (method === "POST" && parts[1] === "rule") return json(addRule(String(b.text ?? ""), by), 201);
+    if (method === "POST" && parts[1] === "permission") return json(addPermission(String(b.agent ?? ""), String(b.may ?? ""), by), 201);
+    if (method === "DELETE" && (parts[1] === "rule" || parts[1] === "permission") && parts[2]) return json(removeRule(parts[1], Number(parts[2]), String(q.get("by") ?? "")));
+  }
   // The Board: the backlog, each agent's pile, and where every ticket stands.
   if (parts[0] === "board") {
     if (method === "GET" && !parts[1]) return json({ ...board(), linear: { connected: !!linearKey() } });
@@ -666,7 +691,7 @@ function choiceOn(threadId: string, choice: string): string {
   return choice;
 }
 
-// participants: ["codex:reviewer", "pratik:approver"] or [{ name, role }]
+// participants: ["codex:reviewer", "sam:approver"] or [{ name, role }]
 function participantsOf(b: any): Participant[] {
   if (!Array.isArray(b?.participants)) return [];
   return b.participants.map((p: any) => typeof p === "string" ? parseParticipant(p) : parseParticipant(`${p?.name ?? ""}:${p?.role ?? "watcher"}`));

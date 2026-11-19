@@ -60,7 +60,7 @@ export interface Handoff {
   skipped: { name: string; reason: string }[];
 }
 export interface Cost { estimate: number; cap?: number; currency: string }
-export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: boolean;
+export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: boolean; parked?: boolean;
   approved?: { head_sha: string; diff_blob: string }; // what an approval approved, recorded by Dak
   prs?: number[]; // the PRs a verdict is about
   quiet?: boolean; // an update that needs no reply

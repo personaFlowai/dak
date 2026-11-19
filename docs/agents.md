@@ -24,7 +24,7 @@ Comments carry an anchor: `{kind: "code", file, side: "old"|"new", start_line, e
 
 ## Your name
 
-`dak whoami` prints your name on Dak in this session. Inside Claude Code, Codex or Cursor, `send`, `reply`, `inbox` and `wait` fill it in. A Codex session's name is its folder plus `-codex` and its worktree's id (say `shop-codex-bc25`), so it never shares a name with a Claude Code session in the same repository. Sending as a different name (`--from atlas`) makes the session answer to that name from then on.
+`dak whoami` prints your name on Dak in this session. Inside Claude Code, Codex or Cursor, `send`, `reply`, `inbox` and `wait` fill it in. A Codex session's name is its folder plus `-codex` and its worktree's id (say `shop-codex-bc25`), so it never shares a name with a Claude Code session in the same repository. Sending as a different name (`--from lead`) makes the session answer to that name from then on.
 
 ## How mail reaches you
 
@@ -40,7 +40,7 @@ Comments carry an anchor: `{kind: "code", file, side: "old"|"new", start_line, e
 - `--option "<text>"` (repeatable, up to six) puts buttons under your message. The reader's reply carries `choice`: the exact button text. Over HTTP, send `options: [...]`; the reader's reply has `choice`.
 - `--fyi` (HTTP `needs_reply: false`) marks an update that needs no answer, so the thread does not wait on the reader. After the reader approves, text-only replies count as updates anyway; a new version, a `question` verdict or buttons always ask.
 - `--link <url>` attaches a link. Linear issues, Notion pages, GitHub PRs and Figma files show as named cards.
-- Threads between two agents (Atlas writing to Mitra, say) are visible to the person under "Between agents", read only.
+- Threads between two agents (the lead writing to Ana, say) are visible to the person under "Between agents", read only.
 
 ## Chapters
 
@@ -78,7 +78,7 @@ A PR without chapters shows one section per file. Chapters make it reviewable in
 
 ## Working with other agents
 
-- **One thread per PR.** `--cc codex:reviewer --cc atlas:watcher` (or `dak add <thread> name:role` later) puts everyone on the same thread. Roles: author, reviewer, approver, watcher. A participant gets the mail like the addressee and can reply; an approver can approve.
+- **One thread per PR.** `--cc codex:reviewer --cc lead:watcher` (or `dak add <thread> name:role` later) puts everyone on the same thread. Roles: author, reviewer, approver, watcher. A participant gets the mail like the addressee and can reply; an approver can approve.
 - **Ready for review.** `--ready --migration <f|none> --proof tests:pass:412 --proof build:pass [--skipped "e2e: why"] [--head sha]`. Dak refuses a handoff with a missing field, or whose `--head` is not the PR's head.
 - **Groups.** `dak group set engineers a b c`, then `--to group:engineers`. Each member acks with `dak ack <thread>`; `dak show` lists who acked, who read it and who has not opened it.
 - **Reviewer runners.** `dak runner add codex` makes `codex` a reader that is a command. A PR sent to it (or with `--cc codex:reviewer`) is reviewed by `codex exec` read-only in the PR's folder; Dak posts the findings as line comments, a verdict, and chapters or reviewer notes. `--command '["prog","arg"]'` runs anything that prints the same JSON. Runs are paid model calls.
@@ -88,7 +88,7 @@ A PR without chapters shows one section per file. Chapters make it reviewable in
 - **Holds.** `dak queue set <pr|thread> --rework "why"` greys a PR out below the rest until its next version; `--state parked --waiting "why"` keeps it out of the review count until `dak queue unpark`.
 - **Moved heads.** An approval records the head and diff it approved. The queue row says when the head moved since, and whether it is a rebase only or the changes differ (`--head <sha>` from the merge script triggers the check).
 - **Routes.** `dak route set <person> --from-group <group> --via <agent>`: that group's PRs and briefs to the person go to the agent first, with a note. Replies are not routed.
-- **Try it.** `--type tryit --ticket REVA-123` gives Works / Something's wrong; a Works pick comes back with `tryit_result` naming the ticket to close.
+- **Try it.** `--type tryit --ticket ENG-123` gives Works / Something's wrong; a Works pick comes back with `tryit_result` naming the ticket to close.
 - **Stacked reviews.** `--range base..head` (send, add, reply) makes a runner review only those commits.
 - **Lookup.** `dak thread --pr <n>` prints the thread id; `send --json` returns `thread_id`.
 - **Confirmed orders.** `--confirmed-by <thread>` on `order`, `review-order` and `priority` applies an order as the person's when they asked for it there, by button or in words; the output quotes them.

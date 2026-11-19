@@ -41,7 +41,7 @@ export function buildCost(v: { cost?: string; cap?: string }): Cost | undefined 
   return { estimate, ...(cap !== undefined ? { cap } : {}), currency: "USD" };
 }
 
-// --cc codex:reviewer --cc atlas:watcher (a bare name is a watcher)
+// --cc codex:reviewer --cc lead:watcher (a bare name is a watcher)
 export function parseParticipant(s: string): Participant {
   const [name, role = "watcher"] = s.split(":").map((x) => x.trim().toLowerCase());
   if (!name) throw new DakError("bad_participant", "Write --cc name:role, e.g. --cc codex:reviewer.");

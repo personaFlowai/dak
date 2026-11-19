@@ -1,5 +1,5 @@
 /* The topics column: every topic with this agent as a list, like a chat history. One click shows
-   that topic alone; the list shows which one you are on and what each needs from you. It replaces
+   that topic alone; the list shows which one you are on and which are new. It replaces
    the old prev/next arrows and the "All topics" timeline, where it was easy to lose your place. */
 import { S, me, esc, name, when, agentOf } from "./state";
 import { everyThread, isPair, peerName, peerOf, type Topic } from "./convo";
@@ -18,7 +18,8 @@ function prNumber(t: Summary): string {
 function standingOf(t: Summary): { label: string; cls: string } {
   const other = t.to === me ? t.from : t.to;
   if (t.status === "closed") return { label: "Done", cls: "" };
-  if (t.to === me && t.status === "waiting") return t.reviewing_since ? { label: "You're reviewing", cls: "you" } : { label: "Waiting on you", cls: "you" };
+  // A topic for you needs no label here: what needs your answer lives on the You page.
+  if (t.to === me && t.status === "waiting") return { label: t.reviewing_since ? "You're reviewing" : "", cls: "" };
   if (t.status === "waiting") return { label: `Waiting on ${name(other)}`, cls: "" };
   if (t.status === "picked_up") return { label: `${name(other)} picked it up`, cls: "done" };
   if (t.status === "answered") return { label: t.to === me ? "You answered" : `${name(other)} answered`, cls: "done" };
@@ -30,10 +31,8 @@ const matches = (t: Summary, q: string) => !q || `${t.subject} ${prNumber(t)} ${
 export function topicRows(): string {
   const all = everyThread().filter((t) => peerOf(t) === S.peer && matches(t, S.topicFind))
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  const yours = (t: Summary) => t.to === me && t.status === "waiting";
   const groups: [string, Summary[], boolean][] = [
-    ["Waiting on you", all.filter(yours), false],
-    ["In progress", all.filter((t) => !yours(t) && t.status !== "closed"), false],
+    ["Open", all.filter((t) => t.status !== "closed"), false],
     ["Done", all.filter((t) => t.status === "closed"), true],
   ];
   const row = (t: Summary) => {

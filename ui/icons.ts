@@ -41,12 +41,15 @@ import lineUp from "@phosphor-icons/core/assets/regular/arrow-line-up.svg" with 
 import list from "@phosphor-icons/core/assets/regular/list-bullets.svg" with { type: "text" };
 import more from "@phosphor-icons/core/assets/regular/dots-three.svg" with { type: "text" };
 import pin from "@phosphor-icons/core/assets/regular/push-pin.svg" with { type: "text" };
+import shield from "@phosphor-icons/core/assets/regular/shield-check.svg" with { type: "text" };
+import lock from "@phosphor-icons/core/assets/regular/lock-simple.svg" with { type: "text" };
+import stack from "@phosphor-icons/core/assets/regular/stack.svg" with { type: "text" };
 import { siClaude, siCursor, siLinear, siNotion, siFigma } from "simple-icons";
 
 const FILE_ICONS: Record<string, string> = { ts: fileTs, mts: fileTs, tsx: fileTsx, jsx: fileTsx, md: fileMd, js: fileJs, mjs: fileJs, css: fileCss, sql: fileSql };
 export const fileIcon = (path: string) => FILE_ICONS[path.split(".").pop()?.toLowerCase() ?? ""] ?? fileCode;
 
-export const I = { kanban, team, clip, pin, more, list, archive, columns, expand, collapse, lineUp, tray, sent, compose, gear, sidebar, sparkle, chat, external, check, next, prev, pr, doc, close, search, github, terminal, up, person, plug, warning };
+export const I = { kanban, team, clip, pin, more, list, archive, columns, expand, collapse, lineUp, tray, sent, compose, gear, sidebar, sparkle, chat, external, check, next, prev, pr, doc, close, search, github, terminal, up, person, plug, warning, shield, lock, stack };
 
 const brand = (path: string) => `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${path}"/></svg>`;
 
@@ -87,3 +90,6 @@ export const TOOLS: Record<string, { label: string; mark: string }> = {
   cli: { label: "Shell", mark: terminal },
   http: { label: "HTTP", mark: terminal },
 };
+
+// A ticket reference: Linear's mark for an ENG-142 style id, a document for anything else.
+export const ticketMark = (ref: string) => /^[A-Z][A-Z0-9]+-\d+$/.test(ref) ? brand(siLinear.path) : doc;

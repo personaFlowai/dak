@@ -5,11 +5,11 @@ description: Send a pull request, a design doc or a note to a person or another 
 
 # Dak
 
-Dak is the review inbox on this Mac. You send work to a reader (a person, such as `sam`, or an agent, such as `atlas`). They read it in the Dak app, leave comments anchored to lines or paragraphs and a verdict, and the answer comes back to you on the same thread. Every command takes `--json`.
+Dak is the review inbox on this Mac. You send work to a reader (a person, such as `sam`, or an agent, such as `lead`). They read it in the Dak app, leave comments anchored to lines or paragraphs and a verdict, and the answer comes back to you on the same thread. Every command takes `--json`.
 
 Before the first send, check Dak is there: `dak agents --json` lists the readers and sessions. If `dak` is not found, it is not installed on this machine: say so and stop.
 
-**Your name.** `dak whoami` prints your name on Dak in this session. Inside Claude Code, Codex or Cursor, `send`, `reply`, `inbox` and `wait` fill it in, so `--from` and `--for` are only needed to use a different name (a named role such as `atlas`). Once you send as a name, this session answers to it.
+**Your name.** `dak whoami` prints your name on Dak in this session. Inside Claude Code, Codex or Cursor, `send`, `reply`, `inbox` and `wait` fill it in, so `--from` and `--for` are only needed to use a different name (a named role such as `lead`). Once you send as a name, this session answers to it.
 
 **Getting mail.** Claude Code receives mail through Dak's hooks, even when idle. If your tool has no hook running (Codex until its hook is approved), run `dak inbox --unread --json` at the start and the end of every task.
 
@@ -62,7 +62,7 @@ Then:
 
 When the PR is ready, say so with the proof, as fields Dak checks:
 
-`dak send --to <reader> --from <you> --pr <n> --chapters chapters.json --ready --migration none --proof tests:pass:412 --proof build:pass --skipped "e2e: no device today" --head <sha> --cc codex:reviewer --cc atlas:watcher --json`
+`dak send --to <reader> --from <you> --pr <n> --chapters chapters.json --ready --migration none --proof tests:pass:412 --proof build:pass --skipped "e2e: no device today" --head <sha> --cc codex:reviewer --cc lead:watcher --json`
 
 - `--migration` is the migration file name, or `none`. `--proof` is `name:pass|fail[:count]`, at least one. `--skipped` says what you did not run, and why.
 - `--head` is the commit your proofs ran on. If the PR's head has moved, Dak refuses: re-run on the head.
@@ -100,15 +100,15 @@ If Dak has a runner named `codex` (`dak runner add codex`), sending a PR to it, 
 
 ### Routes
 
-The person can have a group's PRs and briefs come to an agent first: `dak route set pratik --from-group engineers --via atlas`. Such a send goes to atlas with a note saying why, and `dak send` prints "Routed". Replies, notes and questions are never routed.
+The person can have a group's PRs and briefs come to an agent first: `dak route set sam --from-group engineers --via lead`. Such a send goes to lead with a note saying why, and `dak send` prints "Routed". Replies, notes and questions are never routed.
 
 ### Try it
 
-A "try it" on a live feature: `dak send --to pratik --type tryit --ticket REVA-2850 "Open Settings → Messages and ..."`. It gets the buttons "Works: move REVA-2850 to Done" and "Something's wrong". When they pick Works, the reply carries `tryit_result: {result: "works", ticket}`: post your production proof on the ticket and move it to Done; that pick was the Checking.
+A "try it" on a live feature: `dak send --to sam --type tryit --ticket ENG-2850 "Open Settings → Messages and ..."`. It gets the buttons "Works: move ENG-2850 to Done" and "Something's wrong". When they pick Works, the reply carries `tryit_result: {result: "works", ticket}`: post your production proof on the ticket and move it to Done; that pick was the Checking.
 
 ### Reviewer runners on stacked PRs
 
-`--range base..head` on `dak send`, `dak add` or `dak reply` makes a runner (codex, cursor) review only those commits, for example `dak add <thread> codex:reviewer --range origin/reva-2440..HEAD`. In a read-only sandbox the Dak inbox check prints nothing new and exits 0; reviewer workspaces in temporary folders are hidden from `dak agents` (`--all` shows them).
+`--range base..head` on `dak send`, `dak add` or `dak reply` makes a runner (codex, cursor) review only those commits, for example `dak add <thread> codex:reviewer --range origin/eng-2440..HEAD`. In a read-only sandbox the Dak inbox check prints nothing new and exits 0; reviewer workspaces in temporary folders are hidden from `dak agents` (`--all` shows them).
 
 ### The merge queue
 
@@ -144,7 +144,9 @@ Exit code 2 means nothing yet. Carry on with other work and wait again later; do
 | `question` | Answer first, then wait again. Change nothing until answered. |
 | none | A plain message: read it and answer if it asks something. If it has a `choice`, the reader clicked that button. |
 
-**The Board: your pile.** The person assigns you tickets (from Linear, or made in Dak) on the Board; you get them on your "Board: your pile" topic. You have exactly one Now: `dak next` takes the top of your pile and makes it your Now, and `dak status REVA-3041 "fixing Cursor round 2"` makes that ticket your Now (your previous Now goes back to Up next). Say it in the same step as the handover message you already send, so your last word is never stale; with no Now, the Board shows you as idle. When a ticket is many PRs, name the one you are on: `dak status REVA-3041 "fixing Cursor round 2" --pr 2551 --pr-stage fixing` (`--pr-stage` is building, cursor, fixing or proof: where the PR is before it reaches the person; Dak cannot see a branch or a Cursor round). A PR you name is listed even before it is on Dak. The Board lists every open PR of the ticket with its own stage and marks yours, and the ticket's stage is your PR's. Put the ticket ID in every PR's title, or the Board cannot tell it belongs to the ticket. To put a ticket back to Up next (not Now, not started), `dak status <ticket> --stop`. When you are stuck, `dak status <ticket> "…" --blocked "on what"`: it shows as Blocked (Blocked on you, when it names the person) and leaves Now. "Needs you" on the Board only ever comes from a Dak topic of the ticket's own (its subject names the ticket) that waits on the person, so ask on Dak, with the ticket ID in the subject, when you need them. Put the ticket ID in the subject of every topic and PR about it, so the Board links your work to it. Dak fills in the rest (the person's verdicts, the merge queue, merged and live). `dak pile` lists yours.
+**The Board: your pile.** The person assigns you tickets (from Linear, or made in Dak) on the Board; you get them on your "Board: your pile" topic. You have exactly one Now: `dak next` takes the top of your pile and makes it your Now, and `dak status ENG-3041 "fixing Cursor round 2"` makes that ticket your Now (your previous Now goes back to Up next). Say it in the same step as the handover message you already send, so your last word is never stale; with no Now, the Board shows you as idle. When a ticket is many PRs, name the one you are on: `dak status ENG-3041 "fixing Cursor round 2" --pr 2551 --pr-stage fixing` (`--pr-stage` is building, cursor, fixing or proof: where the PR is before it reaches the person; Dak cannot see a branch or a Cursor round). A PR you name is listed even before it is on Dak. The Board lists every open PR of the ticket with its own stage and marks yours, and the ticket's stage is your PR's. Put the ticket ID in every PR's title, or the Board cannot tell it belongs to the ticket. To put a ticket back to Up next (not Now, not started), `dak status <ticket> --stop`. When you are stuck, `dak status <ticket> "…" --blocked "on what"`: it shows as Blocked (Blocked on you, when it names the person) and leaves Now. "Needs you" on the Board only ever comes from a Dak topic of the ticket's own (its subject names the ticket) that waits on the person, so ask on Dak, with the ticket ID in the subject, when you need them. Put the ticket ID in the subject of every topic and PR about it, so the Board links your work to it. Dak fills in the rest (the person's verdicts, the merge queue, merged and live). `dak pile` lists yours.
+
+**Work.** Every agent starts from a piece of work: one owner, one outcome, one state. The dak-work skill says what counts as a piece and how to create and move one (`dak work add`, `start`, `ready`, `done`); `dak rules` shows what the person has said goes.
 
 **The team and @mentions.** `dak team` lists everyone who works through Dak, on this Mac or outside it: their @name, role, area, and what they can and cannot do. Send work to the one whose area it is. Writing `@name` in any message or reply brings that member onto the topic from that message on, and the mail reaches them (marked "mentions you"). Write `@<person>` only for what needs the person.
 

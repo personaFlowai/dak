@@ -4,7 +4,7 @@
    `dak queue next` reads the result, so a merge loop asks Dak what is next instead of
    chaining scripts by hand. */
 import { loadConfig, person } from "./config";
-import { awaitingReview, store, threadForPr, type AwaitingReview } from "./store";
+import { addMessage, awaitingReview, store, threadForPr, type AwaitingReview } from "./store";
 import { DakError } from "./types";
 
 export const TIERS = ["urgent", "normal", "later"] as const;
@@ -48,7 +48,23 @@ export function holdOf(threadId: string | null, row?: any): Hold | null {
       WHERE m.thread_id = ? AND a.type = 'pr' AND m.created_at > ? LIMIT 1`).get(threadId, r.hold_at);
     if (newer) return null;
   }
+  if (r.hold === "parked" && parkedBackBy(threadId, r)) return null;
   return { kind: r.hold, note: r.hold_note ?? null, at: r.hold_at, by: r.hold_by ?? null };
+}
+
+/* The person parked it, and the sender has since sent something new to answer: a new version of a
+   PR or doc, buttons, or a question. That brings it back on its own, so nothing parked waits
+   unseen after it changed. A plain reply ("ok, parked") does not. Parks an agent set stay until
+   unparked, as before. Returns what brought it back, or null. */
+export function parkedBackBy(threadId: string, r?: any): string | null {
+  const row = r ?? store().query("SELECT hold, hold_at, hold_by FROM review_order WHERE thread_id = ?").get(threadId) as any;
+  if (row?.hold !== "parked" || !row.hold_at || row.hold_by !== me()) return null;
+  const m = store().query(`SELECT m.verdict, m.options, (SELECT group_concat(a.type) FROM attachments a WHERE a.message_id = m.id) AS atts
+    FROM messages m WHERE m.thread_id = ? AND m.author != ? AND m.created_at > ?
+      AND (m.options IS NOT NULL OR m.verdict = 'question' OR EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id AND a.type IN ('pr', 'doc')))
+    ORDER BY m.id LIMIT 1`).get(threadId, row.hold_by, row.hold_at) as { verdict: string | null; options: string | null; atts: string | null } | null;
+  if (!m) return null;
+  return m.atts?.match(/pr|doc/) ? "a new version" : "a new question";
 }
 
 // Put a hold on (kind) or take it off (null). Anyone may: it says what is true about the work.
@@ -231,7 +247,7 @@ export function orderReviews(refs: string[], by: string, opts: { tier?: Tier } =
   return { ordered, kept };
 }
 
-export type OrderedReview = AwaitingReview & Priority & { type: string; blocks: string | null; hold: Hold | null };
+export type OrderedReview = AwaitingReview & Priority & { type: string; blocks: string | null; hold: Hold | null; back: string | null };
 export function reviewsInOrder(reader: string): OrderedReview[] {
   ensurePriority();
   const pr = new Map((store().query("SELECT * FROM review_order").all() as any[]).map((r) => [r.thread_id, r]));
@@ -239,7 +255,7 @@ export function reviewsInOrder(reader: string): OrderedReview[] {
   return awaitingReview(reader, typed).map((r) => {
     const p = pr.get(r.thread_id);
     return { ...r, tier: (p?.tier ?? "normal") as Tier, rank: p?.rank ?? null, why: p?.why ?? null, rank_by: p?.rank_by ?? null, blocks: p?.blocks ?? null,
-      hold: holdOf(r.thread_id, p ?? null) };
+      hold: holdOf(r.thread_id, p ?? null), back: parkedBackBy(r.thread_id, p ?? null) };
   // Held rows (being reworked, parked) go below everything else, in their own order.
   }).sort((a, b) => Number(!!a.hold) - Number(!!b.hold) || byPriority(a, b, (x, y) => x.waiting_since.localeCompare(y.waiting_since)));
 }
@@ -252,4 +268,15 @@ function touchQueue() {
 export function touchStamp(): string {
   store().exec(`CREATE TABLE IF NOT EXISTS queue_touch (k INTEGER PRIMARY KEY, at TEXT)`);
   return (store().query("SELECT at FROM queue_touch WHERE k = 1").get() as { at: string } | null)?.at ?? "";
+}
+
+/* The person parks a topic from their list, or unparks it. The sender hears it as an update, which
+   never wakes a session, so it stops asking without anyone spending a turn on it. The topic stays
+   waiting on the person; it only leaves the count. */
+export function park(threadId: string, on: boolean, note: string | null, by: string) {
+  const id = setHold(threadId, on ? "parked" : null, on ? note : null, by);
+  const words = on ? `Parked for now${note ? `: ${note}` : ""}. It comes back to me when you send a new version or a new question.`
+    : "Unparked: it is back on my list.";
+  addMessage(id, { author: by, body: words, needs_reply: false, extra: { parked: on } });
+  return id;
 }

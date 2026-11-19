@@ -6,6 +6,7 @@ import { local } from "./api";
 import { everyThread, isPair, peerList, archivedList, pairList, peerName, peerOf } from "./convo";
 import { topicRows } from "./topics";
 import { I } from "./icons";
+import { P, youCount } from "./places";
 
 export type SideLevel = "agents" | "topics" | "pairs";
 
@@ -13,23 +14,35 @@ export type SideLevel = "agents" | "topics" | "pairs";
    each with a short name under its icon, as iPhone apps do. */
 export function railView(): string {
   const phone = onPhone();
-  const queueN = S.queue.filter((r) => r.state !== "deployed" && !r.hold).length;
-  const item = (attr: string, icon: string, label: string, short: string, on: boolean, n = 0, you = false) =>
-    `<button class="ri ${on ? "on" : ""}" ${attr} title="${label}" aria-label="${label}${n ? `, ${n}` : ""}" ${on ? `aria-current="page"` : ""}>${icon}${n ? `<b class="${you ? "you" : ""}">${n}</b>` : ""}${phone ? `<span class="rl">${short}</span>` : ""}</button>`;
+  const youN = youCount();
+  const workN = P.work.filter((w) => w.state !== "done").length;
   // The phone's Inbox and Between agents are its list screen; the Mac's are the sidebar beside a thread.
   const listing = phone ? S.phoneList : S.view === "thread";
   const inbox = listing && S.sideLevel !== "pairs" || S.view === "welcome";
-  const pairs = phone ? S.phoneList && S.sideLevel === "pairs" : S.sideLevel === "pairs";
-  return `${item(`data-rail="agents"`, I.tray, "Inbox", "Inbox", inbox)}
-    ${item("data-waiting", I.check, "Waiting on you", "For you", !(phone && S.phoneList) && S.view === "waiting", S.reviews.length, true)}
-    ${item("data-queue", I.pr, "Merge queue", "Queue", !(phone && S.phoneList) && S.view === "queue", queueN)}
-    ${phone ? "" : item(`data-rail="pairs"`, I.chat, "Between agents", "Agents", pairs)}
-    ${item("data-board-open", I.kanban, "Board", "Board", !(phone && S.phoneList) && S.view === "board")}
-    ${phone ? "" : item("data-team-open", I.team, "Team", "Team", S.view === "team")}
-    ${item("data-search-open", I.search, "Search everything (⌘K)", "Search", false)}
-    ${phone ? "" : `${item("data-compose", I.compose, "New message (N)", "New", S.view === "compose")}
+  const pairs = phone ? S.phoneList && S.sideLevel === "pairs" : S.view === "thread" && S.sideLevel === "pairs";
+  const off = phone && S.phoneList;
+  if (phone) {
+    const tab = (attr: string, icon: string, label: string, on: boolean, n = 0, you = false) =>
+      `<button class="ri ${on ? "on" : ""}" ${attr} aria-label="${label}${n ? `, ${n}` : ""}" ${on ? `aria-current="page"` : ""}>${icon}${n ? `<b class="${you ? "you" : ""}">${n}</b>` : ""}<span class="rl">${label}</span></button>`;
+    return `${tab("data-you", I.check, "You", !off && S.view === "you", youN, true)}${tab("data-work", I.stack, "Work", !off && S.view === "work")}
+      ${tab(`data-rail="agents"`, I.tray, "Inbox", inbox, S.counts.to)}${tab("data-search-open", I.search, "Search", false)}`;
+  }
+  /* The Mac: a labelled list, wide enough to read at a glance. Your three places first, then
+     where conversations live, then the rest. */
+  const row = (attr: string, icon: string, label: string, on: boolean, n = 0, you = false, hint = "") =>
+    `<button class="nav ${on ? "on" : ""}" ${attr} title="${hint || label}" aria-label="${label}${n ? `, ${n}` : ""}" ${on ? `aria-current="page"` : ""}>${icon}<span>${label}</span>${n ? `<b class="${you ? "you" : ""}">${n}</b>` : ""}</button>`;
+  return `${row("data-compose", I.compose, "New message", S.view === "compose", 0, false, "New message (N)")}
+    ${row("data-search-open", I.search, "Search", false, 0, false, "Search everything (⌘K)")}
+    <div class="nav-gap"></div>
+    ${row("data-you", I.check, "You", S.view === "you", youN, true, "What waits on you, most blocking first")}
+    ${row("data-work", I.stack, "Work", ["work", "queue", "board"].includes(S.view), workN, false, "Every piece of work, and what is shipping")}
+    ${row("data-rules", I.shield, "Rules", S.view === "rules", 0, false, "Your rules, and what each agent may do")}
+    <div class="nav-head">Conversations</div>
+    ${row(`data-rail="agents"`, I.tray, "Inbox", inbox, S.counts.to)}
+    ${row(`data-rail="pairs"`, I.chat, "Between agents", pairs)}
+    ${row("data-team-open", I.team, "Team", S.view === "team")}
     <span class="grow"></span>
-    ${(window as any).DAK?.phone ? "" : item("data-settings", I.gear, "Settings", "Settings", S.view === "settings")}`}`;
+    ${(window as any).DAK?.phone ? "" : row("data-settings", I.gear, "Settings", S.view === "settings")}`;
 }
 
 export function phoneListHead(): string {
@@ -87,11 +100,10 @@ export function tabsView(): string {
   const tabs = S.tabs.map((id) => all.find((t) => t.id === id)).filter(Boolean) as ReturnType<typeof everyThread>;
   return tabs.map((t) => {
     const on = S.view === "thread" && S.cur === t.id;
-    const yours = t.to === me && t.status === "waiting";
     const who = peerOf(t);
     const preview = S.preview === t.id;
     return `<div class="tab ${on ? "on" : ""} ${preview ? "preview" : ""}" draggable="true" role="tab" aria-selected="${on}"><button class="tab-go" data-tab="${t.id}" title="${esc(`${isPair(who) ? peerName(who) : name(who)}: ${t.subject}`)}${preview ? " (preview: the next topic you open takes this tab; double-click to keep it)" : ""}">
-      ${yours ? `<span class="dot" title="Waiting on you"></span>` : ""}<span class="tl">${esc(t.subject)}</span></button>
+      ${t.unread ? `<span class="dot" title="New"></span>` : ""}<span class="tl">${esc(t.subject)}</span></button>
       <button class="tab-x" data-tab-close="${t.id}" aria-label="Close tab">${I.close}</button></div>`;
   }).join("");
 }

@@ -14,7 +14,7 @@ export function dakHome(): string {
 export interface ReaderConfig extends Reader {
   about?: string; // one line: what this agent does ("Coordinates the engineers")
   tool?: string; // claude-code, codex, cursor, grok
-  where?: string; // the session folder this name belongs to, so the hook can tell it is Atlas
+  where?: string; // the session folder this name belongs to, so the hook can tell which named reader it is
 }
 
 export type HelperName = "claude" | "codex" | "cursor" | "custom";

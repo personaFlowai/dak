@@ -69,7 +69,7 @@ document.addEventListener("mousedown", (e) => {
 }, true);
 document.addEventListener("focusout", (e) => { if (pop && e.target === pop.box) setTimeout(() => { if (document.activeElement !== pop?.box) close(); }, 0); });
 
-// In a rendered message: "@atlas" for each name the message mentions, shown as a mention.
+// In a rendered message: "@lead" for each name the message mentions, shown as a mention.
 export function markMentions(html: string, mentions?: string[]): string {
   if (!mentions?.length) return html;
   return mentions.reduce((h, n) => h.replace(new RegExp(`(^|[\\s(>])@(${n.replace(/[-]/g, "\\-")})(?![\\w-])`, "g"), `$1<span class="mention">@$2</span>`), html);

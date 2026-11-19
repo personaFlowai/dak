@@ -179,7 +179,7 @@ export function addMessage(threadId: string, input: {
   const other = author !== thread.from && author !== thread.to && isParticipant(threadId, author);
   const settled = thread.status === "informed" || thread.status === "closed";
   const asks = !other && author !== thread.to && needsReply(thread, input);
-  const status: ThreadStatus = input.extra?.reviewing !== undefined ? thread.status // "on it" (or "stopped") is not an answer
+  const status: ThreadStatus = input.extra?.reviewing !== undefined || input.extra?.parked !== undefined ? thread.status // "on it", "stopped" or "parked" is not an answer
     : author === thread.to && othersStillWaiting(threadId, author, input) ? "waiting"
     : author === thread.to ? "answered"
     : other ? (thread.to.startsWith("group:") && !settled ? "answered" : thread.status)
@@ -189,7 +189,7 @@ export function addMessage(threadId: string, input: {
   // turn and never interrupts one or wakes an idle session. Buttons, verdicts and new versions
   // always ask.
   const quiet = !input.options?.length && !input.verdict && !input.choice && !input.attachments?.length
-    && (input.needs_reply === false || input.extra?.reviewing !== undefined || (author === thread.from && !other && !asks));
+    && (input.needs_reply === false || input.extra?.reviewing !== undefined || input.extra?.parked !== undefined || (author === thread.from && !other && !asks));
   // An approval records exactly what was approved (head and diff), so a later push can be told
   // apart: the merge queue says "head moved since your approval" and whether the changes differ.
   let extra: MessageExtra | undefined = quiet ? { ...input.extra, quiet: true } : input.extra;
@@ -448,7 +448,7 @@ export function addParticipant(threadId: string, p: Participant): Participant[] 
 
 /* ---------- routes ---------- */
 
-// "PRs and briefs that engineers send to pratik go to atlas": the reader's own way of saying who
+// "PRs and briefs that engineers send to sam go to lead": the reader's own way of saying who
 // reviews first. Only new PR and doc threads are routed; replies, notes and questions are not,
 // so anything on a thread the person is already on still reaches them.
 export interface Route { to_reader: string; from_group: string; via: string }

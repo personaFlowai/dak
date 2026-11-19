@@ -5,7 +5,7 @@ import { loadConfig, readerForFolder } from "./config";
 import { store } from "./store";
 
 // Who is out there to message. Three sources, merged by name:
-//   readers   - named in config (you, atlas, ...)
+//   readers   - named in config (you, lead, ...)
 //   seen      - anything that used Dak as itself: sent, waited, read its inbox, or ran the hook
 //   running   - agent processes found on this Mac right now, named by their folder
 // A session's name is its working folder's name, because that is what tells two
@@ -75,8 +75,8 @@ export function sessionTitles(): Map<string, string> {
 
 // The name a session goes by is the one it SENDS as (dak send/reply --from). Reading
 // someone's inbox (--for) never changes who you are, or a quick look would take their mail. An agent that runs
-// "dak send --from atlas" inside a Claude Code session is atlas from then on, so its
-// hooks deliver atlas's mail there, whatever folder it runs in. Without this, replies
+// "dak send --from lead" inside a Claude Code session is lead from then on, so its
+// hooks deliver lead's mail there, whatever folder it runs in. Without this, replies
 // to a name the folder does not produce reach no session at all.
 export function claimName(name: string) {
   const session = process.env.CLAUDE_CODE_SESSION_ID;

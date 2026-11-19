@@ -9,7 +9,7 @@ import {
   type NewAttachment,
 } from "./store";
 import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presence";
-import { SKILL, INSTRUCTIONS } from "./skill";
+import { SKILL, INSTRUCTIONS, WORK_SKILL } from "./skill";
 import pkg from "../package.json";
 import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
 import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, draftChapters } from "./pr";
@@ -23,6 +23,8 @@ import { addRunner, removeRunner, runners, setRange } from "./reviewer";
 import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
 import { confirmedBy, setHold, describeReview, orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
 import type { AwaitingReview } from "./store";
+import { addWork, getWork, listWork, moveWork, reassignWork, type WorkItem } from "./work";
+import { rules as readRules } from "./rules";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
 
@@ -72,7 +74,7 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
       --cost 0.15 [--cap 0.25]  what a yes would spend, shown with the buttons
       --head-only (reply)       move the PR to its new head in place, with a note that asks nothing
       --message-file <f|->      the message from a file or stdin, untouched by the shell
-      --type tryit [--ticket REVA-123]   a "try it" on a live feature: buttons Works / Something's wrong; on Works
+      --type tryit [--ticket ENG-123]   a "try it" on a live feature: buttons Works / Something's wrong; on Works
                                 the reply says to post the proof on the ticket and move it to Done
       --allow-big "why"         send chapters over 6 files or 12 hunks anyway; the reason shows on each big chapter
       --range base..head        (also on dak add) a reviewer runner reviews only these commits: a stacked PR's own
@@ -83,6 +85,13 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak route | dak route remove <reader> --from-group <group>
   dak ack <thread> --from <name> [text]          a member's "done" on a broadcast
   dak decisions [--for <name>]                   every button picked, with the question and its cost
+  dak work [--owner <agent>] [--all]             every open piece of work: id, owner, state, title
+  dak work add "title" --owner <agent> [--kind code|mock|research|doc|email|note] [--ticket ENG-1] [--topic t_…]
+  dak work start|hold|next <W-n> [--blocked "why"]   move your piece
+  dak work ready <W-n> --proof "…" --topic t_…  ready for the person; without proof and a topic Dak sends it back
+  dak work done <W-n> --proof "…"               done needs proof
+  dak work give <W-n> <agent>                    hand it to another owner
+  dak rules                                      the person's rules and what each agent may do (read only)
   dak runner add codex | cursor | claude | <name> --command '["prog","arg"]'
                                                  a reader that is a command: PRs sent to it get reviewed headless
   dak runner list | dak runner remove <name>
@@ -113,7 +122,7 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak hook claude-code                           Claude Code hook: new messages reach the session at each turn
   dak hook print                                 the hooks block for ~/.claude/settings.json
   dak readers [add <name> [--person]]
-  dak init --readers you:person,atlas,mitra         (first run)
+  dak init --readers you:person,lead,ana         (first run)
   dak serve [--port 7474]                        the review screens at http://127.0.0.1:7474
   dak --version
   Add --json to any command for machine-readable output.
@@ -184,7 +193,7 @@ function refreshThread(id: string, values: any) {
   }).meta;
 }
 
-// The queue as Atlas reads it in a terminal: what waits on the person, what is moving, what waits.
+// The queue as a lead agent reads it in a terminal: what waits on the person, what is moving, what waits.
 function queueText(rows: QueueRow[], reviews: OrderedReview[], who: string): string {
   const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
   const left = (r: QueueRow) => { if (!r.eta_at) return ""; const m = Math.round((Date.parse(r.eta_at) - Date.now()) / 60000); return m >= 0 ? `, about ${m} min left` : `, ${-m} min over`; };
@@ -296,6 +305,7 @@ const OPTIONS = {
   eta: { type: "string" }, after: { type: "string" }, tier: { type: "string" }, why: { type: "string" }, waiting: { type: "string" },
   review: { type: "boolean" }, hotfix: { type: "boolean" }, "confirmed-by": { type: "string" }, type: { type: "string" }, blocks: { type: "string" },
   rework: { type: "string" }, "from-group": { type: "string" }, via: { type: "string" }, range: { type: "string" }, ticket: { type: "string" }, "allow-big": { type: "string" }, state: { type: "string" }, note: { type: "string" }, thread: { type: "string" }, title: { type: "string" }, all: { type: "boolean" },
+  kind: { type: "string" }, owner: { type: "string" }, topic: { type: "string" }, lead: { type: "boolean" },
 } as const;
 
 export async function main(argv: string[]): Promise<number> {
@@ -458,7 +468,7 @@ export async function main(argv: string[]): Promise<number> {
       }
       if (cmd === "status") {
         const [id, ...rest] = positionals;
-        if (!id) throw new DakError("no_task", 'Which ticket? dak status REVA-3041 "fixing Cursor round 2" [--blocked "..."] [--stop]');
+        if (!id) throw new DakError("no_task", 'Which ticket? dak status ENG-3041 "fixing Cursor round 2" [--blocked "..."] [--stop]');
         if (values.stop) { const c = unstart(id, who); out(json, c, () => `${c.id} is back in Up next: not Now, not started, no line or block.`); return 0; }
         const prN = values.pr ? Number(String(values.pr).replace(/^#/, "")) : null;
         if (values.pr && !Number.isInteger(prN)) throw new DakError("bad_pr", "--pr takes the PR number you are on: --pr 2551");
@@ -467,7 +477,7 @@ export async function main(argv: string[]): Promise<number> {
         return 0;
       }
       if (cmd === "assign") {
-        // Who assigned it: --from, else this session's own name (so Atlas's assignments say Atlas).
+        // Who assigned it: --from, else this session's own name (so the lead's assignments name the lead).
         const by = values.from ?? whoami({ tool: detectTool(), where: process.cwd() });
         if (values.file) {
           // One "<ticket> <agent>" per line, in pile order; # starts a comment.
@@ -499,11 +509,11 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "team": {
       // dak team                       everyone who works through Dak, with name, role and area
-      // dak team set <name> --display "Atlas" --role CTO --area "..." --can "..." --cannot "..."
+      // dak team set <name> --display "Lead" --role "Engineering lead" --area "..." --can "..." --cannot "..."
       if (positionals[0] === "set") {
         const name = positionals[1];
         if (!name) throw new DakError("no_member", "Whose card? dak team set <name> --role ...");
-        const m = setMember(name, { display: values.display, role: values.role, area: values.area, can: values.can, cannot: values.cannot });
+        const m = setMember(name, { display: values.display, role: values.role, area: values.area, can: values.can, cannot: values.cannot, ...(values.lead !== undefined ? { lead: !!values.lead } : {}) });
         out(json, m, () => `Updated ${m.name}.`);
         return 0;
       }
@@ -551,6 +561,8 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "skill": {
       // The Dak skill, for an agent Dak cannot install it into: paste it into its instructions.
+      // dak skill work: the Work skill alone, to hand to an agent in any tool.
+      if (positionals[0] === "work") { console.log(values.plain ? WORK_SKILL.replace(/^---[\s\S]*?---\s*/, "").trim() : WORK_SKILL); return 0; }
       console.log(values.plain ? INSTRUCTIONS : SKILL);
       return 0;
     }
@@ -568,7 +580,7 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "add": {
-      // dak add <thread> codex:reviewer pratik:approver
+      // dak add <thread> codex:reviewer sam:approver
       const id = positionals.shift() ?? "";
       if (!positionals.length) throw new DakError("usage", "dak add <thread> <name:role>... (roles: author, reviewer, approver, watcher)");
       let list = getThread(id).participants;
@@ -589,7 +601,7 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "route": {
-      // dak route set pratik --from-group engineers --via atlas | dak route remove pratik --from-group engineers | dak route
+      // dak route set sam --from-group engineers --via lead | dak route remove sam --from-group engineers | dak route
       const [sub, to] = positionals;
       if ((sub === "set" || sub === "remove") && to) {
         if (!values["from-group"]) throw new DakError("usage", "dak route set <reader> --from-group <group> --via <reader>");
@@ -704,6 +716,35 @@ export async function main(argv: string[]): Promise<number> {
       const from = String(values.from ?? person(loadConfig()));
       setReviewing(id, from, { prs: prNumbers(values.on), stop: !!values.stop, body: readBody(positionals, values) });
       out(json, { reviewing: id, stopped: !!values.stop }, () => `Told ${getThread(id).thread.from} you ${values.stop ? "stopped reviewing" : "are reviewing"} ${id}.`);
+      return 0;
+    }
+    case "work": {
+      const by = values.from ?? whoami({ tool: detectTool(), where: process.cwd() });
+      const [sub, id, ...more] = positionals;
+      const line = (w: WorkItem) => `${w.id.padEnd(6)} ${w.state.padEnd(6)} ${w.kind.padEnd(8)} ${w.owner.padEnd(10)} ${w.title}${w.ticket ? `  [${w.ticket}]` : ""}${w.blocked ? `  (held: ${w.blocked})` : ""}`;
+      const proof = values.proof ? [].concat(values.proof).join("; ") : null;
+      if (!sub || sub === "list") {
+        const list = listWork({ owner: values.owner ?? values.for, open: !values.all });
+        out(json, list, () => list.length ? list.map(line).join("\n") : "No open work.");
+        return 0;
+      }
+      if (sub === "add") {
+        const w = addWork({ title: [id, ...more].filter(Boolean).join(" ") || readBody([], values), kind: values.kind, owner: values.owner ?? by, ticket: values.ticket, by, thread_id: values.topic ?? null });
+        out(json, w, () => `${w.id} is ${w.owner}'s: ${w.title}`);
+        return 0;
+      }
+      if (sub === "show") { const w = getWork(id); out(json, w, () => `${line(w)}${w.proof ? `\n  proof: ${w.proof}` : ""}${w.thread_id ? `\n  topic: ${w.thread_id}` : ""}`); return 0; }
+      if (sub === "give") { const w = reassignWork(id, more[0] ?? values.owner ?? "", by); out(json, w, () => `${w.id} is now ${w.owner}'s.`); return 0; }
+      const to = ({ start: "doing", doing: "doing", hold: "held", held: "held", next: "next", ready: "ready", done: "done" } as Record<string, string>)[sub];
+      if (!to || !id) throw new DakError("usage", "dak work [list|add|start|hold|next|ready|done|give|show] ...  (dak help)");
+      const w = moveWork(id, to, by, { proof, blocked: values.blocked ?? null, thread_id: values.topic ?? values.thread ?? null });
+      out(json, w, () => `${w.id}: ${w.state}${w.state === "ready" ? " (on the person's You page)" : ""}`);
+      return 0;
+    }
+    case "rules": {
+      const r = readRules();
+      out(json, r, () => [...r.kept.map((k) => `kept by Dak  ${k.text} ${k.how}`), ...r.rules.map((x) => `rule         ${x.text}`),
+        ...r.permissions.map((p) => `${p.agent.padEnd(12)} may ${p.may}`)].join("\n"));
       return 0;
     }
     case "decisions": {

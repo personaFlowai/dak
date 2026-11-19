@@ -17,13 +17,14 @@ function card(m: TeamMember): string {
   const editing = S.teamEdit === m.name;
   const where = [KIND[m.kind] ?? m.kind, m.tool ? TOOL[m.tool] ?? m.tool : "", m.via ? `speaks through ${esc(m.via)}` : ""].filter(Boolean).join(" · ");
   const seen = m.listening ? `<span class="live" title="Used Dak in the last 10 minutes">Listening</span>` : m.last_seen ? `<span>Seen ${when(m.last_seen)}</span>` : "";
-  const head = `<div class="tm-head">${mark(m.name, "md")}<div class="tm-name"><b>${esc(m.display || m.name)}</b><span><code>@${esc(m.name)}</code> · ${where}</span></div>${seen}
+  const head = `<div class="tm-head">${mark(m.name, "md")}<div class="tm-name"><b>${esc(m.display || m.name)}${m.lead ? ` <i class="tm-lead">Lead</i>` : ""}</b><span><code>@${esc(m.name)}</code> · ${where}</span></div>${seen}
     ${m.kind === "person" ? "" : `<button class="btn subtle" data-team-edit="${esc(m.name)}">${editing ? "Cancel" : "Edit"}</button>`}</div>`;
   if (editing) {
     const f = (k: "display" | "role" | "area" | "can" | "cannot", label: string, ph: string) =>
       `<label class="tm-field"><span>${label}</span><input class="input" data-team-field="${k}" value="${esc(m[k] ?? "")}" placeholder="${esc(ph)}" maxlength="200"></label>`;
-    return `<li class="tm editing">${head}<div class="tm-form">${f("display", "Name", "Atlas")}${f("role", "Role", "CTO")}${f("area", "Area", "Engineering, the merge queue")}
-      ${f("can", "Can", "writes code in jewel-saas, merges")}${f("cannot", "Cannot", "no production access")}
+    return `<li class="tm editing">${head}<div class="tm-form">${f("display", "Name", "Lead")}${f("role", "Role", "CTO")}${f("area", "Area", "Engineering, the merge queue")}
+      ${f("can", "Can", "writes code in my-app, merges")}${f("cannot", "Cannot", "no production access")}
+      <label class="tm-check"><input type="checkbox" data-team-lead ${m.lead ? "checked" : ""}><span><b>Lead</b>: hears when you assign tickets on the Board. One member at most.</span></label>
       <div class="btns"><button class="btn primary" data-team-save="${esc(m.name)}">Save</button></div></div></li>`;
   }
   const facts = [m.role || m.area ? `<p class="tm-role">${esc([m.role, m.area].filter(Boolean).join(" · "))}</p>` : "",

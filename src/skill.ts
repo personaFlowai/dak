@@ -2,10 +2,12 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import skillText from "../skills/dak/SKILL.md" with { type: "text" };
+import workText from "../skills/dak-work/SKILL.md" with { type: "text" };
 
 // Teaching an agent to use Dak, as part of connecting it. The skill ships inside the
 // binary, so this works without the source. Each tool gets it where it reads instructions:
-//   Claude Code: a skill at ~/.claude/skills/dak/SKILL.md, loaded when it is relevant.
+//   Claude Code: two skills, ~/.claude/skills/dak/SKILL.md (sending and reading) and
+//   ~/.claude/skills/dak-work/SKILL.md (what work is and how to move it), each loaded when relevant.
 //   Codex: a marked section in ~/.codex/AGENTS.md, its global instructions.
 //   Cursor: keeps global rules in its settings screen, so Settings offers the text to copy.
 // Dak only ever removes what it wrote: a copy it marked, or the section between its markers.
@@ -15,23 +17,26 @@ const START = "<!-- dak:start (added by Dak; Disconnect Codex in Dak removes thi
 const END = "<!-- dak:end -->";
 
 export const SKILL = skillText as unknown as string;
+export const WORK_SKILL = workText as unknown as string;
 
 // Codex runs a hook only after the person approves it, so its mail must not depend on one.
 const CODEX_FIRST = `**Every task, in Codex:** run \`dak inbox --unread --json\` when you start and again before you finish, and act on anything there first. Your name on Dak is what \`dak whoami\` prints; \`dak send\`, \`reply\`, \`inbox\` and \`wait\` fill it in, so you never need \`--from\` or \`--for\`.`;
 // The skill without its front matter: plain instructions for tools that have no skills.
-export const INSTRUCTIONS = SKILL.replace(/^---[\s\S]*?---\s*/, "").trim();
+const plain = (t: string) => t.replace(/^---[\s\S]*?---\s*/, "").trim();
+export const INSTRUCTIONS = `${plain(SKILL)}\n\n${plain(WORK_SKILL).replace(/^# /, "## ")}`;
 
-const claudeSkill = () => join(process.env.DAK_CLAUDE_SKILLS || join(homedir(), ".claude", "skills"), "dak", "SKILL.md");
+const claudeSkill = (name = "dak") => join(process.env.DAK_CLAUDE_SKILLS || join(homedir(), ".claude", "skills"), name, "SKILL.md");
+const CLAUDE_SKILLS: [string, () => string][] = [["dak", () => SKILL], ["dak-work", () => WORK_SKILL]];
 const codexAgents = () => process.env.DAK_CODEX_AGENTS || join(homedir(), ".codex", "AGENTS.md");
 
 export function installSkill(tool: "claude" | "codex" | "cursor") {
-  if (tool === "claude") {
-    const path = claudeSkill(), dir = dirname(path);
+  if (tool === "claude") for (const [name, text] of CLAUDE_SKILLS) {
+    const path = claudeSkill(name), dir = dirname(path);
     // A skill folder you linked yourself (to a checkout of Dak) is yours: leave it.
-    if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) return;
-    if (existsSync(path) && !readFileSync(path, "utf8").includes(MARK)) return;
+    if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) continue;
+    if (existsSync(path) && !readFileSync(path, "utf8").includes(MARK)) continue;
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path, SKILL.replace(/^(---[\s\S]*?---\s*)/, `$1${MARK}\n\n`));
+    writeFileSync(path, text().replace(/^(---[\s\S]*?---\s*)/, `$1${MARK}\n\n`));
   }
   if (tool === "codex") {
     const path = codexAgents();
@@ -43,9 +48,9 @@ export function installSkill(tool: "claude" | "codex" | "cursor") {
 }
 
 export function removeSkill(tool: "claude" | "codex" | "cursor") {
-  if (tool === "claude") {
-    const path = claudeSkill(), dir = dirname(path);
-    if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) return;
+  if (tool === "claude") for (const [name] of CLAUDE_SKILLS) {
+    const path = claudeSkill(name), dir = dirname(path);
+    if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) continue;
     if (existsSync(path) && readFileSync(path, "utf8").includes(MARK)) rmSync(dir, { recursive: true, force: true });
   }
   if (tool === "codex") {
