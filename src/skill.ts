@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import skillText from "../skills/dak/SKILL.md" with { type: "text" };
 import workText from "../skills/dak-work/SKILL.md" with { type: "text" };
+import guideText from "../skills/dak/GUIDE.md" with { type: "text" };
 
 // Teaching an agent to use Dak, as part of connecting it. The skill ships inside the
 // binary, so this works without the source. Each tool gets it where it reads instructions:
@@ -18,6 +19,8 @@ const END = "<!-- dak:end -->";
 
 export const SKILL = skillText as unknown as string;
 export const WORK_SKILL = workText as unknown as string;
+// The long reference the skill points to; `dak help guide` prints it, so it costs nothing until asked for.
+export const GUIDE = guideText as unknown as string;
 
 // Codex runs a hook only after the person approves it, so its mail must not depend on one.
 const CODEX_FIRST = `**Every task, in Codex:** run \`dak inbox --unread --json\` when you start and again before you finish, and act on anything there first. Your name on Dak is what \`dak whoami\` prints; \`dak send\`, \`reply\`, \`inbox\` and \`wait\` fill it in, so you never need \`--from\` or \`--for\`.`;

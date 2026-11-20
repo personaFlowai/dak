@@ -1,12 +1,21 @@
 /* @mentions while writing: typing "@" in a reply box lists the team, and Enter, Tab or a click
    puts the @name in. In messages, a mention is shown as one. */
-import { S, esc } from "./state";
+import { S, esc, name, mark } from "./state";
 
 const BOXES = new Set(["message", "c-body", "edit"]);
 let pop: { box: HTMLTextAreaElement; start: number; items: string[]; i: number } | null = null;
 
-const names = (): { name: string; label: string }[] =>
-  (S.team ?? []).map((m: any) => ({ name: m.name as string, label: [m.display, m.role].filter(Boolean).join(" · ") }));
+// Who is on the topic you are writing on, and who is in its group: they come first, said so.
+function where(n: string): { rank: number; label: string } {
+  const t = S.data?.thread;
+  const on = S.convo.find((x) => x.thread.id === t?.id)?.participants ?? [];
+  if (t && (t.to === n || t.from === n || on.some((p) => p.name === n))) return { rank: 0, label: "On this topic" };
+  if (t?.to.startsWith("group:") && (S.groups[t.to.slice(6)] ?? []).includes(n)) return { rank: 1, label: "In the group" };
+  const m = (S.team ?? []).find((x: any) => x.name === n) as any;
+  return { rank: 2, label: m?.role ?? m?.area ?? "" };
+}
+const names = (): { name: string; shown: string }[] =>
+  (S.team ?? []).filter((m: any) => m.kind !== "person").map((m: any) => ({ name: m.name as string, shown: m.display || name(m.name) }));
 
 function close() { pop = null; document.getElementById("mention-pop")?.remove(); }
 
@@ -15,13 +24,15 @@ function show() {
   let el = document.getElementById("mention-pop");
   if (!el) { el = document.createElement("div"); el.id = "mention-pop"; el.setAttribute("role", "listbox"); document.body.appendChild(el); }
   const all = names();
+  // The name a person reads ("Lead"), with where they stand; picking one still writes @lead.
   el.innerHTML = pop.items.map((n, i) => {
-    const label = all.find((x) => x.name === n)?.label ?? "";
-    return `<button type="button" role="option" aria-selected="${i === pop!.i}" class="${i === pop!.i ? "on" : ""}" data-mention-pick="${esc(n)}"><b>@${esc(n)}</b>${label ? `<span>${esc(label)}</span>` : ""}</button>`;
+    const label = n === "all" ? "Wakes every member" : where(n).label;
+    const shown = n === "all" ? "All" : all.find((x) => x.name === n)?.shown ?? n;
+    return `<button type="button" role="option" aria-selected="${i === pop!.i}" class="${i === pop!.i ? "on" : ""}" data-mention-pick="${esc(n)}" title="@${esc(n)}">${mark(n === "all" ? `group:${S.data?.thread.to.slice(6) ?? "all"}` : n, "sm")}<b>${esc(shown)}</b>${label ? `<span>${esc(label)}</span>` : ""}</button>`;
   }).join("");
   const r = pop.box.getBoundingClientRect();
   // Under the box when there is room, else above it.
-  const h = Math.min(260, pop.items.length * 40 + 8);
+  const h = Math.min(260, pop.items.length * 32 + 8);
   el.style.left = `${Math.max(8, r.left)}px`;
   el.style.width = `${Math.min(340, r.width)}px`;
   el.style.top = `${r.bottom + h + 8 < innerHeight ? r.bottom + 4 : Math.max(8, r.top - h - 4)}px`;
@@ -46,7 +57,11 @@ document.addEventListener("input", (e) => {
   const m = before.match(/(?:^|[\s(])@([a-z0-9_-]{0,40})$/i);
   if (!m) return close();
   const q = m[1].toLowerCase();
-  const items = names().map((x) => x.name).filter((n) => n.includes(q)).sort((a, b) => Number(!a.startsWith(q)) - Number(!b.startsWith(q))).slice(0, 6);
+  const people = names().filter((x) => x.name.includes(q) || x.shown.toLowerCase().includes(q)).map((x) => x.name)
+    .sort((a, b) => where(a).rank - where(b).rank || Number(!a.startsWith(q)) - Number(!b.startsWith(q)));
+  // In a group, @all wakes every member.
+  const inGroup = !!S.data?.thread.to.startsWith("group:") || !!S.compose?.to?.startsWith("group:");
+  const items = [...(inGroup && "all".startsWith(q) ? ["all"] : []), ...people].slice(0, 6);
   if (!items.length) return close();
   pop = { box, start: before.length - m[1].length - 1, items, i: 0 };
   show();

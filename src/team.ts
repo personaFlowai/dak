@@ -2,7 +2,8 @@
    (from presence), agents outside it that hold a door key, the bots those agents speak as, and
    the person. The person can give each one a name to show, a role, an area, and what it can and
    cannot do, so work and @mentions go to the right one. Only the person edits this; agents read it. */
-import { agents } from "./presence";
+import { agents, seatsOf, superseded, type Seat } from "./presence";
+import { sessionRunning } from "./sleeper";
 import { loadConfig } from "./config";
 import { store } from "./store";
 import { keyNames } from "./tunnel";
@@ -24,6 +25,7 @@ export interface TeamMember {
   reader: boolean; // a named reader in Dak's settings ("lead"), not a session found by its folder
   carded: boolean; // the person has written this member's card
   lead: boolean; // the one member the person marked Lead: the Board's notes on assignments go to them
+  seats: (Seat & { state: "working" | "open" | "closed" })[]; // its sessions this week: working now, open and idle, or closed
 }
 export type MemberFields = Partial<Pick<TeamMember, "display" | "role" | "area" | "can" | "cannot" | "lead">>;
 
@@ -45,7 +47,7 @@ export function team(opts: { all?: boolean } = {}): TeamMember[] {
   const cfg = loadConfig();
   const byName = new Map<string, TeamMember>();
   const blank = (name: string, kind: MemberKind): TeamMember =>
-    ({ name, display: null, role: null, area: null, can: null, cannot: null, kind, tool: null, via: null, last_seen: null, listening: false, reader: false, carded: false, lead: false });
+    ({ name, display: null, role: null, area: null, can: null, cannot: null, kind, tool: null, via: null, last_seen: null, listening: false, reader: false, carded: false, lead: false, seats: [] });
   for (const a of agents({ all: opts.all })) {
     const m = blank(a.name, a.kind === "person" ? "person" : a.tool === "grok" || a.tool === "http" ? "cloud" : "local");
     Object.assign(m, { tool: a.tool, last_seen: a.last_seen, listening: a.listening, display: a.title ?? null, role: a.about ?? null, reader: a.reader });
@@ -75,6 +77,12 @@ export function team(opts: { all?: boolean } = {}): TeamMember[] {
       byName.delete(n);
     }
   }
+  // A folder name a session dropped for a member's name is that member's seat, not a member.
+  const carded = new Set((store().query("SELECT name FROM team").all() as { name: string }[]).map((r) => r.name));
+  for (const n of superseded()) if (!carded.has(n) && !cfg.readers.some((r) => r.name === n)) byName.delete(n);
+  const now = Date.now();
+  for (const m of byName.values()) m.seats = seatsOf(m.name).map((x) => ({ ...x,
+    state: now - Date.parse(x.last_seen) < 3 * 60_000 ? "working" : x.tool === "claude-code" && sessionRunning(x.session_id) ? "open" : "closed" }));
   const me = cfg.readers.find((r) => r.kind === "person")?.name;
   const rank = (m: TeamMember) => (m.name === me ? 0 : m.kind === "person" ? 1 : m.display || m.role ? 2 : 3);
   return [...byName.values()].sort((a, b) => rank(a) - rank(b) || (b.last_seen ?? "").localeCompare(a.last_seen ?? "") || a.name.localeCompare(b.name));

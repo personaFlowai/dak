@@ -3,6 +3,8 @@ import { loadConfig } from "./config";
 import { getThread, getThreadRow, takeUnread } from "./store";
 import { approvedSummary, verdictLabel } from "./verdicts";
 import type { Message } from "./types";
+import { isFor } from "./addressing";
+import { countRead } from "./usage";
 
 // Push for Claude Code. Installed as a hook, this runs at the edges of every turn:
 //   SessionStart / UserPromptSubmit: new Dak messages are added to the turn's context.
@@ -39,6 +41,15 @@ export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "clau
     console.log(JSON.stringify(mail.length ? { followup_message: brief(name, mail) } : {}));
     return;
   }
+  // After a tool call, mid-turn: only mail for this agent that needs an answer, with the rest of
+  // its topic so far. Everything else waits for the turn's end or the next turn.
+  if (event === "PostToolUse") {
+    const threads = [...new Set(takeUnread(name, { peek: true }).filter((m) => !m.quiet && isFor(m, name)).map((m) => m.thread_id))];
+    if (!threads.length) return;
+    const mail = threads.flatMap((id) => takeUnread(name, { threadId: id }));
+    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: `${brief(name, mail)}\n(This arrived during your turn. Answer it when it fits, then carry on.)` } }));
+    return;
+  }
   // At a stop, only mail that asks something reopens the turn; updates wait for the next turn's
   // start, where they arrive as context. At the start of a turn, everything is handed over.
   const stop = event === "Stop";
@@ -64,31 +75,57 @@ export async function agentHook(tool: "claude-code" | "codex" | "cursor" = "clau
   }
 }
 
-// Is there unread mail for this agent that needs an answer (not only updates)?
-export const asksSomething = (name: string) => takeUnread(name, { peek: true }).some((m) => !m.quiet);
+// Is there unread mail for this agent that is for it and needs an answer (not only updates)?
+export const asksSomething = (name: string) => takeUnread(name, { peek: true }).some((m) => !m.quiet && isFor(m, name));
 
-export function brief(name: string, msgs: Message[]): string {
-  const lines = [`New Dak message${msgs.length > 1 ? "s" : ""} for you (${name}):`];
-  for (const m of msgs) {
-    const t = getThreadRow(m.thread_id);
-    const v = m.verdict ? ` [${verdictLabel(m)}]` : "";
-    lines.push("", `Thread ${t.id} "${t.subject}", from ${m.author}${v}${m.mentions?.includes(name) ? " (mentions you)" : ""}${m.quiet ? " (an update, no reply needed)" : ""}:`, m.body.trim() || (m.choice ? "" : "(no text)"));
-    // On a thread carrying several PRs, a verdict covers only the PRs it names: say which stand approved.
-    if (m.verdict) { const sum = approvedSummary(getThread(t.id).prs); if (sum) lines.push(`  ${sum}. Merge only those.`); }
-    if (m.choice) lines.push(`  Picked: ${m.choice}`);
-    if (m.tryit_result) lines.push(m.tryit_result.result === "works"
-      ? `  It works: that is the Checking. Post your production proof on ${m.tryit_result.ticket ?? "the ticket"} and move it to Done.`
-      : `  Something's wrong: ask what they saw, and keep ${m.tryit_result.ticket ?? "the ticket"} out of Done.`);
-    for (const c of m.comments) {
-      const at = !c.anchor ? "" : c.anchor.kind === "code" ? `${c.anchor.file}:${c.anchor.start_line}-${c.anchor.end_line}` : `"${c.anchor.quote.slice(0, 80)}"`;
-      lines.push(`  - on ${at}: ${c.body}`);
+// A message for someone else on the topic, in one line: who, to whom, and how it starts.
+function oneLine(m: Message): string {
+  const t = getThreadRow(m.thread_id);
+  const to = m.mentions?.length ? ` to ${m.mentions.map((n) => "@" + n).join(", ")}` : m.answers ? ` to ${m.answers}` : "";
+  // "@helper why only plain?" reads "sam to @helper: why only plain?", not with the name twice.
+  const first = (m.body.trim().split("\n").find((l) => l.trim()) ?? (m.choice ? `picked ${m.choice}` : "(no text)")).trim()
+    .replace(/^(?:@[\w.-]+[,\s]+(?:and\s+)?)+/, "");
+  return `  ${t.id} "${t.subject.length > 40 ? t.subject.slice(0, 39) + "…" : t.subject}" ${m.author}${to}: ${first.length > 100 ? first.slice(0, 99) + "…" : first}`;
+}
+
+/* What an agent is handed: its mail grouped by topic, the topic's name and how to answer once
+   per topic rather than once per message, then the rest of its topics as a line each. Every
+   character here is read by a model, so nothing is said twice. */
+export function brief(name: string, all: Message[]): string {
+  const msgs = all.filter((m) => isFor(m, name));
+  const others = all.filter((m) => !isFor(m, name));
+  const lines = msgs.length ? [`Dak mail for you (${name}):`] : [];
+  for (const id of [...new Set(msgs.map((m) => m.thread_id))]) {
+    const t = getThreadRow(id);
+    const here = msgs.filter((m) => m.thread_id === id);
+    // Only what asks something gets a reply line: an update is read, not answered.
+    const asks = here.some((m) => !m.quiet);
+    lines.push("", `${t.id} "${t.subject}"${asks ? ` · answer: dak reply ${t.id} --from ${name} "..."` : ""}`);
+    for (const m of here) {
+      const v = m.verdict ? ` [${verdictLabel(m)}]` : "";
+      const tags = [m.mentions?.includes(name) && "mentions you", m.quiet && "update, no reply needed"].filter(Boolean).join(", ");
+      lines.push(`${m.author}${v}${tags ? ` (${tags})` : ""}: ${m.body.trim() || (m.choice ? "" : "(no text)")}`);
+      // On a thread carrying several PRs, a verdict covers only the PRs it names: say which stand approved.
+      if (m.verdict) { const sum = approvedSummary(getThread(t.id).prs); if (sum) lines.push(`  ${sum}. Merge only those.`); }
+      if (m.choice) lines.push(`  Picked: ${m.choice}`);
+      if (m.tryit_result) lines.push(m.tryit_result.result === "works"
+        ? `  It works: that is the Checking. Post your production proof on ${m.tryit_result.ticket ?? "the ticket"} and move it to Done.`
+        : `  Something's wrong: ask what they saw, and keep ${m.tryit_result.ticket ?? "the ticket"} out of Done.`);
+      for (const c of m.comments) {
+        const at = !c.anchor ? "" : c.anchor.kind === "code" ? `${c.anchor.file}:${c.anchor.start_line}-${c.anchor.end_line}` : `"${c.anchor.quote.slice(0, 80)}"`;
+        lines.push(`  - on ${at}: ${c.body}`);
+      }
+      if (m.attachments.length) lines.push(`  (attached: ${m.attachments.map((a) => `${a.type} ${a.name}`).join(", ")}; dak show ${t.id} --json)`);
     }
-    for (const a of m.attachments) lines.push(`  (attached ${a.type}: ${a.name}; dak show ${t.id} --json)`);
   }
-  // Only what asks something gets a reply line: an update is read, not answered.
-  const threads = [...new Set(msgs.filter((m) => !m.quiet).map((m) => m.thread_id))];
-  lines.push("", ...threads.map((id) => `Reply with: dak reply ${id} --from ${name} "<your answer>"`));
-  return lines.join("\n");
+  // The rest is the topic going on around this agent: a line each, opened only if it matters.
+  if (others.length) {
+    if (lines.length) lines.push("");
+    lines.push(`${others.length} more on your topics, not for you (dak show <topic> to open one):`, ...others.map(oneLine));
+  }
+  const text = lines.join("\n");
+  countRead(name, text.length);
+  return text;
 }
 
 export const CLAUDE_HOOK_SETTINGS = (bin: string) => ({

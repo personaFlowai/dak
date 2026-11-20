@@ -1,18 +1,21 @@
 /* Dak's screens. Layout: a source-list sidebar (one row per agent), and a
    main area with the app's own toolbar. A PR or doc opens as two panes: the
    conversation with the agent on the left, the thing under review on the right. */
-import { P, setParked, loadWork, loadDecided, loadRules, youView, youSub, workView, workSub, rulesView, submitRule, deleteRule } from "./places";
+import { P, setParked, loadWork, loadDecided, loadRules, youView, youSub, rulesView, submitRule, deleteRule } from "./places";
+import { WB, loadStages, workView, workSub, workTools, moveTo, assignTo } from "./workboard";
+import { stageAction } from "./stagesedit";
+import { FL, loadIssues, makeWork, syncLinear } from "./fromlinear";
 import { api, local } from "./api";
 import { loadTeam, teamCount, teamView } from "./team";
-import { boardSub, boardView, loadBoard, wireBoardDrag } from "./board";
 import { addTab, closeTab, keepTab, railView, sideBody, tabsView, phoneListHead } from "./shell";
 import { closePeek, openPeek, peekBackStep, peekView, showSpot, wordAt } from "./peek";
 import { topicRows } from "./topics";
+import { L, launchPanel, openLaunch, closeLaunch, keepLaunchFields, submitLaunch } from "./launch";
 import qrcode from "qrcode-generator";
 import {
   S, me, esc, $, name, mark, when, standing, approvedNow, prsHere, prOfAtt, looking, findAtt, defaultAtt, chaptersOf, prepare, loadAgents, drafts, saveDrafts,
   setViewed, viewed, chapterFiles, keepUnsent, helperLabel, agentOf, type Summary, type AgentRow,
-  fullWhen, sizeLabel, opensInPane, onPhone,
+  fullWhen, sizeLabel, opensInPane, onPhone, loadGroups, groupLine,
 } from "./state";
 import { prView, selKey, selLabel, prLink } from "./pr";
 import { docView, markQuotes, readSelection, pending, clearPending, layoutMargin, setDocActive } from "./doc";
@@ -36,6 +39,10 @@ async function loadList() {
     api<Record<string, string>>("/archives").catch(() => ({})),
     api<Record<string, string>>("/pins").catch(() => ({})),
   ]);
+  try { S.mains = Object.fromEntries((await api<{ thread_id: string; peer: string }[]>("/main")).map((m) => [m.thread_id, m.peer])); } catch { /* no main topics yet */ }
+  // You are in every group on this Mac: its topics are your conversations, whoever started them.
+  S.threads = [...S.threads, ...S.others.filter((t) => t.to.startsWith("group:") && !S.threads.some((x) => x.id === t.id))];
+  S.others = S.others.filter((t) => !t.to.startsWith("group:"));
   const [q, all] = await Promise.all([api<typeof S.queue>("/queue").catch(() => []), api<typeof S.reviews>(`/reviews?for=${encodeURIComponent(me)}`).catch(() => []), loadWork(), loadDecided()]);
   // Held rows (being reworked, parked) are listed apart and never counted as waiting on you.
   S.queue = q; S.reviews = all.filter((r) => !r.hold); S.heldReviews = all.filter((r) => r.hold) as typeof S.heldReviews;
@@ -53,7 +60,7 @@ async function openThread(id: string, keep = false) {
   const sameConvo = peer === S.peer && S.view === "thread";
   // A conversation shows one topic, so opening one goes to its latest message.
   S.scrollTo = changed || !sameConvo ? "end" : S.scrollTo;
-  if (peer !== S.peer || changed) { S.newTopic = false; S.newSubject = ""; }
+  if (peer !== S.peer || changed) { S.newTopic = false; S.mainNew = false; S.newSubject = ""; }
   // Each topic keeps its own pane: what was open on it, or that it was closed. Leaving one
   // remembers it; coming back restores it. A topic opened for the first time shows its newest
   // PR or doc only when it is waiting on you to review; otherwise the conversation has the room.
@@ -79,6 +86,35 @@ async function openThread(id: string, keep = false) {
 async function openPeer(peer: string) {
   const id = topicFor(peer);
   if (id) await openThread(id);
+}
+
+// Linear, in Settings now that Work is the board: connect a key, sync, disconnect.
+const LIN = { connected: false, synced_at: null as string | null, error: "" };
+async function loadLinear() { try { Object.assign(LIN, await api("/linear-key")); } catch { /* shows not connected */ } }
+function linearView(): string {
+  return `<section><h2>Linear</h2>${LIN.connected
+    ? `<p class="media-line">Connected. Synced ${LIN.synced_at ? when(LIN.synced_at) : "not yet"}. Its open issues are under Work › From Linear.</p>
+       <div class="media-act"><span class="grow"></span><button class="btn" data-linear-sync>Sync now</button><button class="btn" data-linear-disconnect>Disconnect</button></div>`
+    : `<p class="media-line">Bring in your Linear issues, to make work from them. In Linear: Settings › Security &amp; access › Personal API keys › New key (read-only is enough). It stays in a private file on this Mac and is only sent to Linear.</p>
+       <div class="media-act"><input class="input" id="linear-key" type="password" placeholder="lin_api_…" autocomplete="off" spellcheck="false" style="flex:1"><button class="btn primary" data-linear-connect>Connect</button></div>`}
+    ${LIN.error ? `<p class="err">${esc(LIN.error)}</p>` : ""}</section>`;
+}
+
+async function loadMedia() {
+  try { Object.assign(S.media, await api<{ count: number; bytes: number }>(`/media?days=${S.media.days}`)); } catch { /* the section says nothing to clear */ }
+}
+const mb = (n: number) => n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`;
+// Storage: old screenshots and videos, cleared only when the person says so, and only after a second look.
+function storageView(): string {
+  const m = S.media;
+  const days = [1, 3, 7, 30].map((d) => `<option value="${d}" ${m.days === d ? "selected" : ""}>${d} day${d === 1 ? "" : "s"}</option>`).join("");
+  const what = m.count ? `${m.count} file${m.count === 1 ? "" : "s"}, ${mb(m.bytes)}` : "Nothing to clear";
+  const act = !m.count ? "" : m.confirm
+    ? `<span class="warn">They are removed for good. The messages keep a line saying a picture was there.</span><button class="btn" data-media-cancel>Cancel</button><button class="btn primary" data-media-clear>Clear ${esc(what)}</button>`
+    : `<button class="btn" data-media-ask>Clear them</button>`;
+  return `<section><h2>Storage</h2>
+    <p class="media-line">Screenshots and videos in topics done for more than <select class="inline" id="media-days" aria-label="Done for more than">${days}</select>: <b>${esc(what)}</b>.${m.cleared ? ` Cleared ${m.cleared.count} file${m.cleared.count === 1 ? "" : "s"}, ${mb(m.cleared.bytes)}.` : ""}</p>
+    ${act ? `<div class="media-act">${act}</div>` : ""}</section>`;
 }
 
 async function loadSettings() {
@@ -191,7 +227,7 @@ function render() {
 function renderSide() {
   const review = S.view === "thread" && ["pr", "doc"].includes(findAtt(S.att)?.type ?? "");
   $("#app")!.classList.toggle("phone", onPhone());
-  $("#app")!.classList.toggle("place", ["queue", "settings", "compose", "you", "work", "rules", "team", "board"].includes(S.view));
+  $("#app")!.classList.toggle("place", ["queue", "settings", "compose", "you", "work", "rules", "team"].includes(S.view));
   $("#app")!.classList.toggle("rail-mini", !onPhone() && placesMini());
   $("#app")!.classList.toggle("side-closed", onPhone() ? !S.phoneList : S.focus && review ? !S.focusSide : !S.sideOpen);
   if (onPhone()) {
@@ -233,14 +269,14 @@ function renderMain() {
   if (S.view === "compose") main.innerHTML = toolbar("New message") + composeView();
   else if (S.view === "settings") main.innerHTML = toolbar("Settings") + settingsView();
   else if (S.view === "you") main.innerHTML = toolbar("You", youSub()) + youView();
-  else if (S.view === "work") main.innerHTML = toolbar("Work", workSub()) + workView();
+  else if (S.view === "work") main.innerHTML = toolbar("Work", workSub(), workTools()) + workView();
   else if (S.view === "rules") main.innerHTML = toolbar("Rules", "Only you write these") + rulesView();
-  else if (S.view === "board") main.innerHTML = toolbar("Board", boardSub()) + boardView();
-  else if (S.view === "team") main.innerHTML = toolbar("Team", `${teamCount()} agent${teamCount() === 1 ? "" : "s"}`) + teamView();
+  else if (S.view === "team") main.innerHTML = toolbar("Team", `${teamCount()} agent${teamCount() === 1 ? "" : "s"}`, `<button class="btn primary" data-agent-new>${I.compose}New agent</button>`) + teamView();
   else if (S.view === "welcome") main.innerHTML = toolbar("Welcome to Dak") + welcomeView();
   else if (S.view === "queue") main.innerHTML = toolbar("Merge queue", queueSummary()) + queueView();
   else if (!S.data) main.innerHTML = toolbar("Dak") + `<div class="blank"><p>Choose a thread to read it.</p></div>`;
   else main.innerHTML = threadView();
+  main.insertAdjacentHTML("beforeend", launchPanel()); // New agent slides in over any page
   const r = $("#reading"); if (r) r.scrollTop = keep.reading;
   // The PR strip keeps its sideways place, and the open PR's chip in view.
   const strip = $(".prstrip"); if (strip) { strip.scrollLeft = keep.strip; const on = strip.querySelector<HTMLElement>(".prchip.on");
@@ -281,7 +317,7 @@ function threadView(): string {
   const a = findAtt(S.att);
   const media = a?.type === "file" && opensInPane(a.meta.mime);
   const review = a?.type === "pr" || a?.type === "doc" || media;
-  const other = t.to === me ? t.from : t.from === me ? t.to : t.from;
+  const other = t.to.startsWith("group:") ? t.to : t.to === me ? t.from : t.from === me ? t.to : t.from;
   const st = status(t);
   const gh = prLink();
   // Approve belongs to the thread, so it stays when the PR or doc beside the chat is closed.
@@ -298,35 +334,20 @@ function threadView(): string {
     : multi ? (cur && cur.verdict !== "approve" ? `<button class="btn primary" id="approve" data-on-pr="${cur.number}" ${S.sending ? "disabled" : ""} title="Approve ${cur.key} only; anything you have typed or commented goes with it">${I.check} Approve ${cur.key}</button>` : "")
     : `<button class="btn primary" id="approve" ${S.sending ? "disabled" : ""} title="Approve now; anything you have typed or commented goes with it">${I.check} Approve</button>`;
   const archived = S.peer ? isArchived(S.peer) : false;
-  // "I'm reviewing": tells the sender you are on it, on the topic or on the PR that is open; the
-  // PR stays waiting on you until your verdict. "Stop" says you put it down for now.
-  const rv = myReviewing(S.data!.messages);
-  const onIt = rv?.at ?? null;
-  const rvPr = multi && cur?.number ? cur.number : null;
-  const rvWhat = rv?.prs?.length ? ` ${rv.prs.map((n) => `#${n}`).join(", ")}` : "";
-  // Anything waiting on you with something to read: a PR or a doc, however the thread began.
-  const readable = t.kind !== "note" || S.data!.messages.some((m) => m.attachments.some((x) => x.type === "pr" || x.type === "doc"));
-  const reviewingBtn = readable && t.to === me && t.status === "waiting"
-    // Reviewing already: the line under the name says so, and the bar offers to stop.
-    ? onIt ? `<button class="btn" data-stop-reviewing="${t.id}" ${rv?.prs?.length ? `data-on-pr="${rv.prs.join(",")}"` : ""} title="You're reviewing${esc(rvWhat)} since ${esc(fullWhen(onIt))}. Tell ${esc(name(t.from))} you stopped for now; it stays waiting on you">Stop reviewing</button>`
-      : `<button class="btn" data-reviewing="${t.id}" ${rvPr ? `data-on-pr="${rvPr}"` : ""} title="Tell ${esc(name(t.from))} you are reviewing ${rvPr ? `#${rvPr}` : "this"}">I'm reviewing${rvPr ? ` #${rvPr}` : ""}</button>` : "";
   // Park: off your list until you unpark it, or the sender sends a new version or question.
   const parked = S.heldReviews.find((r) => r.thread_id === t.id && r.hold.kind === "parked");
   const parkBtn = t.to === me && t.status === "waiting" && !onPhone()
     ? parked ? `<button class="btn" data-unpark="${t.id}" title="Back on your list">Unpark</button>`
       : `<button class="btn" data-park="${t.id}" title="Off your list until you unpark it, or ${esc(name(t.from))} sends a new version or question">Park</button>` : "";
-  // On the Mac the bar keeps only what you act on (I'm reviewing, Approve); where the topic
-  // stands goes on the line under the name, and Done, Archive and GitHub go in the ⋯ menu.
-  const statusWords = onIt ? { label: `You're reviewing${rvWhat}`, cls: "reviewing" } : st;
-  // A phone's bar has room for Approve and ⋯ only; I'm reviewing moves into the menu there.
+  // The bar keeps only what you act on (Park, Approve); where the topic stands goes on the line
+  // under the name, and Done, Archive and GitHub go in the ⋯ menu.
+  const statusWords = st;
   const phone = onPhone();
   const menu = [
     canApprove && multi && todo.length ? `<button class="mi ${S.confirmAll ? "warn" : ""}" data-approve-all>${I.check}${S.confirmAll ? `Tap again to approve ${todo.length} PRs` : `Approve all ${todo.length}${todo.length < prs.length ? " left" : ""}`}</button>` : "",
-    phone && reviewingBtn && !onIt ? `<button class="mi" data-reviewing="${t.id}" ${rvPr ? `data-on-pr="${rvPr}"` : ""}>${I.person}I'm reviewing${rvPr ? ` #${rvPr}` : ""}</button>` : "",
-    phone && reviewingBtn && onIt ? `<button class="mi" data-stop-reviewing="${t.id}" ${rv?.prs?.length ? `data-on-pr="${rv.prs.join(",")}"` : ""}>${I.close}Stop reviewing${rvWhat}</button>` : "",
     phone && t.to === me && t.status === "waiting" ? (S.heldReviews.some((r) => r.thread_id === t.id && r.hold.kind === "parked")
       ? `<button class="mi" data-unpark="${t.id}">${I.lineUp}Unpark</button>` : `<button class="mi" data-park="${t.id}">${I.archive}Park</button>`) : "",
-    S.peer && !isPair(S.peer) && canReply(t) ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
+    S.peer && !isPair(S.peer) && canReply(t) && !S.mains[t.id] ? `<button class="mi" data-done="${t.id}" data-on="${t.status === "closed" ? "0" : "1"}">${t.status === "closed" ? "Reopen topic" : `${I.check}Mark topic done`}</button>` : "",
     S.peer && !isPair(S.peer) ? `<button class="mi" data-${S.pins[S.peer] ? "unpin" : "pin"}="${esc(S.peer)}">${I.pin}${S.pins[S.peer] ? `Unpin ${esc(name(S.peer))}` : `Pin ${esc(name(S.peer))} to the top`}</button>` : "",
     S.peer ? `<button class="mi" data-${archived ? "unarchive" : "archive"}="${esc(S.peer)}">${archived ? `${I.lineUp}Back to the Inbox` : `${I.archive}Archive conversation`}</button>` : "",
     gh ? `<a class="mi" href="${esc(gh)}" target="_blank" rel="noopener">${I.github}Open on GitHub</a>` : "",
@@ -336,9 +357,9 @@ function threadView(): string {
   const everyAtt = S.data!.messages.flatMap((m) => m.attachments.map((x) => ({ x, m })));
   const atts = everyAtt.filter(({ x }) => !x.hidden);
   const filesBtn = everyAtt.length ? `<div class="more-wrap files-wrap"><button class="icon-btn files-btn" data-files aria-expanded="${S.filesOpen}" aria-haspopup="dialog" title="Attachments on this topic" aria-label="Attachments, ${atts.length}">${I.clip}<span class="fcount">${atts.length}</span></button>${S.filesOpen ? filesPanel(atts, everyAtt.filter(({ x }) => x.hidden)) : ""}</div>` : "";
-  const right = `${parkBtn}${phone ? "" : reviewingBtn}${approveBtn}${filesBtn}${more}`;
+  const right = `${parkBtn}${approveBtn}${filesBtn}${more}`;
   const standing = statusWords ? ` · <span class="tstand ${statusWords.cls}">${esc(statusWords.label)}</span>` : "";
-  const about = agentOf(other)?.about;
+  const about = other.startsWith("group:") ? `Group of ${(S.groups[other.slice(6)] ?? []).length}` : agentOf(other)?.about;
   // The window is the conversation with one agent; the line under its name is the topic you are on.
   const head = isPair(S.peer) ? toolbar(esc(peerName(S.peer!)), `Between agents · read only · ${esc(t.subject)}`, right)
     : toolbar(esc(name(other)), `${about && !phone ? `${esc(about)} · ` : ""}${esc(t.subject)}${standing}${phone ? "" : roles()}`, right);
@@ -587,11 +608,14 @@ function composeView(): string {
     return `<button type="button" class="pick" data-to="${esc(a.name)}">${mark(a.name)}<span class="nm"><b>${esc(name(a.name))}</b><span>${esc(sub)}</span></span></button>`;
   };
   const mine = named.filter(match);
+  const groupRows = Object.keys(S.groups).map((g) => `group:${g}`).filter((g) => !f || `${g} ${groupLine(g)}`.toLowerCase().includes(f))
+    .map((g) => `<button type="button" class="pick" data-to="${esc(g)}">${mark(g)}<span class="nm"><b>${esc(name(g))}</b><span>${esc(groupLine(g))}</span></span></button>`).join("");
   return `<div class="pane-body"><form class="form newmsg" onsubmit="return false">
     <div class="search big">${I.search}<input id="c-filter" value="${esc(c.filter)}" placeholder="Who is it for?" aria-label="Who is it for" autocomplete="off"></div>
     <div class="picks">${mine.length ? `<div class="group">Recent</div>${mine.map(row).join("")}` : ""}
+      ${groupRows ? `<div class="group">Groups</div>${groupRows}` : ""}
       ${others.length ? `<div class="group">Other sessions</div>${others.map(row).join("")}` : ""}
-      ${!mine.length && !others.length ? `<p class="empty">No one matches “${esc(c.filter)}”.</p>` : ""}</div>
+      ${!mine.length && !others.length && !groupRows ? `<p class="empty">No one matches “${esc(c.filter)}”.</p>` : ""}</div>
     ${f ? "" : `<p class="note-line">Anyone else shows when you type their name.</p>`}
     <p class="note-line"><button type="button" class="link" data-cmode="pr">Pull in a GitHub PR to read</button></p>
   </form></div>`;
@@ -720,6 +744,8 @@ function settingsView(): string {
 
     ${native ? `<section><h2>Start at login</h2><div class="conn"><span class="mark md">${I.check}</span><span class="nm"><b>Open Dak when you log in</b><span>${S.login === "approve" ? "macOS needs your OK: System Settings → General → Login Items → allow Dak." : "Keeps Dak running from the moment you log in, so new mail always shows a banner."}</span></span>
       <label class="check"><input type="checkbox" data-login ${S.login === "on" || S.login === "approve" ? "checked" : ""}> ${S.login === "on" ? "On" : S.login === "approve" ? "Waiting for macOS" : "Off"}</label></div></section>` : ""}
+    ${linearView()}
+    ${storageView()}
     <section><h2>GitHub</h2><div class="conn"><span class="mark md">${I.github}</span><span class="nm"><b>${s.github_login ? `Signed in as ${esc(s.github_login)}` : "Not signed in"}</b><span>${s.github_login ? "Pull PRs in from New message. Tick GitHub when you send a review to post it there as well." : "Run gh auth login in a terminal to pull PRs in and post reviews."}</span></span></div></section>
   </div></div>`;
 }
@@ -776,11 +802,14 @@ async function sendNewTopic() {
   if (!body) { S.sendError = "Write something first."; return renderMain(); }
   S.sending = true; S.sendError = ""; renderMain();
   try {
-    const r = await api<{ thread: Thread }>("/threads", { method: "POST", body: { to: S.peer, from: me, subject, body, attachments: S.newAtts } });
+    // The first message of the main topic starts it; any other new topic gets its subject.
+    const id = S.mainNew
+      ? (await api<{ thread_id: string }>("/main", { method: "POST", body: { to: S.peer, body, by: me, attachments: S.newAtts } })).thread_id
+      : (await api<{ thread: Thread }>("/threads", { method: "POST", body: { to: S.peer, from: me, subject, body, attachments: S.newAtts } })).thread.id;
     delete S.message[key]; keepUnsent(); S.newAtts = [];
-    S.newTopic = false; S.newSubject = ""; S.sending = false;
+    S.newTopic = false; S.mainNew = false; S.newSubject = ""; S.sending = false;
     await loadList();
-    await openThread(r.thread.id);
+    await openThread(id);
   } catch (e: any) { S.sending = false; S.sendError = e.message ?? "Could not send."; renderMain(); }
 }
 
@@ -875,13 +904,8 @@ document.addEventListener("input", (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "message" && S.cur) { S.message[draftKey()] = el.value; keepUnsent(); }
   if (el.id === "new-subject") S.newSubject = el.value;
-  if (el.id === "board-q") {
-    // Filter as you type, keeping the cursor where it was.
-    const at = el.selectionStart ?? el.value.length;
-    S.boardFilter.q = el.value; renderMain();
-    const box = $<HTMLInputElement>("#board-q"); box?.focus(); box?.setSelectionRange(at, at);
-    return;
-  }
+  if (el.id === "fl-q") { FL.q = el.value; const at = el.selectionStart; renderMain(); const box = $<HTMLInputElement>("#fl-q"); box?.focus(); box?.setSelectionRange(at, at); return; }
+  if (el.id === "wb-q") { WB.q = el.value; const at = el.selectionStart; renderMain(); const box = $<HTMLInputElement>("#wb-q"); box?.focus(); box?.setSelectionRange(at, at); return; }
   if (el.id === "topic-find") { S.topicFind = el.value; const l = $("#tlist"); if (l) l.innerHTML = topicRows(); }
   if (el.id === "pal-q") {
     S.search.q = el.value; S.search.i = 0;
@@ -915,6 +939,9 @@ document.addEventListener("submit", async (e) => {
 });
 
 document.addEventListener("change", async (e) => {
+  const mv = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-wb-move]");
+  if (mv) { await moveTo(mv.dataset.wbMove!, mv.value); await loadWork(); return renderMain(); }
+  if ((e.target as HTMLElement).id === "media-days") { S.media.days = Number((e.target as HTMLSelectElement).value); S.media.confirm = false; S.media.cleared = null; await loadMedia(); return renderMain(); }
   const el = e.target as HTMLInputElement;
   if (el.dataset.hideTests !== undefined) { S.hideTests = el.checked; local.set("hideTests", S.hideTests); return; }
   if (el.id === "att-file") return addFiles([...((el as HTMLInputElement).files ?? [])]);
@@ -929,13 +956,12 @@ document.addEventListener("change", async (e) => {
     const from = draftKey(), to = el.value === "__new" ? `new:${S.peer}` : el.value;
     const typed = S.message[from] ?? "";
     if (typed.trim() && !(S.message[to] ?? "").trim()) { S.message[to] = typed; delete S.message[from]; keepUnsent(); }
-    if (el.value === "__new") { S.newTopic = true; renderMain(); $<HTMLInputElement>("#new-subject")?.focus(); return; }
+    if (el.value === "__new") { S.newTopic = true; S.mainNew = false; renderMain(); $<HTMLInputElement>("#new-subject")?.focus(); return; }
     S.newTopic = false;
     return openThread(el.value);
   }
   if (el.id === "chapter-pick") { S.chapter = Number(el.value); S.phoneFile = null; S.sel = null; S.editing = null; await prepare(); return renderMain(); }
   if (el.id === "version") { useAtt(el.value); await prepare(); return renderMain(); }
-  if (el.dataset.boardAssign && el.value) return assignCard(el.dataset.boardAssign, el.value === "none" ? null : el.value, null);
   if (el.dataset.wakeClosed !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { wake_closed: el.checked } }); return renderMain(); }
   if (el.dataset.codexListen !== undefined) { S.settings = await api("/settings", { method: "PUT", body: { codex_listen: el.checked } }); return renderMain(); }
   if (el.dataset.login !== undefined) { (window as any).webkit?.messageHandlers?.dak?.postMessage({ login: el.checked }); return; }
@@ -1009,14 +1035,6 @@ document.addEventListener("drop", (e) => {
 });
 window.addEventListener("resize", () => layoutMargin());
 // The ⋯ menu closes on a click anywhere else.
-// Give a ticket to an agent (or back to the backlog), then show the Board as it now stands.
-async function assignCard(task: string, agent: string | null, before: string | null) {
-  try { await api("/board/assign", { method: "POST", body: { task, agent, before } }); S.boardError = ""; }
-  catch (err: any) { S.boardError = err.message; }
-  await loadBoard(); renderMain();
-}
-wireBoardDrag((task, agent, before) => { void assignCard(task, agent, before); });
-
 // Close a tab; closing the one you are on moves to its neighbour, or to Waiting on you.
 async function closeTabAndMove(id: string) {
   if (id === S.cur && S.view === "thread") rememberPane(id);
@@ -1057,20 +1075,17 @@ document.addEventListener("dblclick", (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab;
   if (id && S.preview === id) { keepTab(id); $("#tabs")!.innerHTML = tabsView(); }
 });
-document.addEventListener("click", (e) => { if ((S.moreOpen || S.filesOpen || S.boardMenu) && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; S.filesOpen = false; S.boardMenu = null; renderMain(); } }, true);
-// Tapping a ticket on the Board opens its panel (a link or button inside it does its own thing).
-document.addEventListener("click", (e) => {
-  const t = e.target as HTMLElement;
-  if (t.closest("button, a, select, input")) return;
-  const c = t.closest<HTMLElement>(".board-page [data-card]");
-  if (c) { S.boardOpen = S.boardOpen === c.dataset.card ? null : c.dataset.card!; renderMain(); }
-});
+document.addEventListener("click", (e) => { if ((S.moreOpen || S.filesOpen) && !(e.target as HTMLElement).closest(".more-wrap")) { S.moreOpen = false; S.filesOpen = false; renderMain(); } }, true);
 document.addEventListener("load", (e) => { if ((e.target as HTMLElement).closest?.(".docbody")) layoutMargin(); }, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.add("cmd"); });
 document.addEventListener("keyup", (e) => { if (e.key === "Meta" || e.key === "Control") document.body.classList.remove("cmd"); });
 window.addEventListener("blur", () => document.body.classList.remove("cmd"));
 
 document.addEventListener("click", async (e) => {
+  // An open filter menu closes on a click anywhere else.
+  if (WB.menu && !(e.target as HTMLElement).closest(".wb-dd")) { WB.menu = ""; renderMain(); }
+  // A click on the shade beside the New agent panel closes it.
+  if ((e.target as HTMLElement).classList.contains("lscrim")) { closeLaunch(); return renderMain(); }
   const b = (e.target as HTMLElement).closest<HTMLElement>("button, [data-thread]");
   if (!b) return;
   const d = b.dataset;
@@ -1142,7 +1157,59 @@ document.addEventListener("click", async (e) => {
   if (d.finish === "changes") { S.verdict[S.cur!] = "changes"; keepUnsent(); return writeReview(); }
   if (d.finish === "reply") return writeReview();
   if (d.compose !== undefined) return openCompose();
+  // Make it work: the form on a message, then the piece, then its topic.
+  if (d.mwOpen) {
+    const m = S.data?.messages.find((x) => x.id === Number(d.mwOpen));
+    S.makeWork = { mid: Number(d.mwOpen), title: (m?.body.split("\n").find((l) => l.trim()) ?? "").slice(0, 100), kind: "code", owner: "", error: "" };
+    if (!S.team?.length) await loadTeam();
+    return renderMain();
+  }
+  if (d.mwCancel !== undefined) { S.makeWork = null; return renderMain(); }
+  if (d.mwMake !== undefined && S.makeWork) {
+    const f = S.makeWork;
+    f.title = $<HTMLInputElement>("#mw-title")?.value ?? f.title; f.kind = $<HTMLSelectElement>("#mw-kind")?.value ?? f.kind; f.owner = $<HTMLSelectElement>("#mw-owner")?.value ?? "";
+    try {
+      const r = await api<{ thread_id: string }>(`/messages/${f.mid}/work`, { method: "POST", body: { title: f.title, kind: f.kind, owner: f.owner || null, by: me } });
+      S.makeWork = null; await Promise.all([loadList(), loadWork()]); return openThread(r.thread_id);
+    } catch (err: any) { f.error = err.message ?? "Could not make it work."; return renderMain(); }
+  }
+  // Main, before its first message: the reply box writes it.
+  if (d.mainStart !== undefined && S.peer) {
+    const t = topicFor(S.peer);
+    if (t && S.cur !== t) await openThread(t);
+    S.newTopic = true; S.mainNew = true; S.newSubject = ""; renderMain(); $<HTMLTextAreaElement>("#message")?.focus(); return;
+  }
+  // A new topic with the agent or group you are looking at: the reply box starts one.
+  if (d.newTopic !== undefined && S.peer) {
+    S.mainNew = false;
+    const t = topicFor(S.peer);
+    if (!t) { await openCompose(); if (S.compose) { S.compose.to = S.peer; renderMain(); } return; }
+    if (S.cur !== t) await openThread(t);
+    S.newTopic = true; S.newSubject = ""; renderMain(); $<HTMLInputElement>("#new-subject")?.focus(); return;
+  }
   if (d.cmode && S.compose) { S.compose.mode = d.cmode as any; S.compose.error = ""; return renderMain(); }
+  // New agent, from the Team page or a piece of work.
+  if (d.agentNew !== undefined) { await openLaunch(); return renderMain(); }
+  if (d.workStart) { WB.assigning = false; await openLaunch(d.workStart); return renderMain(); }
+  if (d.flToggle !== undefined) { FL.open = !FL.open; P.open = null; renderMain(); if (FL.open) { await loadIssues(); renderMain(); } return; }
+  if (d.flMake) { await makeWork(d.flMake); await loadWork(); return renderMain(); }
+  if (d.flSync !== undefined) { renderMain(); await syncLinear(); return renderMain(); }
+  if (d.wbAssign !== undefined) { WB.assigning = !WB.assigning; return renderMain(); }
+  if (d.wbAssignTo) { await assignTo(P.open!, d.wbAssignTo); await loadWork(); return renderMain(); }
+  if (d.lClose !== undefined) { closeLaunch(); return renderMain(); }
+  if (d.lTool) { keepLaunchFields(); L.tool = d.lTool; return renderMain(); }
+  if (d.lRepo) { keepLaunchFields(); L.repo = d.lRepo; L.other = false; return renderMain(); }
+  if (d.lOther !== undefined) { keepLaunchFields(); L.other = true; return renderMain(); }
+  if (d.lFolder) { keepLaunchFields(); L.folder = d.lFolder; return renderMain(); }
+  if (d.lWork !== undefined) { keepLaunchFields(); L.work = d.lWork; return renderMain(); }
+  if (d.lStart !== undefined) {
+    keepLaunchFields(); // read what was typed before the redraw below replaces the panel
+    L.sending = true; renderMain();
+    const r = await submitLaunch();
+    if (!r) return renderMain();
+    P.open = null; await Promise.all([loadList(), loadWork(), loadTeam()]);
+    return openThread(r.thread_id);
+  }
   if (d.closeCompose !== undefined) { S.compose = null; S.view = "thread"; return render(); }
   if (d.to !== undefined && S.compose) {
     // Someone you already talk to: write the new topic in their conversation, like a reply.
@@ -1168,10 +1235,23 @@ document.addEventListener("click", async (e) => {
     await loadList(); return render();
   }
   if (d.parkedFold !== undefined) { P.parkedOpen = !P.parkedOpen; return renderMain(); }
-  if (d.workOpen) { P.open = P.open === d.workOpen ? null : d.workOpen; return renderMain(); }
+  // A piece with no topic yet: start one with its owner, about it, and open it.
+  if (d.workTopic) {
+    try { const r = await api<{ thread_id: string }>(`/work/${encodeURIComponent(d.workTopic)}/topic`, { method: "POST", body: { by: me } }); await loadList(); return openThread(r.thread_id); }
+    catch (err: any) { WB.moveError = err.message ?? "Could not start a topic."; return renderMain(); }
+  }
+  if (d.workOpen) { FL.open = false; P.open = P.open === d.workOpen ? null : d.workOpen; WB.moveError = ""; WB.menu = ""; WB.assigning = false; return renderMain(); }
   if (d.workClose !== undefined) { P.open = null; return renderMain(); }
-  if (d.work !== undefined) { S.view = "work"; S.phoneList = false; render(); await loadWork(); return renderMain(); }
-  if (d.rules !== undefined) { S.view = "rules"; S.phoneList = false; render(); await loadRules(); return renderMain(); }
+  if (d.work !== undefined) { S.view = "work"; S.phoneList = false; render(); await Promise.all([loadWork(), loadStages(), loadTeam(), loadIssues()]); return renderMain(); }
+  if (d.wbKind) { WB.kind = d.wbKind; WB.owners = []; WB.labels = []; P.open = null; return renderMain(); }
+  if (d.wbMode) { WB.mode = d.wbMode as any; return renderMain(); }
+  if (d.wbStuck !== undefined) { WB.stuck = !WB.stuck; return renderMain(); }
+  if (d.wbMenu) { WB.menu = WB.menu === d.wbMenu ? "" : d.wbMenu as any; return renderMain(); }
+  // Picking in a filter keeps its menu open, so several can be picked in a row.
+  if (d.wbOwner !== undefined) { WB.owners = !d.wbOwner ? [] : WB.owners.includes(d.wbOwner) ? WB.owners.filter((x) => x !== d.wbOwner) : [...WB.owners, d.wbOwner]; return renderMain(); }
+  if (d.wbLabel !== undefined) { WB.labels = !d.wbLabel ? [] : WB.labels.includes(d.wbLabel) ? WB.labels.filter((x) => x !== d.wbLabel) : [...WB.labels, d.wbLabel]; return renderMain(); }
+  if (d.rules !== undefined) { S.view = "rules"; S.phoneList = false; render(); await Promise.all([loadRules(), loadStages()]); return renderMain(); }
+  if (await stageAction(d)) return renderMain();
   if (d.ruleDel) { await deleteRule(d.ruleDel); return renderMain(); }
   if (d.reviewing || d.stopReviewing) {
     // "I'm on it" (or "stopped for now"): the sender hears through Dak, and the PR stays waiting on you.
@@ -1182,7 +1262,13 @@ document.addEventListener("click", async (e) => {
     if (S.cur === id) await openThread(id, true);
     return render();
   }
-  if (d.settings !== undefined) { S.view = "settings"; askLogin(); render(); await Promise.all([loadSettings(), loadAgents(true)]); return render(); }
+  if (d.settings !== undefined) { S.view = "settings"; askLogin(); render(); await Promise.all([loadSettings(), loadAgents(true), loadMedia(), loadLinear()]); return render(); }
+  if (d.mediaAsk !== undefined) { S.media.confirm = true; return renderMain(); }
+  if (d.mediaCancel !== undefined) { S.media.confirm = false; return renderMain(); }
+  if (d.mediaClear !== undefined) {
+    S.media.cleared = await api<{ count: number; bytes: number }>("/media/clear", { method: "POST", body: { days: S.media.days, by: me } });
+    S.media.confirm = false; await loadMedia(); return renderMain();
+  }
   if (d.phone) {
     if (d.phone === "open") {
       S.phone = { opening: true }; renderMain();
@@ -1190,45 +1276,43 @@ document.addEventListener("click", async (e) => {
     } else S.phone = await api(`/phone${d.phone === "signout" ? "?signout=1" : ""}`, { method: "DELETE" });
     return renderMain();
   }
-  if (d.boardOpen !== undefined) {
-    S.view = "board"; S.phoneList = false; S.boardError = ""; render();
-    await Promise.all([loadBoard(), loadTeam()]);
-    return render();
-  }
-  if (d.boardMenu) { S.boardMenu = S.boardMenu === d.boardMenu ? null : d.boardMenu as any; return renderMain(); }
-  if (d.boardPick) {
-    // Tick or untick; the menu stays open so several can be picked.
-    const list: string[] = S.boardFilter[d.boardPick as "agents" | "labels" | "milestones"], v = d.v ?? "";
-    const i = list.indexOf(v); i >= 0 ? list.splice(i, 1) : list.push(v);
-    return renderMain();
-  }
-  if (d.boardClear) { S.boardFilter[d.boardClear as "agents" | "labels" | "milestones"] = []; return renderMain(); }
-  if (d.boardView) { S.boardView = d.boardView as any; return renderMain(); }
-  if (d.boardNeeds !== undefined) { S.boardFilter.needs = !S.boardFilter.needs; return renderMain(); }
-  if (d.boardGrp) { const i = S.boardClosed.indexOf(d.boardGrp); i >= 0 ? S.boardClosed.splice(i, 1) : S.boardClosed.push(d.boardGrp); return renderMain(); }
-  if (d.boardClose !== undefined) { S.boardOpen = null; return renderMain(); }
-  if (d.boardFold !== undefined) { S.backlogFolded = !S.backlogFolded; local.set("backlogFolded", S.backlogFolded); return renderMain(); }
-  if (d.boardTop) {
-    const c = S.board?.cards.find((x: any) => x.id === d.boardTop);
-    const first = S.board?.cards.filter((x: any) => x.agent === c?.agent && x.id !== c?.id).sort((x: any, y: any) => x.position - y.position)[0];
-    if (c?.agent) return assignCard(c.id, c.agent, first?.id ?? null);
-  }
-  if (d.boardSync !== undefined) {
-    try { await api("/board/sync", { method: "POST" }); S.boardError = ""; } catch (err: any) { S.boardError = err.message; }
-    await loadBoard(); return renderMain();
+  if (d.linearSync !== undefined) {
+    try { await api("/board/sync", { method: "POST" }); LIN.error = ""; } catch (err: any) { LIN.error = err.message; }
+    await loadLinear(); return renderMain();
   }
   if (d.linearConnect !== undefined) {
     const key = $<HTMLInputElement>("#linear-key")?.value.trim() ?? "";
     if (!key) return;
     b.textContent = "Connecting";
-    try { await api("/linear-key", { method: "PUT", body: { key } }); S.boardError = ""; } catch (err: any) { S.boardError = err.message; }
-    await loadBoard(); return renderMain();
+    try { await api("/linear-key", { method: "PUT", body: { key } }); LIN.error = ""; } catch (err: any) { LIN.error = err.message; }
+    await loadLinear(); return renderMain();
   }
-  if (d.linearDisconnect !== undefined) { await api("/linear-key", { method: "DELETE" }); await loadBoard(); return renderMain(); }
+  if (d.linearDisconnect !== undefined) { await api("/linear-key", { method: "DELETE" }); await loadLinear(); return renderMain(); }
   if (d.teamOpen !== undefined) {
     S.view = "team"; S.teamEdit = null; render();
-    await Promise.all([loadTeam(), api("/door").then((x) => { S.door = x; }).catch(() => {})]);
+    await Promise.all([loadTeam(), loadGroups(), api("/door").then((x) => { S.door = x; }).catch(() => {})]);
     return render();
+  }
+  if (d.groupNew !== undefined) { S.groupNew = S.groupNew ? null : { name: "", members: [] }; return renderMain(); }
+  if (d.groupMember && S.groupNew) {
+    // Picking a member redraws the form: keep the name typed so far.
+    S.groupNew.name = $<HTMLInputElement>("#group-name")?.value ?? S.groupNew.name; S.groupNew.error = undefined;
+    const m = d.groupMember; S.groupNew.members = S.groupNew.members.includes(m) ? S.groupNew.members.filter((x) => x !== m) : [...S.groupNew.members, m];
+    return renderMain();
+  }
+  if (d.groupCreate !== undefined && S.groupNew) {
+    const g = S.groupNew; g.name = ($<HTMLInputElement>("#group-name")?.value ?? g.name).trim().toLowerCase().replace(/\s+/g, "-");
+    if (!g.name || !g.members.length) { g.error = !g.name ? "Give the group a name." : "Pick at least one member."; return renderMain(); }
+    try { await api(`/groups/${encodeURIComponent(g.name)}`, { method: "PUT", body: { members: g.members } }); }
+    catch (e: any) { g.error = e.message ?? "Could not make the group."; return renderMain(); }
+    S.groupNew = null; await loadGroups(); return renderMain();
+  }
+  if (d.groupOpen) {
+    S.phoneList = false;
+    const g = `group:${d.groupOpen}`;
+    if (topicFor(g)) return openPeer(g);
+    // A new group has no topics yet: start the first one.
+    await openCompose(); if (S.compose) { S.compose.to = g; renderMain(); } return;
   }
   if (d.teamEdit) { S.teamEdit = S.teamEdit === d.teamEdit ? null : d.teamEdit; return renderMain(); }
   if (d.teamSave) {
@@ -1495,7 +1579,6 @@ document.addEventListener("scroll", () => { if (pending) readSelection(); }, tru
 
 document.addEventListener("keydown", (e) => {
   if (S.view === "work" && e.key === "Escape" && P.open) { e.preventDefault(); P.open = null; return renderMain(); }
-  if (S.view === "board" && e.key === "Escape" && (S.boardOpen || S.boardMenu)) { e.preventDefault(); if (S.boardMenu) S.boardMenu = null; else S.boardOpen = null; return renderMain(); }
   if ((S.moreOpen || S.filesOpen) && e.key === "Escape") { e.preventDefault(); S.moreOpen = false; S.filesOpen = false; return renderMain(); }
   if (S.peek && e.key === "Escape") { e.preventDefault(); closePeek(); return renderMain(); }
   if (S.peek && (e.metaKey || e.ctrlKey) && e.key === "[" && S.peekBack.length) { e.preventDefault(); peekBackStep(); return renderMain(); }
@@ -1544,7 +1627,6 @@ document.addEventListener("keydown", (e) => {
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (k === "c" && pending) { e.preventDefault(); return commentOnSelection(); }
-  if (k === "n") { e.preventDefault(); openCompose(); return; }
   if (k === "e" && S.view === "thread" && S.peer) { e.preventDefault(); return archive(S.peer, !isArchived(S.peer)); }
   // [ and ]: the previous and next topic with this agent, in the topic bar's order.
   if ((k === "[" || k === "]") && S.view === "thread" && S.cur) {
@@ -1658,7 +1740,7 @@ async function refresh() {
   await loadList();
   // A sender Dak has not seen yet (a new Codex or Cursor session) gets its tool's logo.
   const known = new Set(S.agents.map((a) => a.name));
-  if ([...S.threads, ...S.others].some((t) => !known.has(t.from) || !known.has(t.to))) { await loadAgents(); renderSide(); }
+  if ([...S.threads, ...S.others].some((t) => !known.has(t.from) || (!known.has(t.to) && !t.to.startsWith("group:")))) { await loadAgents(); renderSide(); }
   const mine = S.threads;
   for (const t of mine) {
     const key = `${t.id}:${t.updated_at}`;
@@ -1765,7 +1847,7 @@ function listen() {
 }
 
 (async function start() {
-  await Promise.all([loadAgents(), loadSettings(), loadTeam()]);
+  await Promise.all([loadAgents(), loadSettings(), loadTeam(), loadGroups()]);
   await loadList();
   const mine = S.threads;
   seen = new Set(mine.map((t) => `${t.id}:${t.updated_at}`));

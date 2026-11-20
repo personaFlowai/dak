@@ -53,9 +53,16 @@ export const inAgent = () => ["claude-code", "codex", "cursor"].includes(detectT
 function ensure() {
   store().exec(`CREATE TABLE IF NOT EXISTS presence (
     name TEXT PRIMARY KEY, tool TEXT, where_ TEXT, session_id TEXT, last_seen TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS session_names (session_id TEXT PRIMARY KEY, name TEXT NOT NULL, at TEXT NOT NULL)`);
+    CREATE TABLE IF NOT EXISTS session_names (session_id TEXT PRIMARY KEY, name TEXT NOT NULL, at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS seats (session_id TEXT PRIMARY KEY, name TEXT NOT NULL, tool TEXT, where_ TEXT, last_seen TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS seats_by_name ON seats (name, last_seen)`);
   const cols = new Set((store().query("PRAGMA table_info(presence)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("title")) store().exec("ALTER TABLE presence ADD COLUMN title TEXT");
+  // Sessions seen before seats existed become seats of the name they go by now.
+  // Once, when the table is new; each session's latest sighting wins.
+  if (!store().query("SELECT 1 FROM seats LIMIT 1").get()) store().exec(`INSERT OR IGNORE INTO seats
+    SELECT p.session_id, coalesce(s.name, p.name), p.tool, p.where_, max(p.last_seen)
+    FROM presence p LEFT JOIN session_names s ON s.session_id = p.session_id WHERE p.session_id IS NOT NULL AND p.session_id != '' GROUP BY p.session_id`);
 }
 
 /* A Claude Code session's title, the name it shows in Claude ("Team engineer (M21, M11a)"):
@@ -112,6 +119,27 @@ export function touch(name: string, info: { tool?: string; where?: string; sessi
       tool = coalesce(excluded.tool, tool), where_ = coalesce(excluded.where_, where_),
       session_id = coalesce(excluded.session_id, session_id), last_seen = excluded.last_seen`)
     .run(name.toLowerCase(), info.tool ?? null, info.where ?? null, info.session ?? null, new Date().toISOString());
+  // A member can run in several sessions at once or over time: each is one of its seats.
+  if (info.session) store().query(`INSERT INTO seats VALUES (?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET
+      name = excluded.name, tool = coalesce(excluded.tool, tool), where_ = coalesce(excluded.where_, where_), last_seen = excluded.last_seen`)
+    .run(info.session, name.toLowerCase(), info.tool ?? null, info.where ?? null, new Date().toISOString());
+}
+
+export interface Seat { session_id: string; tool: string | null; where: string | null; last_seen: string }
+// A member's seats from the last week, newest first.
+export function seatsOf(name: string): Seat[] {
+  ensure();
+  const week = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  return store().query("SELECT session_id, tool, where_ AS \"where\", last_seen FROM seats WHERE name = ? AND last_seen > ? ORDER BY last_seen DESC LIMIT 6").all(name, week) as Seat[];
+}
+
+// A session that first showed up under its folder's name and then took a member's name: the
+// folder name is that member's seat, not another member.
+export function superseded(): Set<string> {
+  ensure();
+  // Only a name made from the folder: a name somebody chose with --from is never folded away.
+  const rows = store().query(`SELECT p.name, p.where_ FROM presence p JOIN session_names s ON s.session_id = p.session_id WHERE s.name != p.name`).all() as { name: string; where_: string | null }[];
+  return new Set(rows.filter((r) => r.where_ && (r.name === nameFor(r.where_) || r.name === codexNameFor(r.where_))).map((r) => r.name));
 }
 
 export function known(name: string): boolean {

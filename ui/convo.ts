@@ -2,7 +2,7 @@
    thread, so a reply reaches the agent on the right piece of work with its anchors.
    On screen, all threads with one agent read as one timeline, split into topics. */
 import { api } from "./api";
-import { S, me, esc, name, mark, when, agentOf, standing, looking, type Summary } from "./state";
+import { S, me, esc, name, mark, when, agentOf, standing, looking, isGroup, groupLine, type Summary } from "./state";
 import { I } from "./icons";
 
 // Where typed text is kept: per topic, or per agent while starting a new one.
@@ -14,9 +14,10 @@ export type Topic = { thread: Thread; messages: Message[]; participants?: Partic
 
 // Who a thread is with, from your side. A thread between two agents belongs to the pair, "lead+ana".
 // A thread you were added to (as reviewer, approver, watcher) belongs with whoever started it.
+// A group's topics belong to the group, whoever started them.
 export const peerOf = (t: Pick<Thread, "to" | "from"> & { participants?: string[] }) =>
-  t.to === me ? t.from : t.from === me ? t.to : t.participants?.includes(me) ? t.from : [t.from, t.to].sort().join("+");
-export const onThread = (t: Pick<Thread, "to" | "from"> & { participants?: string[] }) => t.to === me || t.from === me || !!t.participants?.includes(me);
+  isGroup(t.to) ? t.to : t.to === me ? t.from : t.from === me ? t.to : t.participants?.includes(me) ? t.from : [t.from, t.to].sort().join("+");
+export const onThread = (t: Pick<Thread, "to" | "from"> & { participants?: string[] }) => isGroup(t.to) || t.to === me || t.from === me || !!t.participants?.includes(me);
 export const isPair = (peer: string | null) => !!peer?.includes("+");
 export const peerName = (peer: string) => peer.split("+").map(name).join(" and ");
 export const everyThread = () => [...S.threads, ...S.others];
@@ -73,7 +74,7 @@ export function peerList(): string {
 
 function peerRow(p: Peer): string {
   {
-    const about = agentOf(p.name)?.about;
+    const about = isGroup(p.name) ? groupLine(p.name) : agentOf(p.name)?.about;
     // The Inbox says what is new, not what needs you: that is the You page's job.
     const shown = S.threads.find((t) => t.id === topicFor(p.name)) ?? p.latest;
     const state = p.unread ? `<span class="new">${p.unread} new</span>` : p.topics > 1 ? `${p.topics} topics` : "";
@@ -104,7 +105,7 @@ export function archivedList(): string {
 // The topic to open when you click an agent: the newest unread one, else the newest open one.
 export function topicFor(peer: string): string | null {
   const mine = everyThread().filter((t) => peerOf(t) === peer);
-  return (mine.find((t) => t.unread) ?? mine.find((t) => t.status !== "closed") ?? mine[0])?.id ?? null;
+  return (mine.find((t) => t.unread) ?? mine.find((t) => S.mains[t.id]) ?? mine.find((t) => t.status !== "closed") ?? mine[0])?.id ?? null;
 }
 
 // Load every topic with the current agent (the newest S.topicCap of them), reusing
@@ -187,10 +188,10 @@ export function topicPicker(): string {
   const open = S.convo.filter((t) => t.thread.status !== "closed" || t.thread.id === S.cur);
   const sorted = [...open].sort((a, b) => b.thread.updated_at.localeCompare(a.thread.updated_at));
   const cur = S.convo.find((t) => t.thread.id === S.cur);
-  const label = S.newTopic ? "New topic" : cur ? topicLabel(cur) : "";
-  return `<div class="replying"><span>${S.newTopic ? "Starting" : "On"}</span><span class="topic-link" title="Change where this goes"><b>${esc(label)}</b>${I.next}
+  const label = S.mainNew ? "Main" : S.newTopic ? "New topic" : cur ? (S.mains[cur.thread.id] ? "Main" : topicLabel(cur)) : "";
+  return `<div class="replying"><span>${S.newTopic && !S.mainNew ? "Starting" : "On"}</span><span class="topic-link" title="Change where this goes"><b>${esc(label)}</b>${I.next}
     <select id="topic" aria-label="Topic your reply goes on">${sorted.map((t) =>
-      `<option value="${t.thread.id}" ${!S.newTopic && t.thread.id === S.cur ? "selected" : ""}>${esc(topicLabel(t).slice(0, 70))}</option>`).join("")}
+      `<option value="${t.thread.id}" ${!S.newTopic && t.thread.id === S.cur ? "selected" : ""}>${esc(S.mains[t.thread.id] ? "Main" : topicLabel(t).slice(0, 70))}</option>`).join("")}
       <option value="__new" ${S.newTopic ? "selected" : ""}>New topic…</option></select></span></div>
 `;
 }

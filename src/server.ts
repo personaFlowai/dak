@@ -16,7 +16,9 @@ import {
 } from "./store";
 import { explain, ask } from "./explain";
 import { HELPERS, setHelper, setModel, setCodexListen, setWakeClosed, writeConfig, type HelperName } from "./config";
-import { connected, connect, disconnect, ensureCodexListenTimeout, type HookTool } from "./claude-hooks";
+import { folders, launches, load, repos, startSession } from "./launch";
+import { clearMedia, mediaToClear } from "./store";
+import { connected, connect, disconnect, ensureCodexListenTimeout, ensureMidTurn, type HookTool } from "./claude-hooks";
 import { codexDefaultModel } from "./presence";
 import { postReview } from "./github";
 import { waitForMail } from "./wake";
@@ -28,7 +30,11 @@ import { agents, touch } from "./presence";
 import { DakError, type Verdict } from "./types";
 import { setMember, team } from "./team";
 import { addTask, assign, board } from "./board";
-import { addWork, getWork, listWork, moveWork, reassignWork } from "./work";
+import { addWork, assignWork, getWork, listWork, moveStage, moveWork, reassignWork, startTopic } from "./work";
+import { allStages, setStages } from "./stages";
+import { openIssues, workFromIssue } from "./fromlinear";
+import { mainTopics, postToMain, workFromMessage } from "./maintopic";
+import { usage } from "./usage";
 import { addPermission, addRule, removeRule, rules } from "./rules";
 import { clearLinearKey, linearKey, setLinearKey, syncLinear } from "./linear";
 import { refreshGhStates } from "./ghstate";
@@ -60,6 +66,7 @@ export function serve(port?: number) {
   const secret = token();
   // Reviewer runners pick up what was sent to them. A tick is one indexed query per runner.
   settleWakes();
+  try { ensureMidTurn(dakBinary()); } catch { /* a settings file Dak will not touch */ }
   let ticks = 0;
   const ticker = setInterval(() => {
     try { tickRunners(); } catch { /* never stop the server */ }
@@ -487,8 +494,43 @@ async function api(req: Request, url: URL): Promise<Response> {
     if (method === "GET" && !parts[1]) return json(listWork({ owner: q.get("owner") ?? undefined, open: q.get("all") !== "1" }));
     if (method === "POST" && !parts[1]) { const b = await body(); return json(addWork({ title: String(b.title ?? ""), kind: b.kind, owner: String(b.owner ?? ""), ticket: b.ticket ?? null, by: String(b.by ?? by()), thread_id: b.topic ?? null }), 201); }
     if (method === "POST" && parts[1] && parts[2] === "move") { const b = await body(); return json(moveWork(parts[1], String(b.state ?? ""), String(b.by ?? by()), { proof: b.proof ?? null, blocked: b.blocked ?? null, thread_id: b.topic ?? null })); }
+    if (method === "POST" && parts[1] && parts[2] === "assign") { const b = await body(); return json(assignWork(parts[1], String(b.owner ?? ""), String(b.by ?? ""))); }
+    if (method === "POST" && parts[1] && parts[2] === "topic") { const b = await body(); return json(startTopic(parts[1], String(b.by ?? by()))); }
+    if (method === "POST" && parts[1] && parts[2] === "stage") { const b = await body(); return json(moveStage(parts[1], String(b.stage ?? ""), String(b.by ?? by()), { proof: b.proof ?? null, thread_id: b.topic ?? null })); }
     if (method === "POST" && parts[1] && parts[2] === "give") { const b = await body(); return json(reassignWork(parts[1], String(b.owner ?? ""), String(b.by ?? by()))); }
     if (method === "GET" && parts[1]) return json(getWork(parts[1]));
+  }
+  // Starting a session: what the form needs (load, repositories, recent starts), and the start.
+  if (parts[0] === "launch") {
+    if (method === "GET") return json({ load: load(), repos: repos(), folders: folders(), launches: launches() });
+    if (method === "POST") { const b = await body(); return json(startSession({ tool: String(b.tool ?? ""), name: String(b.name ?? ""), message: String(b.message ?? ""), by: String(b.by ?? ""),
+      repo: b.repo ?? null, folder: b.folder ?? null, branch: b.branch ?? null, work: b.work ?? null }), 201); }
+  }
+  // Old screenshots and videos: how much there is, and clearing them (the person only).
+  if (parts[0] === "media") {
+    const days = Number(q.get("days") ?? 30);
+    if (method === "GET") return json(mediaToClear(days));
+    if (method === "POST" && parts[1] === "clear") { const b = await body(); return json(clearMedia(Number(b.days ?? 30), String(b.by ?? ""))); }
+  }
+  if (parts[0] === "usage" && method === "GET") return json(usage(Number(q.get("days") ?? 7), q.get("for") ?? undefined));
+  // The main topic of each conversation, writing in it, and making work from a message.
+  if (parts[0] === "main") {
+    if (method === "GET") return json(mainTopics());
+    if (method === "POST") { const b = await body(); return json(postToMain({ to: String(b.to ?? ""), body: String(b.body ?? ""), by: String(b.by ?? ""), attachments: b.attachments ?? [] }), 201); }
+  }
+  if (parts[0] === "messages" && parts[1] && parts[2] === "work" && method === "POST") {
+    const b = await body();
+    return json(workFromMessage(Number(parts[1]), { title: String(b.title ?? ""), kind: b.kind, owner: b.owner ?? null, ticket: b.ticket ?? null, by: String(b.by ?? "") }), 201);
+  }
+  // From Linear: issues that are not work yet, and making work from one.
+  if (parts[0] === "linear" && parts[1] === "issues") {
+    if (method === "GET") return json(openIssues());
+    if (method === "POST" && parts[2]) { const b = await body(); return json(workFromIssue(decodeURIComponent(parts[2]), String(b.by ?? ""), b.kind ?? "code"), 201); }
+  }
+  // Stages: the person's steps for each kind of work, one column each on the Work board.
+  if (parts[0] === "stages") {
+    if (method === "GET") return json(allStages());
+    if (method === "PUT" && parts[1]) { const b = await body(); return json(setStages(parts[1], Array.isArray(b.stages) ? b.stages : [], String(b.by ?? ""))); }
   }
   // Rules: the person's list. Four are kept by Dak in code; only the person adds or removes the rest.
   if (parts[0] === "rules") {
@@ -511,6 +553,7 @@ async function api(req: Request, url: URL): Promise<Response> {
   }
   // The person's Linear key: kept in a private file, never returned.
   if (parts[0] === "linear-key") {
+    if (method === "GET") { let at: string | null = null; try { at = (store().query("SELECT max(synced_at) AS at FROM tasks").get() as any)?.at ?? null; } catch { /* never synced */ } return json({ connected: !!linearKey(), synced_at: at }); }
     if (method === "PUT") { const r = await setLinearKey(String((await body()).key ?? "")); await syncLinear().catch(() => {}); return json(r); }
     if (method === "DELETE") { clearLinearKey(); return json({ connected: false }); }
   }

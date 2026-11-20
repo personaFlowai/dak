@@ -1,7 +1,7 @@
 /* The window's frame on the Mac: a thin rail of places on the left, tabs along the top for what
    you have open, and a sidebar that drills in (agents, then one agent's topics, with Back).
    Three columns, so the review pane keeps its width. The phone keeps its own two screens. */
-import { S, esc, name, mark, me, agentOf, onPhone } from "./state";
+import { S, esc, name, mark, me, agentOf, onPhone, isGroup, groupLine } from "./state";
 import { local } from "./api";
 import { everyThread, isPair, peerList, archivedList, pairList, peerName, peerOf } from "./convo";
 import { topicRows } from "./topics";
@@ -31,8 +31,7 @@ export function railView(): string {
      where conversations live, then the rest. */
   const row = (attr: string, icon: string, label: string, on: boolean, n = 0, you = false, hint = "") =>
     `<button class="nav ${on ? "on" : ""}" ${attr} title="${hint || label}" aria-label="${label}${n ? `, ${n}` : ""}" ${on ? `aria-current="page"` : ""}>${icon}<span>${label}</span>${n ? `<b class="${you ? "you" : ""}">${n}</b>` : ""}</button>`;
-  return `${row("data-compose", I.compose, "New message", S.view === "compose", 0, false, "New message (N)")}
-    ${row("data-search-open", I.search, "Search", false, 0, false, "Search everything (⌘K)")}
+  return `${row("data-search-open", I.search, "Search", false, 0, false, "Search everything (⌘K)")}
     <div class="nav-gap"></div>
     ${row("data-you", I.check, "You", S.view === "you", youN, true, "What waits on you, most blocking first")}
     ${row("data-work", I.stack, "Work", ["work", "queue", "board"].includes(S.view), workN, false, "Every piece of work, and what is shipping")}
@@ -55,9 +54,10 @@ export function sideBody(): string {
   if (S.sideLevel === "topics" && S.peer) {
     const peer = S.peer;
     const count = everyThread().filter((t) => peerOf(t) === peer).length;
-    const about = isPair(peer) ? "Between agents, read only" : agentOf(peer)?.about ?? "";
+    const about = isPair(peer) ? "Between agents, read only" : isGroup(peer) ? groupLine(peer) : agentOf(peer)?.about ?? "";
     return `<div class="side-head drill"><button class="back" data-side-back title="Back to all agents">${I.prev}<span>${isPair(peer) ? "Between agents" : "Agents"}</span></button></div>
-      <div class="crumb">${isPair(peer) ? "" : mark(peer, "md")}<div><b>${esc(isPair(peer) ? peerName(peer) : name(peer))}</b><span>${about ? `${esc(about)} · ` : ""}${count} topic${count === 1 ? "" : "s"}</span></div></div>
+      <div class="crumb">${isPair(peer) ? "" : mark(peer, "md")}<div><b>${esc(isPair(peer) ? peerName(peer) : name(peer))}</b><span>${about ? `${esc(about)} · ` : ""}${count} topic${count === 1 ? "" : "s"}</span></div>
+        ${isPair(peer) ? "" : `<button class="icon-btn new-topic" data-new-topic title="New topic with ${esc(name(peer))}" aria-label="New topic">${I.compose}</button>`}</div>
       <div class="side-find"><input id="topic-find" type="search" placeholder="Find a topic, PR or ticket" value="${esc(S.topicFind)}" autocomplete="off"></div>
       <div class="list tlist" id="tlist" role="list" aria-label="Topics">${topicRows()}</div>`;
   }

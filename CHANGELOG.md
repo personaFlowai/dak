@@ -1,5 +1,150 @@
 # Changelog
 
+## 0.20.2
+
+Cleanup from the release 3 plan.
+
+- Held is a flag on a piece, not a state: a held piece stays in its stage, flagged with what it waits on. `dak work hold W-12 --blocked "…"` sets it, `dak work unhold` or any move lifts it. A held PR keeps its stage on the board. Existing held pieces were converted.
+- The Work skill and `dak help` teach `dak work stage` and `dak work hold` only. `start`, `next`, `ready` and `done` still work for agents taught them, and will go later.
+
+## 0.20.1
+
+- The Dak skill says to write each thing once: not in the session and again in Dak, not a message and an update repeating it, not to the person and again to the lead.
+
+## 0.20.0
+
+Release 3 complete: the token savings.
+
+- The Dak skill every agent reads is a quarter of its size (20,700 characters to 4,700): the everyday rules only. Everything else moved to `dak help guide`, which costs nothing until an agent asks for it.
+- Mail is handed over grouped by topic: the topic and how to answer it once, then each message as one line with its author, instead of a header and a reply line per message.
+- Dak counts what each agent writes into it and is handed by it, per day. `dak usage` shows it, and each agent's Team card shows today's.
+
+## 0.19.5
+
+Release 3, part 6: the main topic.
+
+- Each conversation, with an agent or a group, has Main pinned at the top of its topics: one topic that never closes, for everything that is not a piece of work. Writing there the first time starts it; opening a conversation lands on its unread topic, else Main.
+- "Make it work" on any message in Main makes a piece (title, kind, owner), moves that message into the piece's own topic, and leaves a line in Main pointing there. With an owner the piece is assigned and the agent told.
+- The topic list groups Work (each topic with its piece and stage), Other topics, and Done.
+
+## 0.19.4
+
+Release 3, part 5: the You page.
+
+- You is two lists: Your review (PRs, briefs, work marked ready) and Questions (an agent asking you, with buttons), each with Urgent first. Parked sits below, open, with what brings each back. "You decided" stays at the foot.
+- "I'm reviewing" is gone, from the list and from a topic's bar: Park is the one hold, Urgent the one priority.
+
+## 0.19.3
+
+Release 3, part 4: the Board page is gone.
+
+- Work is the board. The Board page, its piles and its ticket stages are removed from the app; its code goes with it.
+- Linear moved to Settings: connect a key, see when it last synced, sync now, disconnect.
+- Agents' `dak pile`, `dak next`, `dak status` and `dak assign` still work, and code pieces still follow their PRs from the Board's data.
+
+## 0.19.2
+
+Release 3, part 3: From Linear.
+
+- Work has "From Linear": the open Linear issues that are not work yet, grouped by milestone, with a search and "Make work" on each. Made work starts in Not started with no owner and the issue as its ticket, and leaves the list.
+
+## 0.19.1
+
+Release 3, part 2: assigning work.
+
+- A piece's Owner is a menu of the team, like giving work to a person, with "Start a new agent…" at the foot. Assigning tells the agent on the piece's topic (or a new one about it), so it is woken and starts from the piece. Only you assign.
+- A piece can wait with no owner ("Not assigned") until it is assigned.
+- Fixed: picking a button an agent sent in a group woke the whole group; it now wakes only the agent that asked.
+
+## 0.19.0
+
+Release 3, part 1: New agent on the Team page.
+
+- Team has "New agent", a panel from the right: a name, the engine (Claude Code, Codex, Cursor), the folder (a new worktree off main in a repository agents use, the one used last already picked; or another folder agents worked in, or a path), an optional piece of work, and the first message. The agent joins the Team under its name with a card. A name already on the team adds a session to that agent.
+- A piece of work's "Start a new agent" opens the same panel with the piece attached.
+- New message is gone from the sidebar, and with it New session.
+
+## 0.18.1
+
+- Fixed: Start on a new session sent an empty first message, name and branch, because the form was redrawn before it was read; it said "Say what the session should do first" though you had.
+
+## 0.18.0
+
+The Work board.
+
+- Work is a board: one column per stage, scrolling sideways like the Board page, or one row per owner across the stages (Team). Kinds are tabs; Everyone and Label filter (several at once), Stuck shows only pieces past their stage's limit, and search finds a W-number, ticket or title. The merge queue strip is gone from the page.
+- Stages are yours: Rules has a stage list for each kind, with what each counts as (waiting, being worked on, your review, done), when a piece there is stuck, and for code which point in a PR brings a piece there by itself. Renaming a stage keeps its pieces. Dak's rules hold on whatever the names: your review needs proof and a briefing, only you move a piece on from it, the last stage needs proof.
+- `dak work stage W-12 testing` moves a piece; `dak work stage` lists the stages. A piece's panel shows its track with time in each stage and lets you move it.
+- A piece with no topic has "Start a topic", which opens one with its owner, about it.
+- A conversation has a New topic button next to its name.
+- New session: For is optional. Empty, the session gets a name of its own instead of joining a member.
+
+## 0.17.2
+
+Release 2: the last two token savers.
+
+- An update (no reply needed) from one agent to others is a line or two: over 600 characters it is refused, with how to attach the detail instead. Updates to the person are not limited. The Dak skill says to end with one line, not a copy of the work.
+- Settings has Storage: screenshots and videos in topics done for more than 1, 3, 7 or 30 days, with their size, cleared on your click after a second look. A file still used on an open topic is kept, and each cleared message keeps a line saying a picture was there.
+
+## 0.17.1
+
+- In a group, the person's message with no @mention wakes every member: when the person writes to a group they mean the group. An agent's message with no @mention still wakes nobody.
+- `@all` in a group wakes every member, from anyone. The @ list offers it first in a group.
+
+## 0.17.0
+
+Release 2, part 7, and release 2 complete.
+
+- The @ list shows each member the way you would write their name, with its tool's mark, and who is on this topic or in this group first, said so. Picking one still writes @name.
+
+## 0.16.5
+
+Release 2, part 6: start a session from Dak.
+
+- New message has a New session row: pick the tool (Claude Code, Codex or Cursor), who it is for, a fresh worktree off main in a repository agents have worked in, a branch, and the first message. Dak opens a topic with that message and runs the tool there in the background under that name; its answers come back on the topic.
+- A piece of work has "Start an agent on this": the same form, the branch named from the ticket, and the new session owns the piece and moves it itself.
+- Only the person starts a session, and never while the machine is busy (the one-minute load at or over the number of cores, or start_load_limit in config).
+
+## 0.16.4
+
+Release 2, part 5: Team seats.
+
+- Each member on the Team page lists its seats: the sessions it ran in this week, each working now, open and idle, or closed.
+- A session first seen under its folder's name that then took a member's name is that member's seat, not a second member. A name somebody chose with --from is never folded away.
+- The Team page keeps its width with long member lists.
+
+## 0.16.3
+
+Release 2, part 4: groups in the app.
+
+- A group is one conversation in the Inbox, with its own topics, whoever started them. Its header and the reply box name the group.
+- The Team page lists groups and makes new ones: a name, the members, and the wake-up rules shown before you create it. A new group opens straight to its first message.
+- New message lists groups next to agents.
+- Fixed: an @mention of a group member in a group's first message now wakes that member.
+
+## 0.16.2
+
+Release 2, part 3: ask and wait.
+
+- `dak send` and `dak reply` take `--wait` (with `--timeout`, 10 minutes by default): the asker stays in its command until the answer for it comes back, then prints it and carries on in the same turn.
+- In the app, the question says whether the asker is still waiting, how fast the answer came, or that it carried on without one.
+
+## 0.16.1
+
+Release 2, part 2: mail reaches a busy agent mid-turn.
+
+- Claude Code runs Dak after every tool call. Mail for that agent that needs an answer is handed over then, instead of when its turn ends; updates and mail about others still wait for the next turn.
+- An existing Claude Code connection gets the new hook when Dak starts; Dak keeps a copy of the settings file first.
+
+## 0.16.0
+
+Release 2, part 1: who gets woken.
+
+- An @mention wakes only the member it names. Everyone else on the topic gets the message as one line at their next turn, not the full text, and is not woken for it.
+- In a group, a message with no @mention wakes nobody; each member reads it at their next turn.
+- A member brought in by an @mention answers whoever mentioned it, then leaves the topic. It comes back only when someone mentions it again.
+- In the app, a message with an @mention says who it woke, and a member leaving says so.
+
 ## 0.15.4
 
 - The Inbox shows what is new, not what waits on you. Agent rows say "3 new" instead of "2 waiting on you"; the topic list is Open and Done; a tab's dot means unread. What needs your answer lives on the You page only, so a parked topic no longer shows up as waiting in the Inbox.

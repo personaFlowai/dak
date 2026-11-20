@@ -34,7 +34,13 @@ const ours = (t: HookTool) => (entry: any) => t === "cursor"
   ? isOurs(t, entry?.command)
   : (entry?.hooks ?? []).some((h: any) => isOurs(t, h?.command));
 const hasWake = (s: any) => (s.hooks?.Stop ?? []).some((e: any) => (e?.hooks ?? []).some((h: any) => h?.asyncRewake && isOurs("claude", h.command)));
-const eventsFor = (t: HookTool): readonly string[] => (t === "cursor" ? CURSOR_EVENTS : EVENTS);
+// Claude Code also runs Dak after every tool call, so mail meant for a busy agent reaches it
+// mid-turn instead of when the turn ends. Only mail for that agent is handed over there.
+const MID_TURN = "PostToolUse";
+const eventsFor = (t: HookTool): readonly string[] => (t === "cursor" ? CURSOR_EVENTS : t === "claude" ? [...EVENTS, MID_TURN] : EVENTS);
+// What makes a connection count: the turn edges. A connection made before mid-turn delivery
+// still counts, and ensureMidTurn adds the new hook to it.
+const requiredFor = (t: HookTool): readonly string[] => (t === "cursor" ? CURSOR_EVENTS : EVENTS);
 
 // Codex's Stop hook may wait for mail for up to an hour ("keep listening"), so its limit is
 // a little over that. Every other hook answers at once.
@@ -55,9 +61,21 @@ export function ensureCodexListenTimeout(): boolean {
   return changed;
 }
 
+// Give an existing Claude Code connection the mid-turn hook. Called when the server starts.
+export function ensureMidTurn(bin: string): boolean {
+  if (!connected("claude")) return false;
+  const path = hooksPath("claude");
+  const s = read("claude");
+  if ((s.hooks?.[MID_TURN] ?? []).some(ours("claude"))) return false;
+  copyFileSync(path, `${path}.before-dak`);
+  (s.hooks[MID_TURN] ??= []).push({ hooks: [{ type: "command", command: `${bin}${MARK.claude}`, timeout: 5 }] });
+  writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+  return true;
+}
+
 export function connected(t: HookTool): boolean {
   const s = read(t);
-  return eventsFor(t).every((e) => (s.hooks?.[e] ?? []).some(ours(t))) && (t !== "claude" || hasWake(s));
+  return requiredFor(t).every((e) => (s.hooks?.[e] ?? []).some(ours(t))) && (t !== "claude" || hasWake(s));
 }
 
 export function connect(t: HookTool, bin: string) {

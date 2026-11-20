@@ -1,14 +1,21 @@
 /* The Team page: everyone who works through Dak, on this Mac or outside it, with the card the
    person keeps for each (name, role, area, what it can and cannot do), and the door that lets
    agents outside this Mac in, one key each. */
-import { S, esc, mark, when, me } from "./state";
+import { S, esc, mark, when, me, name } from "./state";
 import { api } from "./api";
 import { I } from "./icons";
 import type { TeamMember } from "../src/team";
 
+// Today's characters each agent wrote into Dak and was handed: what it costs in tokens.
+let today: Record<string, { wrote: number; read: number }> = {};
 export async function loadTeam() {
   try { S.team = await api<TeamMember[]>("/team"); } catch { /* the page says it could not load */ }
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    today = Object.fromEntries((await api<{ agent: string; day: string; wrote: number; read: number }[]>("/usage?days=1")).filter((u) => u.day === day).map((u) => [u.agent, u]));
+  } catch { today = {}; }
 }
+const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
 
 const KIND: Record<string, string> = { person: "You", local: "On this Mac", cloud: "Outside, through the door", bot: "Bot" };
 const TOOL: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor", grok: "Grok Bot", http: "HTTPS", cli: "Command line" };
@@ -29,7 +36,32 @@ function card(m: TeamMember): string {
   }
   const facts = [m.role || m.area ? `<p class="tm-role">${esc([m.role, m.area].filter(Boolean).join(" · "))}</p>` : "",
     m.can ? `<p class="tm-can"><b>Can</b> ${esc(m.can)}</p>` : "", m.cannot ? `<p class="tm-can"><b>Cannot</b> ${esc(m.cannot)}</p>` : ""].join("");
-  return `<li class="tm">${head}${facts || (m.kind === "person" ? "" : `<p class="tm-empty">No card yet. Edit to say what ${esc(m.name)} does, so work and @mentions reach the right one.</p>`)}</li>`;
+  const u = today[m.name];
+  const cost = u && m.kind !== "person" ? `<p class="tm-cost">Today: wrote ${k(u.wrote)}, read ${k(u.read)} characters in Dak</p>` : "";
+  return `<li class="tm">${head}${cost}${facts || (m.kind === "person" ? "" : `<p class="tm-empty">No card yet. Edit to say what ${esc(m.name)} does, so work and @mentions reach the right one.</p>`)}${seatList(m)}</li>`;
+}
+
+// Its sessions this week. Two at once used to show as two members; they are one member's seats.
+const SEAT_WORD = { working: "Working", open: "Open, idle", closed: "Closed" } as const;
+function seatList(m: TeamMember): string {
+  if (m.kind === "person" || !m.seats?.length) return "";
+  return `<ul class="tm-seats">${m.seats.map((x) => `<li><i class="st ${x.state}"></i><code>${esc(x.where?.split("/").pop() ?? x.session_id.slice(0, 8))}</code>
+    <span>${SEAT_WORD[x.state]}</span><time>${x.state === "working" ? "now" : when(x.last_seen)}</time></li>`).join("")}</ul>`;
+}
+
+// Groups: a conversation with several agents at once. Who is woken follows the @mentions.
+function groupsSection(agents: TeamMember[]): string {
+  const rows = Object.entries(S.groups).map(([g, ms]) => `<li class="grp-row">${mark(`group:${g}`, "md")}<span class="nm"><b>${esc(name(`group:${g}`))}</b><span>${ms.map((m) => esc(name(m))).join(", ")}</span></span>
+    <button class="btn" data-group-open="${esc(g)}">Open</button></li>`).join("");
+  const n = S.groupNew;
+  const form = n ? `<div class="grp-form">
+    <label class="tm-field"><span>Name</span><input class="input" id="group-name" value="${esc(n.name)}" placeholder="For example, engine-team" maxlength="40" autocomplete="off" spellcheck="false"></label>
+    <div class="tm-field"><span>Members</span><div class="grp-pick">${agents.map((a) => `<button type="button" class="grp-chip" data-group-member="${esc(a.name)}" aria-pressed="${n.members.includes(a.name)}">${mark(a.name, "sm")}${esc(a.display || a.name)}</button>`).join("")}</div></div>
+    <ul class="grp-rules"><li><b>@name</b> wakes only that member. A message with no @mention wakes nobody.</li><li>Everyone else sees one line per message at their next turn, not the full text.</li></ul>
+    ${n.error ? `<p class="err">${esc(n.error)}</p>` : ""}
+    <div class="btns"><button class="btn" data-group-new>Cancel</button><button class="btn primary" data-group-create>Create group</button></div></div>` : "";
+  return `<section><h2>Groups</h2><p class="lead">Talk to several agents in one conversation.</p>
+    ${rows ? `<ul class="grp-list">${rows}</ul>` : ""}${form || `<div class="btns"><button class="btn" data-group-new>New group</button></div>`}</section>`;
 }
 
 // The door: one public HTTPS address for every agent outside this Mac, each with its own key.
@@ -59,6 +91,7 @@ export function teamView(): string {
   return `<div class="pane-body"><div class="settings team-page">
     <section><h2>Team</h2><p class="lead">Everyone who works through Dak. Write <code>@name</code> in any message to bring them onto that topic. Agents read these cards (<code>dak team</code>) to send work to the right one.</p>
       <ul class="team-list">${[...people, ...others].map(card).join("") || `<li class="tm-empty">Nobody yet.</li>`}</ul></section>
+    ${groupsSection(others)}
     ${doorSection()}</div></div>`;
 }
 

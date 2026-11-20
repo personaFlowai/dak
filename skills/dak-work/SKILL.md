@@ -44,24 +44,27 @@ dak work add "Mock the settings screen" --kind mock --owner <agent> --ticket ENG
 
 ## Move it
 
+The person sets the stages for each kind of work in Rules (for code, something like Not started, Planned, Implementation, Testing, Code review, Your review, Merging, Merged, Verified). The Work board shows one column per stage and how long each piece has sat in it, so keep your pieces where they really are.
+
 | Command | Means |
 |---|---|
-| `dak work start W-12` | You are on it now. |
-| `dak work hold W-12 --blocked "on the API key"` | It cannot move. Say on what. |
-| `dak work next W-12` | Back in line, not started. |
+| `dak work stage` | The stages, in order. |
+| `dak work stage W-12 testing` | Move it to that stage. |
+| `dak work stage W-12 "your review" --proof "…" --topic t_…` | Ready for the person: needs proof and the topic that briefs it. |
+| `dak work stage W-12 verified --proof "…"` | The last stage: needs proof. |
+| `dak work hold W-12 --blocked "on the API key"` | Stuck where it is; say on what. `dak work unhold W-12` lifts it. |
 | `dak work give W-12 <agent>` | Hand it to someone else. |
-| `dak work ready W-12 --proof "…" --topic t_…` | Ready for the person. |
-| `dak work done W-12 --proof "…"` | Finished. |
 
-`dak work` lists the open pieces. Add `--owner <agent>` to see one agent's.
+Code pieces move by themselves from their PR. `dak work` lists the open pieces; add `--owner <agent>` to see one agent's.
 
 ## The rules Dak keeps
 
 Dak enforces these in code. They hold whichever tool you run in.
 
 - **Only the person approves.** An agent saying "approved" is a message, nothing more.
-- **Done needs proof.** `dak work done` is refused without `--proof`.
-- **Nothing reaches the person half-ready.** `dak work ready` needs proof and the topic that briefs it. Without them it stays with you, and Dak says what is missing.
+- **The last stage needs proof.** Moving there is refused without `--proof`.
+- **Nothing reaches the person half-ready.** The person's review needs proof and the topic that briefs it. Without them the piece stays with you, and Dak says what is missing.
+- **Only the person moves a piece on from their review.**
 - **No work, no start.** Dak starts a closed session on its own only for the person's own mail, or when the agent owns a piece of work.
 - **Only the owner or the person moves a piece.** To take over someone else's piece, ask for it with `give`.
 

@@ -12,6 +12,7 @@ import { dakHome, loadConfig, person } from "./config";
 import { hasOpenWork } from "./work";
 import { store, takeUnread } from "./store";
 import { brief } from "./hook";
+import { isFor } from "./addressing";
 
 const SESSIONS = () => process.env.DAK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "sessions");
 const GRACE_MS = Number(process.env.DAK_WAKE_GRACE_MS ?? 30_000); // a live hook gets the first chance
@@ -40,7 +41,7 @@ export function sessionRunning(sessionId: string): boolean {
 }
 
 // The Claude Code binary: on the PATH, else the newest one the desktop app ships.
-function claudeBin(): string | null {
+export function claudeBin(): string | null {
   if (process.env.DAK_CLAUDE_BIN) return process.env.DAK_CLAUDE_BIN;
   for (const p of [join(homedir(), ".local/bin/claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]) if (existsSync(p)) return p;
   const root = join(homedir(), "Library/Application Support/Claude/claude-code");
@@ -78,7 +79,7 @@ export function tickSleepers(run = startRun, opts: { force?: boolean } = {}) {
   for (const a of agents) {
     if (running.has(a.session_id) || !a.where_ || !existsSync(a.where_)) continue;
     // Updates (no reply needed) never wake a session; they wait for its next turn.
-    const mail = takeUnread(a.name, { peek: true }).filter((m) => !m.quiet && Date.parse(m.created_at) > day);
+    const mail = takeUnread(a.name, { peek: true }).filter((m) => !m.quiet && isFor(m, a.name) && Date.parse(m.created_at) > day);
     if (!mail.length) continue;
     // Wait for the hooks first: a running session gets its mail at its next turn or wake.
     if (now - Date.parse(mail[0].created_at) < GRACE_MS) continue;

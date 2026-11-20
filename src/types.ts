@@ -40,6 +40,11 @@ export interface Message {
   prs?: number[]; // the PRs a verdict is about; none named means every PR on the thread
   quiet?: boolean; // an update that needs no reply: delivered at the next turn, never wakes or interrupts
   mentions?: string[]; // the team members @mentioned in it; each was brought onto the topic
+  answers?: string; // a mentioned member's reply: who mentioned it, so only they are woken
+  left?: boolean; // that member left the topic with this reply
+  everyone?: boolean; // @all in a group: every member is woken
+  moved?: { work: string; thread: string }; // "Make it work" moved a message from here to that piece's topic
+  waits?: { until: string }; // the author is waiting for the answer, until then
   approved_heads?: Record<string, { head_sha: string; diff_blob: string }>; // per PR ("#2450"), what each approval approved
   tryit?: { ticket?: string }; // a "try it" note: its first button means it works
   tryit_result?: { result: "works" | "wrong"; ticket?: string }; // the person's pick on one
@@ -65,6 +70,11 @@ export interface MessageExtra { handoff?: Handoff; cost?: Cost; reviewing?: bool
   prs?: number[]; // the PRs a verdict is about
   quiet?: boolean; // an update that needs no reply
   mentions?: string[];
+  answers?: string;
+  left?: boolean;
+  everyone?: boolean;
+  moved?: { work: string; thread: string };
+  waits?: { until: string };
   approved_heads?: Record<string, { head_sha: string; diff_blob: string }>;
   tryit?: { ticket?: string }; // a "try it" note on a live feature: its first button means it works
   tryit_result?: { result: "works" | "wrong"; ticket?: string }; // the person's pick on one

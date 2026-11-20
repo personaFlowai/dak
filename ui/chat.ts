@@ -24,10 +24,28 @@ export function chatPane(t: Thread, review: boolean): string {
 }
 
 // You can write on a thread you sent, were sent, or were added to.
-export const canReply = (t: Thread) => t.to === me || t.from === me
+export const canReply = (t: Thread) => t.to.startsWith("group:") || t.to === me || t.from === me
   || !!S.convo.find((x) => x.thread.id === t.id)?.participants?.some((p) => p.name === me);
 
+// "Make it work" on a message in the main topic: a piece from it, in its own topic.
+function makeWorkPop(m: Message, topic: Topic): string {
+  const f = S.makeWork;
+  if (!f || f.mid !== m.id) return "";
+  const other = topic.thread.to.startsWith("group:") ? "" : topic.thread.to === me ? topic.thread.from : topic.thread.to;
+  const team = (S.team ?? []).filter((x: any) => x.kind !== "person" && x.kind !== "bot");
+  const kinds = ["code", "mock", "research", "doc", "email", "note"];
+  return `<div class="mw-pop" role="dialog" aria-label="Make it work"><b>Make it a piece of work</b>
+    <label>Title<input class="input" id="mw-title" value="${esc(f.title)}" maxlength="120"></label>
+    <div class="mw-two"><label>Kind<select class="input" id="mw-kind">${kinds.map((k) => `<option ${k === f.kind ? "selected" : ""}>${k}</option>`).join("")}</select></label>
+      <label>Owner<select class="input" id="mw-owner"><option value="">Not assigned</option>${team.map((x: any) => `<option value="${esc(x.name)}" ${x.name === (f.owner || other) ? "selected" : ""}>${esc(x.display || name(x.name))}</option>`).join("")}</select></label></div>
+    <p>This message moves into the piece's own topic; Main keeps a line pointing there.</p>
+    ${f.error ? `<p class="err">${esc(f.error)}</p>` : ""}
+    <div class="mw-btns"><button type="button" class="btn" data-mw-cancel>Cancel</button><button type="button" class="btn primary" data-mw-make>Make it work</button></div></div>`;
+}
+
 function message(m: Message, topic: Topic): string {
+  // A message that went to its own topic leaves a line saying where.
+  if (m.moved) return `<p class="moved-note">${I.stack}<span>${esc(m.moved.work)} was made from a message here; it moved to its own topic.</span><button type="button" class="link" data-topic="${esc(m.moved.thread)}">Open its topic</button></p>`;
   // The PRs a verdict is about, by number: "Approved #2462".
   const on = m.prs?.length ? ` ${m.prs.map((n) => `#${n}`).join(", ")}` : "";
   const v = m.verdict ? `<span class="verdict ${m.verdict}">${{ approve: "Approved", changes: "Changes requested", question: "Question" }[m.verdict]}${on}</span>` : "";
@@ -36,12 +54,14 @@ function message(m: Message, topic: Topic): string {
   const chips = m.attachments.map((a) => a.hidden
     ? `<div class="removed-att">${esc(a.name)} · removed from this topic <button type="button" class="link" data-unhide-att="${a.id}" data-in="${topic.thread.id}">Restore</button></div>`
     : chip(a, topic)).join("");
-  const media = m.attachments.filter((a) => a.type === "file" && /^(image|video)\//.test((a.meta as any).mime)).map((a) => {
+  const media = m.attachments.filter((a) => a.type === "file" && !(a.meta as any).cleared && /^(image|video)\//.test((a.meta as any).mime)).map((a) => {
     const f = a.meta as any;
     return f.mime.startsWith("image/") ? `<img src="${blobUrl(f.blob, f.mime)}" alt="${esc(a.name)}" loading="lazy">` : `<video src="${blobUrl(f.blob, f.mime)}" controls preload="metadata"></video>`;
   }).join("");
+  const mw = S.mains[topic.thread.id] && m.body.trim() ? `<button type="button" class="mw-btn" data-mw-open="${m.id}" title="Make this a piece of work, in its own topic">${I.stack}Make it work</button>` : "";
   return `<article class="msg ${m.author === me ? "mine" : ""}" data-mid="${m.id}">
-    <div class="w">${mark(m.author, "sm")}<b>${esc(name(m.author))}</b>${v}<time title="${esc(fullWhen(m.created_at))}">${when(m.created_at)}</time></div>
+    <div class="w">${mark(m.author, "sm")}<b>${esc(name(m.author))}</b>${v}${mw}<time title="${esc(fullWhen(m.created_at))}">${when(m.created_at)}</time></div>
+    ${makeWorkPop(m, topic)}
     ${m.choice ? `<div class="picked">${I.check}<span>${esc(m.choice)}</span></div>` : ""}
     ${m.body.trim() ? `<div class="prose">${markMentions(renderMd(m.body), m.mentions)}</div>` : ""}
     ${m.handoff ? handoffCard(m.handoff) : ""}
@@ -49,8 +69,40 @@ function message(m: Message, topic: Topic): string {
     ${m.options?.length ? options(m, topic) : ""}
     ${refs ? `<ul class="refs">${refs}</ul>` : ""}
     ${chips ? `<div class="chips">${chips}</div>` : ""}
+    ${wokeLine(m, topic)}
+    ${waitLine(m, topic)}
     ${seenLine(m, topic)}
-  </article>`;
+  </article>${m.left ? `<p class="left-note">${esc(name(m.author))} answered and left this topic. Write @${esc(m.author)} to bring it back.</p>` : ""}`;
+}
+
+// Ask and wait: the asker held its turn for the answer. Say whether it came, and how fast.
+function waitLine(m: Message, topic: Topic): string {
+  if (!m.waits) return "";
+  const asked = m.mentions?.length ? m.mentions : [m.author === topic.thread.from ? topic.thread.to : topic.thread.from];
+  const who = asked.map((n) => esc(name(n))).join(", ");
+  const answer = topic.messages.find((x) => x.id > m.id && (asked.includes(x.author) || x.answers === m.author));
+  const mins = (a: string, b: string) => Math.max(1, Math.round((Date.parse(b) - Date.parse(a)) / 60_000));
+  if (answer && answer.created_at <= m.waits.until) return `<p class="wait-line done">${esc(name(m.author))} waited for ${who}: answered in ${mins(m.created_at, answer.created_at)} min.</p>`;
+  if (Date.now() < Date.parse(m.waits.until)) return `<p class="wait-line">${esc(name(m.author))} is waiting for ${who}, up to ${mins(new Date().toISOString(), m.waits.until)} min more.</p>`;
+  return `<p class="wait-line done">No answer in time; ${esc(name(m.author))} carried on.</p>`;
+}
+
+// Before this, every message woke everyone on the topic: older messages are not labelled.
+const MENTION_RULE_SINCE = "2026-11-20T00:15:00Z";
+// Who a message woke, where that is not obvious: an @mention wakes only who it names, and in a
+// group a message with no @mention wakes nobody. A plain message between two is left unsaid.
+function wokeLine(m: Message, topic: Topic): string {
+  const names = (ns: string[]) => ns.map((n) => `<b>${esc(name(n))}</b>`).join(", ");
+  const group = topic.thread.to.startsWith("group:");
+  if (group && m.answers && m.created_at >= MENTION_RULE_SINCE) return `<p class="woke">Woke <b>${esc(name(m.answers))}</b> only: it asked.</p>`;
+  if (group && m.created_at >= MENTION_RULE_SINCE && (m.everyone || (m.author === me && !m.mentions?.length))) return `<p class="woke">Woke everyone in the group.</p>`;
+  if (m.mentions?.length && m.created_at >= MENTION_RULE_SINCE) {
+    const t = topic.thread;
+    const rest = [t.to, t.from, ...(topic.participants ?? []).map((p) => p.name)].filter((w) => w !== m.author && w !== me && !w.startsWith("group:") && !m.mentions!.includes(w));
+    return `<p class="woke">Woke ${names(m.mentions)} only.${rest.length ? " Others on the topic read it at their next turn." : ""}</p>`;
+  }
+  if (group && m.author !== me && !m.answers && m.created_at >= MENTION_RULE_SINCE) return `<p class="woke">No @mention: nobody was woken.</p>`;
+  return "";
 }
 
 // "Ready for review": the head the proofs ran on, the migration, and each proof's result.
@@ -104,6 +156,7 @@ export function chip(a: Attachment, topic: Topic): string {
     return `<a class="acard" href="${esc(a.meta.url)}" target="_blank" rel="noopener" title="${esc(a.meta.url)}"><span class="aicon">${l.mark}</span><span class="nm"><b>${esc(l.title)}</b><span>${esc(l.where)}</span></span><span class="go">Open ↗</span></a>`;
   }
   const f = a.meta;
+  if ((f as any).cleared) return `<div class="acard cleared"><span class="aicon">${I.doc}</span><span class="nm"><b>${esc(a.name)}</b><span>Cleared to save space</span></span></div>`;
   if (/^image\//.test(f.mime)) return `<button class="acard thumb ${on ? "on" : ""}" data-att="${a.id}" ${inn}><img src="${blobUrl(f.blob, f.mime)}" alt="${esc(a.name)}" loading="lazy"><span class="nm"><b>${esc(a.name)}</b><span>Image · ${size(f.size)}</span></span></button>`;
   if (/^video\//.test(f.mime)) return card(I.doc, a.name, `Video · ${size(f.size)}`, "Play");
   if (opensInPane(f.mime)) return card(I.doc, a.name, `${f.mime.startsWith("text/html") ? "Page" : f.mime.startsWith("application/pdf") ? "PDF" : "Text"} · ${size(f.size)}`, "Open");
@@ -123,14 +176,14 @@ function prVersion(id: string, topic: Topic): number | null {
 
 export function composer(t: Thread, docked = false): string {
   const review = t.kind !== "note";
-  const other = t.to === me ? t.from : t.from === me ? t.to : t.from;
+  const other = t.to.startsWith("group:") ? t.to : t.to === me ? t.from : t.from === me ? t.to : t.from;
   const v = currentVerdict(t);
   const n = drafts(t.id).length;
   // A new topic is a plain message: no verdict, nothing to post to GitHub.
   const opts: [string, string][] = review && t.to === me && !S.newTopic ? [["", "Comment"], ["changes", "Request changes"], ["question", "Ask a question"]] : [];
   const gh = review && !S.newTopic && !!prLink();
   const key = draftKey();
-  const hint = S.newTopic ? `New message to ${name(other)}` : `Reply to ${name(other)}`;
+  const hint = S.mainNew ? `Message ${name(other)}` : S.newTopic ? `New message to ${name(other)}` : `Reply to ${name(other)}`;
   if (docked && !S.dockOpen) {
     const typed = (S.message[key] ?? "").trim();
     return `<div class="dock-bar">
@@ -143,7 +196,7 @@ export function composer(t: Thread, docked = false): string {
   return `<form class="composer ${docked ? "docked" : ""}" id="composer" onsubmit="return false">
     ${docked ? `<div class="dock-top"><span>Reply to ${esc(name(other))}</span><button type="button" class="link" data-dock="close">Hide</button></div>` : ""}
     ${topicPicker()}
-    <textarea id="message" rows="3" aria-label="${esc(hint)}" placeholder="${esc(S.newTopic ? "First line is the subject" : hint)}">${esc(S.message[key] ?? "")}</textarea>
+    <textarea id="message" rows="3" aria-label="${esc(hint)}" placeholder="${esc(S.newTopic && !S.mainNew ? "First line is the subject" : hint)}">${esc(S.message[key] ?? "")}</textarea>
     ${attachBar()}
     <div class="row">
       ${attachButton()}

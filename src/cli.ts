@@ -9,7 +9,7 @@ import {
   type NewAttachment,
 } from "./store";
 import { touch, detectTool, agents, claimName, whoami, inAgent } from "./presence";
-import { SKILL, INSTRUCTIONS, WORK_SKILL } from "./skill";
+import { SKILL, INSTRUCTIONS, WORK_SKILL, GUIDE } from "./skill";
 import pkg from "../package.json";
 import { agentHook, CLAUDE_HOOK_SETTINGS } from "./hook";
 import { snapshotPr, loadChapters, checkChapters, bigChapters, diffForChapters, draftChapters } from "./pr";
@@ -17,13 +17,16 @@ import { DakError, type Message, type Verdict } from "./types";
 import { approvedSummary, verdictLabel } from "./verdicts";
 import { setMember, team } from "./team";
 import { refreshGhStates } from "./ghstate";
+import { isFor } from "./addressing";
 import { addTask, assign, assignMany, board, next as nextTask, pileOf, setTaskStatus, unstart, type Card } from "./board";
 import { buildCost, buildHandoff, describeCost, describeHandoff, parseParticipant } from "./handoff";
 import { addRunner, removeRunner, runners, setRange } from "./reviewer";
 import { checkHead, inQueue, next, queue, removeQueue, setQueue, type QueueRow } from "./queue";
 import { confirmedBy, setHold, describeReview, orderQueue, orderReviews, pairQueue, prioritizeQueue, prioritizeReview, reviewsInOrder, tierOf, type OrderedReview } from "./priority";
 import type { AwaitingReview } from "./store";
-import { addWork, getWork, listWork, moveWork, reassignWork, type WorkItem } from "./work";
+import { addWork, getWork, listWork, moveStage, moveWork, reassignWork, type WorkItem } from "./work";
+import { stagesFor } from "./stages";
+import { usage } from "./usage";
 import { rules as readRules } from "./rules";
 
 const HELP = `dak: a review inbox and message queue for the agents on your Mac
@@ -71,6 +74,7 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
       --cc <name:role>          also on the thread: reviewer, approver, watcher (repeatable)
       --ready --migration <f|none> --proof tests:pass:412 [--proof ...] [--skipped "e2e: why"] [--head sha]
                                 a ready-for-review handoff; refused if a field is missing or the head moved
+      --wait [--timeout 10m]    ask and wait: stay until the answer for you comes back, then print it
       --cost 0.15 [--cap 0.25]  what a yes would spend, shown with the buttons
       --head-only (reply)       move the PR to its new head in place, with a note that asks nothing
       --message-file <f|->      the message from a file or stdin, untouched by the shell
@@ -87,9 +91,10 @@ const HELP = `dak: a review inbox and message queue for the agents on your Mac
   dak decisions [--for <name>]                   every button picked, with the question and its cost
   dak work [--owner <agent>] [--all]             every open piece of work: id, owner, state, title
   dak work add "title" --owner <agent> [--kind code|mock|research|doc|email|note] [--ticket ENG-1] [--topic t_…]
-  dak work start|hold|next <W-n> [--blocked "why"]   move your piece
-  dak work ready <W-n> --proof "…" --topic t_…  ready for the person; without proof and a topic Dak sends it back
-  dak work done <W-n> --proof "…"               done needs proof
+  dak work stage <W-n> "<stage>" [--proof "…"] [--topic t_…]   move your piece to one of the person's stages
+  dak work stage [--kind code]                   the stages, in order
+  dak usage [--for <agent>] [--days 7]           characters each agent wrote into Dak and was handed, per day
+  dak work hold <W-n> --blocked "on what"       flag it stuck where it is; dak work unhold lifts it
   dak work give <W-n> <agent>                    hand it to another owner
   dak rules                                      the person's rules and what each agent may do (read only)
   dak runner add codex | cursor | claude | <name> --command '["prog","arg"]'
@@ -270,6 +275,27 @@ function prNumbers(list?: string[]): number[] | undefined {
   return ns.length ? ns.map(Number) : undefined;
 }
 
+/* Ask and wait: the asker stays in its command until the answer comes back, so it can carry on
+   with the answer in hand instead of ending its turn and being woken later. Only an answer for
+   the asker ends the wait; anything else on the topic waits for its next turn. */
+const waits = (values: any) => values.wait ? { waits: { until: new Date(Date.now() + parseDuration(values.timeout ?? "10m")).toISOString() } } : {};
+async function awaitAnswer(asker: string, threadId: string, askedId: number, until: string, json: boolean): Promise<number> {
+  const me = asker.toLowerCase();
+  while (true) {
+    const mine = takeUnread(me, { threadId, peek: true }).filter((m) => m.id > askedId && isFor(m, me));
+    if (mine.length) {
+      const msgs = takeUnread(me, { threadId });
+      out(json, { thread_id: threadId, messages: msgs }, () => msgs.map(describe).join("\n\n"));
+      return 0;
+    }
+    if (Date.now() >= Date.parse(until)) {
+      out(json, { thread_id: threadId, messages: [], timed_out: true }, () => `No answer on ${threadId} in time. Carry on; it reaches you at your next turn.`);
+      return 2;
+    }
+    await Bun.sleep(1000);
+  }
+}
+
 function describe(m: Message): string {
   const v = m.verdict ? ` [${verdictLabel(m)}]` : "";
   const lines = [`#${m.id} ${m.author}${v} · ${m.created_at}`];
@@ -298,7 +324,7 @@ const OPTIONS = {
   display: { type: "string" }, role: { type: "string" }, area: { type: "string" }, can: { type: "string" }, cannot: { type: "string" }, timeout: { type: "string" },
   "body-file": { type: "string" }, "message-file": { type: "string" }, readers: { type: "string" }, port: { type: "string" },
   unread: { type: "boolean" }, peek: { type: "boolean" }, json: { type: "boolean" }, person: { type: "boolean" },
-  force: { type: "boolean" }, stop: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
+  force: { type: "boolean" }, wait: { type: "boolean" }, days: { type: "string" }, stop: { type: "boolean" }, fyi: { type: "boolean" }, plain: { type: "boolean" }, done: { type: "boolean" }, option: { type: "string", multiple: true }, choice: { type: "string" }, help: { type: "boolean", short: "h" },
   cc: { type: "string", multiple: true }, ready: { type: "boolean" }, head: { type: "string" }, migration: { type: "string" },
   proof: { type: "string", multiple: true }, skipped: { type: "string", multiple: true }, cost: { type: "string" }, cap: { type: "string" },
   "head-only": { type: "boolean" }, as: { type: "string" }, command: { type: "string" }, preset: { type: "string" },
@@ -312,7 +338,7 @@ export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   if (cmd === "--version" || cmd === "-v" || cmd === "version") { console.log(`dak ${pkg.version}`); return 0; }
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
-    console.log(rest[0] === "chapters" ? CHAPTERS_HELP : HELP);
+    console.log(rest[0] === "chapters" ? CHAPTERS_HELP : rest[0] === "guide" ? GUIDE : HELP);
     return 0;
   }
   const { values, positionals } = parseArgs({ args: rest, options: OPTIONS as any, allowPositionals: true }) as any;
@@ -350,7 +376,7 @@ export async function main(argv: string[]): Promise<number> {
     case "send": {
       if (!values.to) throw new DakError("no_reader", "Say who it is for with --to <reader>.");
       if (!values.from) throw new DakError("no_sender", "Say who is sending with --from <name>.");
-      touch(values.from, { tool: detectTool(), where: process.cwd() }); claimName(values.from);
+      touch(values.from, { tool: detectTool(), where: process.cwd(), session: process.env.CLAUDE_CODE_SESSION_ID || undefined }); claimName(values.from);
       const atts = attachmentsFrom(values);
       let kind: "pr" | "doc" | "note" = atts.some((a) => a.type === "doc") ? "doc" : "note";
       let subject = values.subject as string | undefined;
@@ -367,7 +393,7 @@ export async function main(argv: string[]): Promise<number> {
         const heading = doc ? readFileSync(doc, "utf8").match(/^#\s+(.+)$/m)?.[1] : undefined;
         subject = heading ?? (values.file ?? [])[0] ?? readBody(positionals, values).split("\n")[0].slice(0, 80);
       }
-      const extra: any = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
+      const extra: any = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values), ...waits(values) };
       // A "try it": the person tries the live feature and answers with one tap. The first button
       // means it works; on that, the agent posts its proof on the ticket and moves it to Done.
       if (values.type === "tryit") {
@@ -380,6 +406,7 @@ export async function main(argv: string[]): Promise<number> {
       // A hotfix goes to the top of the reader's review list.
       if (values.hotfix) prioritizeReview(thread.id, values.from, { tier: "urgent", why: values.why ?? "Hotfix" });
       describeReview(thread.id, { type: values.type, blocks: values.blocks });
+      if (values.wait) return await awaitAnswer(values.from, thread.id, message.id, message.waits!.until, json);
       out(json, { thread_id: thread.id, thread, message, ...(routed ? { routed } : {}) }, () => `${routed ? `Routed: ${routed.to} has ${routed.from_group}'s PRs and briefs go to ${routed.via} first.\n` : ""}Sent ${thread.id} to ${thread.to}: ${thread.subject}\nWait for the reply with: dak wait ${thread.id} --for ${thread.from}`);
       return 0;
     }
@@ -418,7 +445,7 @@ export async function main(argv: string[]): Promise<number> {
       const id = positionals.shift();
       if (!id) throw new DakError("no_thread", "Which thread? dak reply <thread> --from <name> <message>");
       if (!values.from) throw new DakError("no_sender", "Say who is replying with --from <name>.");
-      touch(values.from, { tool: detectTool(), where: process.cwd() }); claimName(values.from);
+      touch(values.from, { tool: detectTool(), where: process.cwd(), session: process.env.CLAUDE_CODE_SESSION_ID || undefined }); claimName(values.from);
       const verdict = values.verdict as Verdict | undefined;
       if (verdict && !["approve", "changes", "question"].includes(verdict)) {
         throw new DakError("bad_verdict", "A verdict is approve, changes or question.");
@@ -440,7 +467,7 @@ export async function main(argv: string[]): Promise<number> {
         prMeta = meta;
       }
       if (values.ready && !prMeta) prMeta = messages.flatMap((m) => m.attachments).filter((a) => a.type === "pr").pop()?.meta ?? null;
-      const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values) };
+      const extra = { handoff: values.ready ? buildHandoff(prMeta, values) : undefined, cost: buildCost(values), ...waits(values) };
       for (const c of values.cc ?? []) addParticipant(id, parseParticipant(c));
       if (values.range) setRange(id, ["none", ""].includes(values.range) ? null : values.range);
       describeReview(id, { type: values.type, blocks: values.blocks });
@@ -453,6 +480,7 @@ export async function main(argv: string[]): Promise<number> {
             ...(values.fyi || values.done || (values["head-only"] && !values.ready) ? { needs_reply: false } : {}) })
         : null;
       if (values.done) setStatus(id, "closed");
+      if (values.wait && m) return await awaitAnswer(values.from, id, m.id, m.waits!.until, json);
       out(json, m ?? { done: id }, () => values.done ? `Marked ${id} done.` : `Replied on ${id}.`);
       return 0;
     }
@@ -721,7 +749,7 @@ export async function main(argv: string[]): Promise<number> {
     case "work": {
       const by = values.from ?? whoami({ tool: detectTool(), where: process.cwd() });
       const [sub, id, ...more] = positionals;
-      const line = (w: WorkItem) => `${w.id.padEnd(6)} ${w.state.padEnd(6)} ${w.kind.padEnd(8)} ${w.owner.padEnd(10)} ${w.title}${w.ticket ? `  [${w.ticket}]` : ""}${w.blocked ? `  (held: ${w.blocked})` : ""}`;
+      const line = (w: WorkItem) => `${w.id.padEnd(6)} ${w.stage.padEnd(15)} ${w.kind.padEnd(8)} ${w.owner.padEnd(10)} ${w.title}${w.ticket ? `  [${w.ticket}]` : ""}${w.held ? `  (held${w.blocked ? `: ${w.blocked}` : ""})` : ""}`;
       const proof = values.proof ? [].concat(values.proof).join("; ") : null;
       if (!sub || sub === "list") {
         const list = listWork({ owner: values.owner ?? values.for, open: !values.all });
@@ -734,11 +762,30 @@ export async function main(argv: string[]): Promise<number> {
         return 0;
       }
       if (sub === "show") { const w = getWork(id); out(json, w, () => `${line(w)}${w.proof ? `\n  proof: ${w.proof}` : ""}${w.thread_id ? `\n  topic: ${w.thread_id}` : ""}`); return 0; }
+      if (sub === "stage") {
+        if (!id || !more.length) {
+          const st = stagesFor(values.kind ?? (id ? getWork(id).kind : "code"));
+          out(json, st, () => st.map((x, i) => `${i + 1}. ${x.name}${x.gate === "review" ? "  (the person's review)" : x.gate === "done" ? "  (needs proof)" : ""}`).join("\n"));
+          return 0;
+        }
+        const w = moveStage(id, more.join(" "), by, { proof, thread_id: values.topic ?? values.thread ?? null });
+        out(json, w, () => `${w.id}: ${w.stage}`);
+        return 0;
+      }
       if (sub === "give") { const w = reassignWork(id, more[0] ?? values.owner ?? "", by); out(json, w, () => `${w.id} is now ${w.owner}'s.`); return 0; }
-      const to = ({ start: "doing", doing: "doing", hold: "held", held: "held", next: "next", ready: "ready", done: "done" } as Record<string, string>)[sub];
-      if (!to || !id) throw new DakError("usage", "dak work [list|add|start|hold|next|ready|done|give|show] ...  (dak help)");
+      // start, next, ready and done still work for agents taught them; dak work stage is the way now.
+      const to = ({ start: "doing", doing: "doing", hold: "held", held: "held", unhold: "unheld", next: "next", ready: "ready", done: "done" } as Record<string, string>)[sub];
+      if (!to || !id) throw new DakError("usage", "dak work [list|add|stage|hold|unhold|give|show] ...  (dak help)");
       const w = moveWork(id, to, by, { proof, blocked: values.blocked ?? null, thread_id: values.topic ?? values.thread ?? null });
-      out(json, w, () => `${w.id}: ${w.state}${w.state === "ready" ? " (on the person's You page)" : ""}`);
+      out(json, w, () => `${w.id}: ${w.stage}${w.held ? ` (held${w.blocked ? `: ${w.blocked}` : ""})` : ""}${w.state === "ready" ? " (on the person's You page)" : ""}`);
+      return 0;
+    }
+    // What each agent wrote into Dak and was handed by it, per day: what Dak costs in tokens.
+    case "usage": {
+      const list = usage(Number(values.days ?? 7), values.for ?? undefined);
+      const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+      out(json, list, () => list.length ? ["day         agent             wrote  (msgs)    read  (briefs)",
+        ...list.map((u) => `${u.day}  ${u.agent.padEnd(16)} ${k(u.wrote).padStart(6)}  (${u.messages})  ${k(u.read).padStart(6)}  (${u.briefs})`)].join("\n") : "Nothing yet.");
       return 0;
     }
     case "rules": {

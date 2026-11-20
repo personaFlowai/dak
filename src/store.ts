@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { dakHome, loadConfig } from "./config";
+import { dakHome, loadConfig, person } from "./config";
 import type {
   Anchor, Attachment, Comment, Message, Reader, Thread, ThreadKind, ThreadStatus, Verdict,
 } from "./types";
@@ -77,7 +77,7 @@ export function store(): Database {
 }
 
 const now = () => new Date().toISOString();
-const newId = (p: string) => `${p}_${randomBytes(4).toString("hex")}`;
+export const newId = (p: string) => `${p}_${randomBytes(4).toString("hex")}`;
 
 /* ---------- blobs ---------- */
 
@@ -98,6 +98,37 @@ export function blobPath(sha: string): string {
 
 export const readBlobText = (sha: string) => readFileSync(blobPath(sha), "utf8");
 
+/* Old screenshots and videos: most of Dak's store, and nobody opens them once a topic has been
+   done for weeks. The person clears them from Settings, never Dak by itself. The attachment
+   stays on its message, marked cleared, so the conversation still says a picture was there. */
+function oldMedia(days: number) {
+  const before = new Date(Date.now() - days * 86_400_000).toISOString();
+  return store().query(`SELECT a.id, a.meta FROM attachments a JOIN messages m ON m.id = a.message_id JOIN threads t ON t.id = m.thread_id
+    WHERE a.type = 'file' AND t.status = 'closed' AND t.updated_at < ?
+      AND (json_extract(a.meta, '$.mime') LIKE 'image/%' OR json_extract(a.meta, '$.mime') LIKE 'video/%')
+      AND json_extract(a.meta, '$.cleared') IS NULL`).all(before) as { id: string; meta: string }[];
+}
+export function mediaToClear(days: number): { count: number; bytes: number } {
+  const rows = oldMedia(days);
+  return { count: rows.length, bytes: rows.reduce((n, r) => n + (JSON.parse(r.meta).size ?? 0), 0) };
+}
+export function clearMedia(days: number, by: string): { count: number; bytes: number } {
+  const me = person(loadConfig());
+  if (by !== me) throw new DakError("not_yours", `Only ${me} clears media.`, 403);
+  if (!Number.isFinite(days) || days < 1) throw new DakError("bad_days", "Clear media from topics done for at least a day.");
+  const rows = oldMedia(days);
+  let bytes = 0;
+  for (const r of rows) {
+    const meta = JSON.parse(r.meta);
+    store().query("UPDATE attachments SET meta = ? WHERE id = ?").run(JSON.stringify({ ...meta, cleared: true }), r.id);
+    bytes += meta.size ?? 0;
+    // The same picture can be on a topic that is still open: keep the file while anything uses it.
+    const still = store().query("SELECT 1 FROM attachments WHERE json_extract(meta, '$.blob') = ? AND json_extract(meta, '$.cleared') IS NULL LIMIT 1").get(meta.blob);
+    if (!still && /^[0-9a-f]{64}$/.test(meta.blob ?? "")) { try { unlinkSync(join(dakHome(), "blobs", meta.blob)); } catch { /* already gone */ } }
+  }
+  return { count: rows.length, bytes };
+}
+
 /* ---------- readers ---------- */
 
 export function requireReader(name: string): Reader {
@@ -116,6 +147,21 @@ export function requireReader(name: string): Reader {
 
 export type NewAttachment = Omit<Attachment, "id">;
 export interface NewComment { attachment_id?: string | null; anchor: Anchor | null; body: string }
+
+/* An update between agents is a line or two. Every agent on the topic reads it, so a pasted
+   recap of the work costs each of them; the detail belongs in the PR, the doc or a file, where
+   whoever needs it opens it. Updates to the person are not held to this: the person reads them
+   on screen, not in a model's context. */
+const UPDATE_LIMIT = 600;
+function updateFits(thread: Pick<Thread, "to" | "from">, author: string, body: string, attachments: number) {
+  const me = person(loadConfig());
+  if (author === me || thread.to === me || thread.from === me || attachments) return;
+  if (body.trim().length <= UPDATE_LIMIT) return;
+  throw new DakError("update_too_long", `An update to other agents is a line or two (${body.trim().length} characters here, ${UPDATE_LIMIT} at most). Say what changed and where it is: the PR, the doc, the topic. Put the detail there, or attach it with --doc or --file.`);
+}
+
+// "@all" in a group wakes every member.
+const ALL = /(^|[\s(])@all\b/i;
 
 export function createThread(input: {
   to: string; from: string; subject: string; kind: ThreadKind; body: string; attachments: NewAttachment[]; needs_reply?: boolean; options?: string[];
@@ -148,11 +194,14 @@ export function createThread(input: {
     s.query("INSERT INTO threads VALUES (?,?,?,?,?,?,?,?)").run(id, to, from, input.subject.trim(), input.kind, input.needs_reply === false && !cleanOptions(input.options) ? "informed" : "waiting", t, t);
     for (const p of others) if (p.name !== to && p.name !== from) addParticipantRow(id, p);
     // Anyone @mentioned in the first message is on the topic from the start.
-    const mentioned = mentionsIn(input.body, memberNames()).filter((n) => n !== to && n !== from && !others.some((p) => p.name === n));
-    for (const n of mentioned) addParticipantRow(id, { name: n, role: "member" });
+    // A group member mentioned here is already on it, but the mention still says who is woken.
+    const mentioned = mentionsIn(input.body, memberNames()).filter((n) => n !== from);
+    for (const n of mentioned) if (n !== to && !others.some((p) => p.name === n)) addParticipantRow(id, { name: n, role: "member" });
     if (mentioned.length) input = { ...input, extra: { ...input.extra, mentions: mentioned } };
+    if (members && ALL.test(input.body)) input = { ...input, extra: { ...input.extra, everyone: true } };
     // Sent with --fyi: an update, delivered at the reader's next turn rather than interrupting it.
     const quiet = input.needs_reply === false && !cleanOptions(input.options);
+    if (quiet) updateFits({ to, from } as Thread, from, input.body, input.attachments.length);
     return insertMessage(id, from, input.body, null, input.attachments, [], cleanOptions(input.options), undefined, quiet ? { ...input.extra, quiet: true } : input.extra);
   });
   const messageId = tx();
@@ -192,11 +241,14 @@ export function addMessage(threadId: string, input: {
     && (input.needs_reply === false || input.extra?.reviewing !== undefined || input.extra?.parked !== undefined || (author === thread.from && !other && !asks));
   // An approval records exactly what was approved (head and diff), so a later push can be told
   // apart: the merge queue says "head moved since your approval" and whether the changes differ.
+  if (quiet) updateFits(thread, author, input.body, input.attachments?.length ?? 0);
   let extra: MessageExtra | undefined = quiet ? { ...input.extra, quiet: true } : input.extra;
   // A pick on a "try it" note is the Checking result: record it plainly, with the ticket, so the
   // agent's hook and dak wait --json both say what to do (works: post the proof, move it to Done).
   if (input.choice) {
-    const q = store().query("SELECT options, extra FROM messages WHERE thread_id = ? AND options IS NOT NULL ORDER BY id DESC LIMIT 1").get(threadId) as { options: string; extra: string | null } | null;
+    const q = store().query("SELECT author, options, extra FROM messages WHERE thread_id = ? AND options IS NOT NULL ORDER BY id DESC LIMIT 1").get(threadId) as { author: string; options: string; extra: string | null } | null;
+    // A pick answers whoever asked: in a group, only the asker is woken, not every member.
+    if (q && q.author !== author) extra = { ...extra, answers: q.author };
     const tryit = q?.extra ? JSON.parse(q.extra).tryit : undefined;
     if (tryit) extra = { ...extra, tryit_result: { result: JSON.parse(q!.options)[0] === input.choice ? "works" : "wrong", ...(tryit.ticket ? { ticket: tryit.ticket } : {}) } };
   }
@@ -222,8 +274,19 @@ export function addMessage(threadId: string, input: {
   // what follows), not the whole history before it.
   const mentioned = mentionsIn(input.body, memberNames()).filter((n) => n !== author);
   if (mentioned.length) extra = { ...extra, mentions: mentioned };
+  if (thread.to.startsWith("group:") && ALL.test(input.body)) extra = { ...extra, everyone: true };
+  // A member brought in by an @mention answers whoever mentioned it, then leaves the topic: the
+  // rest of the conversation is not for it. Group members stay; they are the group.
+  const leaving = !thread.to.startsWith("group:") && author !== thread.to && author !== thread.from
+    && participantsOf(threadId).some((p) => p.name === author && p.role === "member");
+  if (leaving) {
+    const asker = store().query("SELECT author FROM messages WHERE thread_id = ? AND author != ? AND extra LIKE ? ORDER BY id DESC LIMIT 1")
+      .get(threadId, author, `%"mentions":%"${author}"%`) as { author: string } | null;
+    extra = { ...extra, ...(asker ? { answers: asker.author } : {}), left: true };
+  }
   const s = store();
   const id = s.transaction(() => {
+    if (leaving) s.query("DELETE FROM participants WHERE thread_id = ? AND name = ?").run(threadId, author);
     const before = (s.query("SELECT coalesce(max(id), 0) AS m FROM messages WHERE thread_id = ?").get(threadId) as { m: number }).m;
     for (const n of mentioned) if (n !== thread.to && n !== thread.from && !isParticipant(threadId, n)) {
       addParticipantRow(threadId, { name: n, role: "member" });
@@ -299,6 +362,9 @@ function insertMessage(threadId: string, author: string, body: string, verdict: 
 
 export function setStatus(threadId: string, status: ThreadStatus) {
   getThreadRow(threadId);
+  // The main topic never closes: it is where everything that is not a piece of work goes.
+  if (status === "closed" && store().query("SELECT 1 FROM sqlite_master WHERE name = 'main_topics'").get()
+    && store().query("SELECT 1 FROM main_topics WHERE thread_id = ?").get(threadId)) throw new DakError("main_topic", "The main topic stays open; mark a piece of work done instead.", 409);
   store().query("UPDATE threads SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), threadId);
 }
 

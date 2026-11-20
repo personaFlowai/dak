@@ -3,7 +3,7 @@ import { highlightLines } from "./hl";
 import { blocks, type Block } from "./md";
 import { parseDiff, hunkStart, type DiffFile } from "../src/diff";
 import type { Anchor, Attachment, Chapter, Message, Participant, Thread, Verdict } from "../src/types";
-import { TOOLS } from "./icons";
+import { I, TOOLS } from "./icons";
 import { approvedNow, prKey, prStates, type PrState } from "../src/verdicts";
 
 export type Pr = Extract<Attachment, { type: "pr" }>;
@@ -13,7 +13,7 @@ export interface Draft { id: string; attachment_id: string; anchor: Anchor; body
 export interface Sel { att: string; file: string; side: "old" | "new"; start: number; end: number }
 export interface AgentRow { name: string; title?: string | null; kind: "person" | "agent"; reader: boolean; about: string | null; tool: string | null; where: string | null; last_seen: string | null; running: boolean; listening: boolean }
 export interface AskTurn { q: string; a?: string; error?: string; context?: string; loading?: boolean; seconds?: number; by?: string }
-export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "team" | "board" | "you" | "work" | "rules";
+export type View = "thread" | "compose" | "settings" | "welcome" | "queue" | "team" | "you" | "work" | "rules";
 
 export const me = boot.me;
 
@@ -32,15 +32,13 @@ export const S = {
   paneClosed: false, // you closed the PR or doc beside the chat; a card reopens it
   door: null as any, // the tunnel for agents outside this Mac, and their keys
   team: [] as any[], // everyone who works through Dak (src/team.ts TeamMember)
-  board: null as any, // the Board's tickets (ui/board.ts BoardData)
-  boardError: "" as string,
-  boardFilter: { agents: [] as string[], labels: [] as string[], milestones: [] as string[], q: "", needs: false },
-  boardView: "piles" as "piles" | "stages",
-  boardMenu: null as null | "agents" | "labels" | "milestones", // the open filter dropdown
-  boardClosed: [] as string[], // backlog milestone groups folded away
-  backlogFolded: local.get<boolean>("backlogFolded", false), // the whole backlog folded to a strip
-  boardOpen: null as string | null, // the ticket whose panel is open
   teamEdit: null as string | null, // whose card is open for editing
+  groups: {} as Record<string, string[]>, // group name to its members
+  mains: {} as Record<string, string>, // each conversation's main topic: thread id to the agent or group it is with
+  mainNew: false, // writing the first message of a conversation's main topic
+  makeWork: null as null | { mid: number; title: string; kind: string; owner: string; error: string }, // "Make it work" open on a message
+  media: { days: 30, count: 0, bytes: 0, confirm: false, cleared: null as null | { count: number; bytes: number } }, // old screenshots and videos, in Settings
+  groupNew: null as { name: string; members: string[]; error?: string } | null, // the New group form, while open
   phone: null as any, // the private link to your phone: { open, url, link } or { opening } or { error }
   sideOpen: local.get("sideOpen", true),
   focusSide: false, // focus hides the sidebar; the sidebar button can still bring it back
@@ -107,7 +105,7 @@ export const S = {
   sendError: "",
   ask: {} as Record<string, AskTurn[]>,
   askContext: null as null | { label: string; sel?: Sel; quote?: string },
-  compose: null as null | { mode: "message" | "pr"; to: string; subject: string; body: string; filter: string; pr: string; repo: string; error: string; sending: boolean },
+  compose: null as null | { mode: "message" | "pr" | "session"; to: string; subject: string; body: string; filter: string; pr: string; repo: string; error: string; sending: boolean },
   settings: null as any,
   diffs: new Map<string, DiffFile[]>(),
   files: new Map<string, string[]>(),
@@ -152,8 +150,10 @@ export const $ = <T extends HTMLElement = HTMLElement>(s: string, root: ParentNo
 
 // How a name reads: You; a session by its own title in Claude Code ("Team engineer (M21)"),
 // not the folder-and-code name Dak gave it; anyone else by name. Named readers (such as lead) keep theirs.
+export const isGroup = (n: string | null | undefined) => !!n?.startsWith("group:");
 export const name = (n: string) => {
   if (n === me) return "You";
+  if (isGroup(n)) { const g = n.slice(6).replace(/[-_]+/g, " "); return g.charAt(0).toUpperCase() + g.slice(1); }
   const a = S.agents.find((x) => x.name === n);
   if (a?.title && !a.reader) return a.title;
   return n.length > 18 && /-[0-9a-f]{6}$/.test(n) ? n.replace(/-[0-9a-f]{6}$/, "") : n.charAt(0).toUpperCase() + n.slice(1);
@@ -165,6 +165,7 @@ export const toolOf = (n: string) => agentOf(n)?.tool ?? BY_NAME[n] ?? null;
 // One neutral mark for everyone: the tool's logo when known, else the first letter.
 export function mark(n: string, size: "sm" | "md" = "md") {
   // You are a person, never a tool, even if a session once sent as your name.
+  if (isGroup(n)) return `<span class="mark ${size} group" title="${esc(name(n))}, a group" aria-hidden="true">${I.team}</span>`;
   const t = n === me ? null : toolOf(n);
   const glyph = t && TOOLS[t]?.mark ? TOOLS[t].mark : `<span>${esc((n === me ? "Y" : n.charAt(0)).toUpperCase())}</span>`;
   return `<span class="mark ${size}" title="${esc(t ? `${name(n)} · ${TOOLS[t]?.label ?? t}` : name(n))}" aria-hidden="true">${glyph}</span>`;
@@ -239,6 +240,12 @@ export async function prepare() {
   if (a.type === "doc" && !S.docs.has(a.meta.blob)) S.docs.set(a.meta.blob, blocks(await blobText(a.meta.blob)));
   if (a.type === "file" && /^text\//.test(a.meta.mime) && !S.texts.has(a.meta.blob)) S.texts.set(a.meta.blob, await blobText(a.meta.blob));
 }
+
+export async function loadGroups() {
+  try { S.groups = await api("/groups"); } catch { /* the list still renders */ }
+}
+// "Group · Lead, Ana, Zoe": who is in a group, by name.
+export const groupLine = (g: string) => `Group · ${(S.groups[g.replace(/^group:/, "")] ?? []).map(name).join(", ") || "no members"}`;
 
 export async function loadAgents(scan = false) {
   try { S.agents = await api(`/agents${scan ? "?scan=1" : ""}`); } catch { /* the list still renders by name */ }
